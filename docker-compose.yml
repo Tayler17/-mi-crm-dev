@@ -1,0 +1,129 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: crm_postgres
+    environment:
+      POSTGRES_USER: crm
+      POSTGRES_PASSWORD: crm_secret
+      POSTGRES_DB: crm_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    networks:
+      - crm_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm -d crm_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: crm_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - crm_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: crm_mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - crm_network
+
+  api:
+    image: crm-dev-api
+    container_name: crm_api
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgres://crm:crm_secret@postgres:5432/crm_dev
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev_jwt_secret_change_in_prod
+      JWT_REFRESH_SECRET: dev_refresh_secret_change_in_prod
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      FRONTEND_URL: http://localhost:3000
+      WHATSAPP_WEB_ENABLED: "true"
+      API_PUBLIC_URL: http://localhost:4000
+      TWILIO_WEBHOOK_BASE_URL: https://wrath-schematic-truffle.ngrok-free.dev
+      # ── Platform-level credentials (no longer per-bot) ──
+      TWILIO_ACCOUNT_SID: ""
+      TWILIO_AUTH_TOKEN: ""
+      PLATFORM_AI_PROVIDER: openai
+      PLATFORM_AI_API_KEY: ""
+      PLATFORM_AI_MODEL: gpt-4o-mini
+    ports:
+      - "4000:4000"
+    command: npm run start:prod
+    volumes:
+      - ./api:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - crm_network
+    restart: unless-stopped
+
+  sysctl-fix:
+    image: alpine
+    container_name: crm_sysctl_fix
+    privileged: true
+    pid: host
+    command: >
+      nsenter -t 1 -m -u -i -n -p --
+      sysctl -w
+      fs.inotify.max_user_watches=524288
+      fs.inotify.max_user_instances=1024
+      fs.inotify.max_queued_events=524288
+    restart: "no"
+    networks:
+      - crm_network
+
+  web:
+    image: crm-dev-web
+    container_name: crm_web
+    environment:
+      WATCHPACK_POLLING: "true"
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - crm_network
+    restart: unless-stopped
+    depends_on:
+      - sysctl-fix
+
+  adminer:
+    image: adminer:latest
+    container_name: crm_adminer
+    ports:
+      - "8080:8080"
+    networks:
+      - crm_network
+
+volumes:
+  postgres_data:
+
+networks:
+  crm_network:
+    driver: bridge

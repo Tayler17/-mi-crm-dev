@@ -1,0 +1,9 @@
+node_modules/
+dist/
+uploads/
+.env
+.claude/
+.DS_Store
+*.log
+api;C/
+web;C/
