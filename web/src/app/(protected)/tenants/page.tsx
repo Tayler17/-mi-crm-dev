@@ -42,6 +42,7 @@ export default function TenantsPage() {
   // create modal
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm]             = useState(emptyForm);
+  const [slugTouched, setSlugTouched] = useState(false);
   const [saving, setSaving]         = useState(false);
   const [formError, setFormError]   = useState('');
 
@@ -144,7 +145,7 @@ export default function TenantsPage() {
           <h1 className="page-title">{i.tenantsTitle}</h1>
           <p className="page-sub">{i.tenantsSubtitle}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setShowCreate(true); setFormError(''); }}>
+        <button className="btn btn-primary" onClick={() => { setShowCreate(true); setFormError(''); setForm(emptyForm); setSlugTouched(false); }}>
           {i.newWorkspace}
         </button>
       </div>
@@ -175,13 +176,17 @@ export default function TenantsPage() {
                   <div className="form-group" style={{ marginBottom: 8 }}>
                     <label className="form-label">{i.name}</label>
                     <input className="form-input" required value={form.name}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                      onChange={(e) => {
+                        const name = e.target.value;
+                        const autoSlug = name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+                        setForm({ ...form, name, slug: slugTouched ? form.slug : autoSlug });
+                      }} />
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">{i.slugLabel}</label>
                     <input className="form-input" required placeholder="mi-empresa"
                       value={form.slug}
-                      onChange={(e) => setForm({ ...form, slug: e.target.value.toLowerCase().replace(/\s+/g, '-') })} />
+                      onChange={(e) => { setSlugTouched(true); setForm({ ...form, slug: e.target.value.toLowerCase().replace(/\s+/g, '-') }); }} />
                   </div>
                 </fieldset>
                 <fieldset style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '10px 14px', margin: 0 }}>

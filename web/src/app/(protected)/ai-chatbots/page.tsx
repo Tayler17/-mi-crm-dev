@@ -7,6 +7,7 @@ import {
   testAiChatbotMessage,
   getInboxes, getQueues, getTeams,
   getKnowledgeSources, addKnowledgeUrl, reindexKnowledgeSource, deleteKnowledgeSource, addKnowledgePdf,
+  getSettings,
   type AiChatbot, type AiChatbotStats, type Inbox, type Queue, type Team, type KnowledgeSource,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
@@ -56,12 +57,13 @@ type BotForm = {
 };
 
 function BotModal({
-  bot, inboxes, queues, teams, onSave, onClose,
+  bot, inboxes, queues, teams, allowOwnApiKeys, onSave, onClose,
 }: {
   bot: AiChatbot | null;
   inboxes: Inbox[];
   queues: Queue[];
   teams: Team[];
+  allowOwnApiKeys: boolean;
   onSave: (f: BotForm) => Promise<void>;
   onClose: () => void;
 }) {
@@ -215,17 +217,19 @@ function BotModal({
                 <input className="form-input" value={form.description} onChange={setField('description')} placeholder="Atiende consultas de ventas en WhatsApp 24/7" />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Proveedor de IA</label>
-                  <select className="form-input" value={form.provider} onChange={(e) => {
-                    const prov = e.target.value;
-                    const firstModel = PROVIDERS.find((p) => p.value === prov)?.models[0] ?? '';
-                    setForm((prev) => ({ ...prev, provider: prov, model: firstModel }));
-                  }}>
-                    {PROVIDERS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-                  </select>
-                </div>
+              <div style={{ display: 'grid', gridTemplateColumns: allowOwnApiKeys ? '1fr 1fr' : '1fr', gap: 12 }}>
+                {allowOwnApiKeys && (
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label">Proveedor de IA</label>
+                    <select className="form-input" value={form.provider} onChange={(e) => {
+                      const prov = e.target.value;
+                      const firstModel = PROVIDERS.find((p) => p.value === prov)?.models[0] ?? '';
+                      setForm((prev) => ({ ...prev, provider: prov, model: firstModel }));
+                    }}>
+                      {PROVIDERS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                    </select>
+                  </div>
+                )}
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">Modelo</label>
                   <select className="form-input" value={form.model} onChange={setField('model')}>
@@ -877,6 +881,7 @@ export default function AiChatbotsPage() {
   const [inboxes, setInboxes] = useState<Inbox[]>([]);
   const [queues, setQueues] = useState<Queue[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [allowOwnApiKeys, setAllowOwnApiKeys] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<AiChatbot | null>(null);
@@ -889,8 +894,12 @@ export default function AiChatbotsPage() {
   async function load() {
     setLoading(true);
     try {
-      const [b, s, ix, q, tm] = await Promise.all([getAiChatbots(), getAiChatbotStats(), getInboxes(), getQueues(), getTeams()]);
+      const [b, s, ix, q, tm, settings] = await Promise.all([
+        getAiChatbots(), getAiChatbotStats(), getInboxes(), getQueues(), getTeams(),
+        getSettings().catch(() => null),
+      ]);
       setBots(b); setStats(s); setInboxes(ix); setQueues(q); setTeams(tm);
+      setAllowOwnApiKeys(settings?.allow_own_api_keys ?? false);
     } finally { setLoading(false); }
   }
 
@@ -1108,6 +1117,7 @@ export default function AiChatbotsPage() {
           inboxes={inboxes}
           queues={queues}
           teams={teams}
+          allowOwnApiKeys={allowOwnApiKeys}
           onSave={handleSave}
           onClose={() => { setShowModal(false); setEditing(null); }}
         />

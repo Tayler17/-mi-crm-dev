@@ -40,11 +40,10 @@ export default function LoginPage() {
   ];
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'Inter, system-ui, sans-serif' }}>
+    <div className="login-root">
 
       {/* ── Left panel — branding ─────────────────────────────────────── */}
-      <div style={{
-        flex: '0 0 52%',
+      <div className="login-brand" style={{
         background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)',
         display: 'flex', flexDirection: 'column', justifyContent: 'center',
         padding: '60px 64px', position: 'relative', overflow: 'hidden',
@@ -91,8 +90,7 @@ export default function LoginPage() {
       </div>
 
       {/* ── Right panel — login form ──────────────────────────────────── */}
-      <div style={{
-        flex: 1,
+      <div className="login-form-panel" style={{
         background: '#f8fafc',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: '40px 48px', position: 'relative',
@@ -235,9 +233,12 @@ export default function LoginPage() {
 
       <style suppressHydrationWarning>{`
         @keyframes spin { to { transform: rotate(360deg); } }
+        .login-root { display: flex; min-height: 100vh; font-family: Inter, system-ui, sans-serif; }
+        .login-brand { flex: 0 0 52%; }
+        .login-form-panel { flex: 1; }
         @media (max-width: 768px) {
-          div[style*='flex: 0 0 52%'] { display: none !important; }
-          div[style*='flex: 1'] { padding: 32px 24px !important; }
+          .login-brand { display: none; }
+          .login-form-panel { padding: 32px 20px !important; flex: 1; min-height: 100vh; }
         }
       `}</style>
     </div>

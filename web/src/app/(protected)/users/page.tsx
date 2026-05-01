@@ -175,7 +175,7 @@ export default function UsersPage() {
           />
           <select className="form-input" style={{ width: 150 }} value={filterRole} onChange={(e) => setFilterRole(e.target.value)}>
             <option value="">{lang === 'en' ? 'All roles' : lang === 'pt' ? 'Todos os papéis' : lang === 'tr' ? 'Tüm roller' : lang === 'ar' ? 'كل الأدوار' : 'Todos los roles'}</option>
-            {ALL_ROLES.map((r) => <option key={r} value={r}>{ROLE_META[r].label}</option>)}
+            {assignableRoles.map((r) => <option key={r} value={r}>{ROLE_META[r].label}</option>)}
           </select>
           <div className="filter-tabs">
             {[
