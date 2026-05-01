@@ -45,7 +45,7 @@ export default function LoginPage() {
       {/* ── Left panel — branding ─────────────────────────────────────── */}
       <div className="login-brand" style={{
         background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)',
-        display: 'flex', flexDirection: 'column', justifyContent: 'center',
+        flexDirection: 'column', justifyContent: 'center',
         padding: '60px 64px', position: 'relative', overflow: 'hidden',
       }}>
         <div style={{ position: 'absolute', top: -120, right: -80, width: 400, height: 400, borderRadius: '50%', background: 'radial-gradient(circle, #6366f133 0%, transparent 70%)', pointerEvents: 'none' }} />
@@ -234,10 +234,10 @@ export default function LoginPage() {
       <style suppressHydrationWarning>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         .login-root { display: flex; min-height: 100vh; font-family: Inter, system-ui, sans-serif; }
-        .login-brand { flex: 0 0 52%; }
+        .login-brand { flex: 0 0 52%; display: flex; }
         .login-form-panel { flex: 1; }
         @media (max-width: 768px) {
-          .login-brand { display: none; }
+          .login-brand { display: none !important; }
           .login-form-panel { padding: 32px 20px !important; flex: 1; min-height: 100vh; }
         }
       `}</style>
