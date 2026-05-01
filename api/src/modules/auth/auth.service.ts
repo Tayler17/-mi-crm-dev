@@ -250,7 +250,7 @@ export class AuthService {
       email: dto.email,
       fullName: dto.fullName,
       passwordHash,
-      role: 'owner',
+      role: 'admin',
       isActive: true,
       emailVerificationToken: verificationToken,
     });
@@ -261,7 +261,7 @@ export class AuthService {
     this.sendVerificationEmail(savedUser.email, verificationToken, savedUser.fullName, frontend)
       .catch((err) => console.error('Error sending verification email:', err?.message));
 
-    const payload = { sub: savedUser.id, email: savedUser.email, tenantId: savedTenant.id, role: 'owner' };
+    const payload = { sub: savedUser.id, email: savedUser.email, tenantId: savedTenant.id, role: 'admin' };
     const accessToken = this.jwtService.sign(payload);
 
     return {
@@ -271,7 +271,7 @@ export class AuthService {
         id: savedUser.id,
         email: savedUser.email,
         fullName: savedUser.fullName,
-        role: 'owner',
+        role: 'admin',
         tenantId: savedTenant.id,
       },
     };
