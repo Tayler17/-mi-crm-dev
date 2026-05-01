@@ -15,11 +15,11 @@ export async function checkPlanLimit(
        (SELECT COUNT(*)::int FROM users       WHERE tenant_id=$1 AND is_active=true)  AS users_count,
        (SELECT COUNT(*)::int FROM contacts    WHERE tenant_id=$1)                     AS contacts_count,
        (SELECT COUNT(*)::int FROM inboxes     WHERE tenant_id=$1)                     AS inboxes_count,
-       (SELECT COUNT(*)::int FROM ai_chatbots WHERE tenant_id::text=$1)               AS ai_chatbots_count,
-       (SELECT COUNT(*)::int FROM call_bots   WHERE tenant_id::text=$1)               AS call_bots_count,
+       (SELECT COUNT(*)::int FROM ai_chatbots WHERE tenant_id::text=$1::text)           AS ai_chatbots_count,
+       (SELECT COUNT(*)::int FROM call_bots   WHERE tenant_id::text=$1::text)           AS call_bots_count,
        COALESCE((
          SELECT SUM(duration)::int FROM call_logs
-         WHERE tenant_id::text=$1 AND created_at >= date_trunc('month', NOW())
+         WHERE tenant_id::text=$1::text AND created_at >= date_trunc('month', NOW())
        ), 0) AS call_seconds_count
      FROM tenants t
      LEFT JOIN plans p ON p.id = t.plan_id
