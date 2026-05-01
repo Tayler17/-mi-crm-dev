@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { getTags, createTag, updateTag, deleteTag, type Tag } from '@/lib/api';
+import { useLangCtx } from '@/lib/lang-context';
+import { APP } from '@/lib/i18n/app';
 
 const PRESET_COLORS = [
   '#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f97316',
@@ -44,7 +46,6 @@ function ColorPicker({ value, onChange }: { value: string; onChange: (c: string)
         <input
           type="color" value={value} onChange={(e) => onChange(e.target.value)}
           style={{ width: 26, height: 26, padding: 0, border: 'none', cursor: 'pointer', borderRadius: 4, background: 'none' }}
-          title="Color personalizado"
         />
       </div>
     </div>
@@ -52,6 +53,9 @@ function ColorPicker({ value, onChange }: { value: string; onChange: (c: string)
 }
 
 export default function TagsPage() {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -81,21 +85,21 @@ export default function TagsPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!fName.trim()) { setFormError('El nombre es obligatorio'); return; }
+    if (!fName.trim()) { setFormError(i.nameRequired); return; }
     setSaving(true); setFormError('');
     try {
       if (editTag) await updateTag(editTag.id, { name: fName.trim(), color: fColor });
       else await createTag({ name: fName.trim(), color: fColor });
       setShowModal(false); load();
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : 'Error al guardar');
+      setFormError(err instanceof Error ? err.message : i.error);
     } finally { setSaving(false); }
   }
 
   async function handleDelete(tag: Tag) {
-    if (!confirm(`¿Eliminar la tag "${tag.name}"? Se desvinculará de todos los contactos y conversaciones.`)) return;
+    if (!confirm(`${i.delete} "${tag.name}"?`)) return;
     try { await deleteTag(tag.id); load(); }
-    catch (err: unknown) { alert(err instanceof Error ? err.message : 'Error'); }
+    catch (err: unknown) { alert(err instanceof Error ? err.message : i.error); }
   }
 
   const filtered = tags.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()));
@@ -107,10 +111,10 @@ export default function TagsPage() {
         <div>
           <h1 className="page-title">Tags</h1>
           <p style={{ margin: '2px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
-            Organiza contactos y conversaciones con etiquetas de colores
+            {i.tagsSubtitle}
           </p>
         </div>
-        <button className="btn btn-primary" onClick={openCreate}>+ Nueva Tag</button>
+        <button className="btn btn-primary" onClick={openCreate}>{i.newTag}</button>
       </div>
 
       <div className="page-body">
@@ -122,7 +126,7 @@ export default function TagsPage() {
             <input
               className="form-input"
               style={{ maxWidth: 320 }}
-              placeholder="Buscar tag..."
+              placeholder={`${i.search} tag...`}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -130,85 +134,83 @@ export default function TagsPage() {
         )}
 
         {loading ? (
-          <div className="loading">Cargando…</div>
+          <div className="loading">{i.loading}</div>
         ) : tags.length === 0 ? (
           <div className="empty">
             <div className="empty-icon">🏷️</div>
-            <p>No hay tags todavía.</p>
-            <button className="btn btn-primary" onClick={openCreate}>Crear primera tag</button>
+            <p>{i.noTagsYet}</p>
+            <button className="btn btn-primary" onClick={openCreate}>{i.createFirstTag}</button>
           </div>
         ) : (
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             {/* Table header */}
             <div style={{
-              display: 'grid', gridTemplateColumns: '1fr auto auto',
+              display: 'grid', gridTemplateColumns: '1fr auto',
               padding: '10px 20px', background: 'var(--bg-secondary)',
               borderBottom: '1px solid var(--border)',
               fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
               textTransform: 'uppercase', letterSpacing: '0.06em',
             }}>
               <span>Tag</span>
-              <span style={{ minWidth: 60, textAlign: 'center' }}>Color</span>
-              <span style={{ minWidth: 80, textAlign: 'right' }}>Acciones</span>
+              <span style={{ minWidth: 80, textAlign: 'right' }}>{i.actions}</span>
             </div>
 
             {/* Tag rows */}
             {filtered.length === 0 ? (
               <div style={{ padding: '30px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-                Sin resultados para "{search}"
+                {i.noResults} &ldquo;{search}&rdquo;
               </div>
-            ) : filtered.map((tag, idx) => (
-              <div
-                key={tag.id}
-                style={{
-                  display: 'grid', gridTemplateColumns: '1fr auto auto',
-                  padding: '12px 20px', alignItems: 'center',
-                  borderBottom: idx < filtered.length - 1 ? '1px solid var(--border)' : 'none',
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-secondary)')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = '')}
-              >
-                {/* Tag pill */}
-                <div>
-                  <TagPill name={tag.name} color={tag.color} />
-                </div>
+            ) : filtered.map((tag, idx) => {
+              const color = tag.color ?? '#6366f1';
+              const count = tag.contactCount ?? 0;
+              return (
+                <div
+                  key={tag.id}
+                  style={{
+                    borderBottom: idx < filtered.length - 1 ? '1px solid var(--border)' : 'none',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-secondary)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = '')}
+                >
+                  {/* Top row: pill + actions */}
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: '1fr auto',
+                    padding: '12px 20px 6px',
+                    alignItems: 'center',
+                  }}>
+                    <TagPill name={tag.name} color={color} />
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        onClick={() => openEdit(tag)}
+                        className="btn btn-ghost"
+                        style={{ padding: '4px 10px', fontSize: 12 }}
+                      >✎ {i.edit}</button>
+                      <button
+                        onClick={() => handleDelete(tag)}
+                        className="btn btn-ghost"
+                        style={{ padding: '4px 10px', fontSize: 12, color: 'var(--danger)' }}
+                      >✕</button>
+                    </div>
+                  </div>
 
-                {/* Color swatch */}
-                <div style={{ minWidth: 60, display: 'flex', justifyContent: 'center' }}>
-                  <span style={{
-                    width: 20, height: 20, borderRadius: '50%',
-                    background: tag.color ?? '#6366f1',
-                    border: '2px solid var(--border)',
-                    display: 'inline-block',
-                    title: tag.color,
-                  }} title={tag.color} />
-                </div>
+                  {/* Contact count label */}
+                  <div style={{ padding: '0 20px 4px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
+                    {count === 1 ? `1 ${i.contactSingular}` : `${count} ${i.contactPlural}`}
+                  </div>
 
-                {/* Actions */}
-                <div style={{ minWidth: 80, display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
-                  <button
-                    onClick={() => openEdit(tag)}
-                    className="btn btn-ghost"
-                    style={{ padding: '4px 10px', fontSize: 12 }}
-                    title="Editar"
-                  >✎ Editar</button>
-                  <button
-                    onClick={() => handleDelete(tag)}
-                    className="btn btn-ghost"
-                    style={{ padding: '4px 10px', fontSize: 12, color: 'var(--danger)' }}
-                    title="Eliminar"
-                  >✕</button>
+                  {/* Full-width color bar */}
+                  <div style={{ height: 6, background: color, opacity: 0.85 }} />
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
         {/* Summary */}
         {tags.length > 0 && (
           <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
-            {filtered.length} de {tags.length} tags
+            {filtered.length} {i.of} {tags.length} tags
           </div>
         )}
       </div>
@@ -218,7 +220,7 @@ export default function TagsPage() {
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">{editTag ? 'Editar Tag' : 'Nueva Tag'}</h2>
+              <h2 className="modal-title">{editTag ? i.editTagLabel : i.newTag}</h2>
               <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
             </div>
             <form onSubmit={handleSubmit}>
@@ -226,13 +228,13 @@ export default function TagsPage() {
                 {formError && <div className="error-msg">{formError}</div>}
 
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Nombre *</label>
+                  <label className="form-label">{i.name} *</label>
                   <input
                     className="form-input"
                     value={fName}
                     onChange={(e) => setFName(e.target.value)}
                     autoFocus
-                    placeholder="ej. VIP, Lead, Urgente, Booking…"
+                    placeholder="ej. VIP, Lead, Urgente…"
                   />
                 </div>
 
@@ -240,14 +242,14 @@ export default function TagsPage() {
 
                 {/* Live preview */}
                 <div>
-                  <label className="form-label" style={{ marginBottom: 6 }}>Vista previa</label>
-                  <TagPill name={fName || 'Nombre tag'} color={fColor} />
+                  <label className="form-label" style={{ marginBottom: 6 }}>{i.tagPreview}</label>
+                  <TagPill name={fName || i.tagNameDefault} color={fColor} />
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>{i.cancel}</button>
                 <button type="submit" className="btn btn-primary" disabled={saving}>
-                  {saving ? 'Guardando…' : editTag ? 'Guardar cambios' : 'Crear tag'}
+                  {saving ? i.saving : editTag ? i.save : i.createFirstTag}
                 </button>
               </div>
             </form>

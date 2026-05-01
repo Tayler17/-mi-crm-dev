@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getDashboardStats, DashboardStats } from '@/lib/api';
+import { getDashboardStats, DashboardStats, getCurrentPlan } from '@/lib/api';
+import { useLangCtx } from '@/lib/lang-context';
+import { APP } from '@/lib/i18n/app';
 
 function getStoredUser() {
   if (typeof window === 'undefined') return null;
@@ -26,9 +28,7 @@ function timeAgo(dt: string) {
 const STATUS_COLOR: Record<string, string> = {
   open: '#6366f1', pending: '#f59e0b', resolved: '#10b981',
 };
-const STATUS_LABEL: Record<string, string> = {
-  open: 'Abiertas', pending: 'En espera', resolved: 'Resueltas',
-};
+// STATUS_LABEL is now built dynamically from APP dict inside the component
 const CHANNEL_ICON: Record<string, string> = {
   whatsapp: '💬', email: '📧', web: '🌐', api: '🔌',
 };
@@ -144,6 +144,149 @@ function AnnouncementBanner({ announcements, onDismiss }: {
   );
 }
 
+function usageColor(pct: number) {
+  if (pct >= 100) return '#ef4444';
+  if (pct >= 70)  return '#f59e0b';
+  return '#10b981';
+}
+
+function usageEmoji(pct: number) {
+  if (pct >= 100) return '🔴';
+  if (pct >= 70)  return '🟡';
+  return '🟢';
+}
+
+function PlanUsageWidget({ plan }: {
+  plan: { tenant: any; usage: Record<string, number>; overage?: { totalOverageCost: number; allowOverage: boolean } | null }
+}) {
+  const { tenant, usage, overage } = plan;
+  if (!tenant) return null;
+
+  const planColor = tenant.color ?? '#6366f1';
+  const planName  = tenant.plan_name ?? tenant.plan ?? 'Plan';
+  const planPrice = Number(tenant.price ?? 0);
+
+  // Items with a limit → show bar. Call minutes always shown.
+  const limitedItems = [
+    { label: 'Usuarios',    used: usage.users            ?? 0, max: tenant.max_users           ?? 0 },
+    { label: 'Contactos',   used: usage.contacts          ?? 0, max: tenant.max_contacts         ?? 0 },
+    { label: 'Inboxes',     used: usage.inboxes           ?? 0, max: tenant.max_inboxes          ?? 0 },
+    { label: 'Msgs IA/mes', used: usage.aiMessagesMonth   ?? 0, max: tenant.max_messages_month   ?? 0 },
+    { label: 'Min tel/mes', used: usage.callMinutesMonth  ?? 0, max: tenant.max_call_minutes     ?? 0 },
+  ].filter((item) => item.max > 0);
+
+  // Call minutes always displayed even without a plan limit
+  const callMinutes = usage.callMinutesMonth ?? 0;
+  const callMinLimit = tenant.max_call_minutes ?? 0;
+
+  // Worst usage % for alert logic
+  const worstPct = limitedItems.length > 0
+    ? Math.max(...limitedItems.map((i) => Math.round((i.used / i.max) * 100)))
+    : 0;
+
+  const isOver   = worstPct >= 100;
+  const isWarn   = !isOver && worstPct >= 70;
+  const extraCost = overage?.totalOverageCost ?? 0;
+
+  if (limitedItems.length === 0 && callMinutes === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      {/* Upgrade pressure alert */}
+      {(isOver || isWarn) && (
+        <div style={{
+          padding: '10px 16px', borderRadius: 10, marginBottom: 10,
+          background: isOver ? '#fef2f2' : '#fffbeb',
+          border: `1px solid ${isOver ? '#fca5a5' : '#fcd34d'}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}>
+          <div style={{ fontSize: 13 }}>
+            <span style={{ fontWeight: 700, color: isOver ? '#dc2626' : '#92400e' }}>
+              {isOver ? '🚨 Has superado el límite de tu plan' : '⚠️ Estás cerca del límite de tu plan'}
+            </span>
+            {isOver && extraCost > 0 && (
+              <span style={{ marginLeft: 8, color: '#dc2626' }}>— Coste extra acumulado: <strong>${extraCost.toFixed(2)}</strong></span>
+            )}
+          </div>
+          <a href="/billing" style={{
+            fontSize: 12, fontWeight: 700, padding: '4px 12px', borderRadius: 6,
+            background: isOver ? '#dc2626' : '#f59e0b', color: '#fff', textDecoration: 'none', flexShrink: 0,
+          }}>
+            {isOver ? 'Ver detalles' : 'Upgrade ahora'}
+          </a>
+        </div>
+      )}
+
+      {/* Usage bars card */}
+      <div className="card" style={{ padding: '14px 18px', borderLeft: `4px solid ${planColor}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: planColor }} />
+            <span style={{ fontSize: 13, fontWeight: 700 }}>Plan: {planName}</span>
+            {planPrice > 0 && (
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>${planPrice}/mes</span>
+            )}
+          </div>
+          <a href="/billing" style={{ fontSize: 12, color: 'var(--primary)', textDecoration: 'none' }}>Ver detalles →</a>
+        </div>
+
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          {/* Limited resources with progress bars */}
+          {limitedItems.map(({ label, used, max }) => {
+            const pct = Math.min(100, Math.round((used / max) * 100));
+            const col = usageColor(pct);
+            return (
+              <div key={label} style={{ flex: '1 1 120px', minWidth: 100 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
+                  <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>{usageEmoji(pct)} {label}</span>
+                  <span style={{ color: col, fontWeight: 600 }}>{used.toLocaleString()} / {max.toLocaleString()}</span>
+                </div>
+                <div style={{ height: 5, background: 'var(--bg-secondary)', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${pct}%`, background: col, borderRadius: 3, transition: 'width 0.4s' }} />
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Call minutes always shown — with bar if limit set, raw count if not */}
+          {callMinLimit === 0 && (
+            <div style={{ flex: '1 1 120px', minWidth: 100 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
+                <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>📞 Min tel/mes</span>
+                <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{callMinutes.toLocaleString()} min</span>
+              </div>
+              <div style={{ height: 5, background: 'var(--bg-secondary)', borderRadius: 3 }} />
+            </div>
+          )}
+        </div>
+
+        {/* Estimated cost this month */}
+        {(planPrice > 0 || extraCost > 0) && (
+          <div style={{
+            marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border)',
+            display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center',
+          }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
+              💰 Coste estimado este mes
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              Plan: <strong>${planPrice.toFixed(2)}</strong>
+            </span>
+            {extraCost > 0 && (
+              <span style={{ fontSize: 12, color: '#f59e0b' }}>
+                Uso extra: <strong>${extraCost.toFixed(2)}</strong>
+              </span>
+            )}
+            <span style={{ fontSize: 13, fontWeight: 700, color: isOver ? '#ef4444' : 'var(--text)', marginLeft: 'auto' }}>
+              Total: ${(planPrice + extraCost).toFixed(2)}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MiniStatRow({ items }: { items: { label: string; value: string | number; color?: string }[] }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: `repeat(${items.length}, 1fr)`, gap: 8, marginTop: 12 }}>
@@ -159,10 +302,13 @@ function MiniStatRow({ items }: { items: { label: string; value: string | number
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [planData, setPlanData] = useState<{ tenant: any; usage: Record<string, number> } | null>(null);
   const user = getStoredUser();
 
   useEffect(() => {
@@ -170,21 +316,24 @@ export default function DashboardPage() {
       .then(setStats)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+    getCurrentPlan().then(setPlanData).catch(() => {});
   }, []);
 
   const greetingHour = new Date().getHours();
-  const greeting = greetingHour < 12 ? 'Buenos días' : greetingHour < 18 ? 'Buenas tardes' : 'Buenas noches';
+  const greeting = greetingHour < 12 ? i.greeting_morning : greetingHour < 18 ? i.greeting_afternoon : i.greeting_evening;
+
+  const STATUS_LABEL: Record<string, string> = { open: i.open, pending: i.pending, resolved: i.resolved };
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--text-muted)', fontSize: 16 }}>
-      Cargando métricas…
+      {i.loadingMetrics}
     </div>
   );
 
   if (error) return (
     <div style={{ padding: 24 }}>
-      <div style={{ color: 'var(--danger)', fontSize: 14, marginBottom: 12 }}>No se pudieron cargar las métricas: {error}</div>
-      <button className="btn btn-primary" onClick={() => { setError(''); setLoading(true); getDashboardStats().then(setStats).catch((e) => setError(e.message)).finally(() => setLoading(false)); }}>Reintentar</button>
+      <div style={{ color: 'var(--danger)', fontSize: 14, marginBottom: 12 }}>{i.errorMetrics}: {error}</div>
+      <button className="btn btn-primary" onClick={() => { setError(''); setLoading(true); getDashboardStats().then(setStats).catch((e) => setError(e.message)).finally(() => setLoading(false)); }}>{i.retry}</button>
     </div>
   );
 
@@ -211,39 +360,42 @@ export default function DashboardPage() {
         </p>
       </div>
 
+      {/* Plan usage widget */}
+      {planData && <PlanUsageWidget plan={planData as any} />}
+
       {/* KPI row — principal */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))', gap: 14, marginBottom: 20 }}>
-        <StatCard label="Contactos"          value={s.contacts.total}          icon="👥" color="#6366f1" onClick={() => router.push('/contacts')} />
-        <StatCard label="Conversaciones"     value={c.total}    sub={`${c.today} hoy`} icon="💬" color="#3b82f6" onClick={() => router.push('/inbox')} />
-        <StatCard label="Deals Activos"      value={s.deals.active} sub={currency(s.deals.pipeline_value)} icon="💼" color="#f59e0b" onClick={() => router.push('/kanban')} />
-        <StatCard label="Deals Ganados"      value={s.deals.won}   sub={currency(s.deals.won_value)} icon="🏆" color="#10b981" />
-        <StatCard label="Tareas Pendientes"  value={s.tasks.total - s.tasks.completed} sub={s.tasks.overdue > 0 ? `⚠ ${s.tasks.overdue} vencidas` : 'Al día'} icon="✓" color={s.tasks.overdue > 0 ? '#ef4444' : '#10b981'} onClick={() => router.push('/tasks')} />
-        <StatCard label="Campañas Activas"   value={s.campaigns.active} sub={`${s.campaigns.total_sent} enviados`} icon="📣" color="#8b5cf6" onClick={() => router.push('/campaigns')} />
+        <StatCard label={i.contacts}        value={s.contacts.total}          icon="👥" color="#6366f1" onClick={() => router.push('/contacts')} />
+        <StatCard label={i.conversations}   value={c.total}    sub={`${c.today} ${i.today_suffix}`} icon="💬" color="#3b82f6" onClick={() => router.push('/inbox')} />
+        <StatCard label={i.activeDeals}     value={s.deals.active} sub={currency(s.deals.pipeline_value)} icon="💼" color="#f59e0b" onClick={() => router.push('/kanban')} />
+        <StatCard label={i.wonDeals}        value={s.deals.won}   sub={currency(s.deals.won_value)} icon="🏆" color="#10b981" />
+        <StatCard label={i.pendingTasks}    value={s.tasks.total - s.tasks.completed} sub={s.tasks.overdue > 0 ? `⚠ ${s.tasks.overdue} ${i.overdue.toLowerCase()}` : 'Al día'} icon="✓" color={s.tasks.overdue > 0 ? '#ef4444' : '#10b981'} onClick={() => router.push('/tasks')} />
+        <StatCard label={i.activeCampaigns} value={s.campaigns.active} sub={`${s.campaigns.total_sent} enviados`} icon="📣" color="#8b5cf6" onClick={() => router.push('/campaigns')} />
       </div>
 
       {/* KPI row — secundaria */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))', gap: 14, marginBottom: 24 }}>
         <StatCard
-          label="Empresas" value={s.companies?.total ?? 0}
+          label={i.companies} value={s.companies?.total ?? 0}
           sub={`${s.companies?.with_deals ?? 0} con deals`}
           icon="🏢" color="#0891b2"
           onClick={() => router.push('/companies')}
         />
         <StatCard
-          label="Conexiones" value={s.connections?.active ?? 0}
+          label={i.connections} value={s.connections?.active ?? 0}
           sub={s.connections?.errors > 0 ? `⚠ ${s.connections.errors} con error` : `${s.connections?.total ?? 0} total`}
           icon="🔌" color={s.connections?.errors > 0 ? '#ef4444' : '#10b981'}
           onClick={() => router.push('/connections')}
         />
         <StatCard
-          label="Automatizaciones" value={s.automations?.active ?? 0}
+          label={i.automations} value={s.automations?.active ?? 0}
           sub={`${s.automations?.total_executions ?? 0} ejecuciones`}
           icon="⚡" color="#f59e0b"
           onClick={() => router.push('/automations')}
         />
         <StatCard
-          label="Flujos Activos" value={s.flows?.active ?? 0}
-          sub={`${s.flows?.running_sessions ?? 0} sesiones abiertas`}
+          label={i.activeFlows} value={s.flows?.active ?? 0}
+          sub={`${s.flows?.running_sessions ?? 0} ${i.runningSessions}`}
           icon="🔀" color="#8b5cf6"
           onClick={() => router.push('/flows')}
         />
@@ -255,8 +407,8 @@ export default function DashboardPage() {
         {/* Conversations */}
         <div className="card">
           <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>Conversaciones</span>
-            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => router.push('/inbox')}>Ver →</button>
+            <span>{i.conversations}</span>
+            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => router.push('/inbox')}>{i.view}</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {(['open', 'pending', 'resolved'] as const).map((st) => {
@@ -277,7 +429,7 @@ export default function DashboardPage() {
           </div>
           {s.conversationsTrend.length > 0 && (
             <div style={{ marginTop: 16 }}>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Últimos 7 días</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{i.last7days}</div>
               <BarChart data={s.conversationsTrend} />
             </div>
           )}
@@ -286,18 +438,18 @@ export default function DashboardPage() {
         {/* Pipeline funnel */}
         <div className="card">
           <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>Pipeline</span>
-            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => router.push('/kanban')}>Kanban →</button>
+            <span>{i.pipeline}</span>
+            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => router.push('/kanban')}>{i.kanban} →</button>
           </div>
           <FunnelChart stages={s.dealsByStage} />
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <div style={{ textAlign: 'center', padding: 8, background: 'var(--bg-secondary)', borderRadius: 6 }}>
               <div style={{ fontSize: 15, fontWeight: 700, color: '#f59e0b' }}>{currency(s.deals.pipeline_value)}</div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>En pipeline</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{i.inPipeline}</div>
             </div>
             <div style={{ textAlign: 'center', padding: 8, background: 'var(--bg-secondary)', borderRadius: 6 }}>
               <div style={{ fontSize: 15, fontWeight: 700, color: '#10b981' }}>{currency(s.deals.won_value)}</div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Ganados</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{i.won}</div>
             </div>
           </div>
         </div>
@@ -305,15 +457,15 @@ export default function DashboardPage() {
         {/* Tasks + System health */}
         <div className="card">
           <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>Tareas</span>
-            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => router.push('/tasks')}>Ver →</button>
+            <span>{i.tasks}</span>
+            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => router.push('/tasks')}>{i.view}</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {[
-              { label: 'Para hoy',    value: s.tasks.due_today,  color: '#6366f1', icon: '📅' },
-              { label: 'Vencidas',    value: s.tasks.overdue,    color: '#ef4444', icon: '⚠' },
-              { label: 'Completadas', value: s.tasks.completed,  color: '#10b981', icon: '✅' },
-              { label: 'Total',       value: s.tasks.total,      color: 'var(--text)', icon: '📋' },
+              { label: i.dueToday,   value: s.tasks.due_today,  color: '#6366f1', icon: '📅' },
+              { label: i.overdue,    value: s.tasks.overdue,    color: '#ef4444', icon: '⚠' },
+              { label: i.completed,  value: s.tasks.completed,  color: '#10b981', icon: '✅' },
+              { label: i.total,      value: s.tasks.total,      color: 'var(--text)', icon: '📋' },
             ].map((t) => (
               <div key={t.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: 'var(--bg-secondary)', borderRadius: 6 }}>
                 <span style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}><span>{t.icon}</span>{t.label}</span>
@@ -324,12 +476,12 @@ export default function DashboardPage() {
 
           {/* System health divider */}
           <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Estado del sistema</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>{i.systemHealth}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {[
-                { label: 'Conexiones activas', value: `${s.connections?.active ?? 0}/${s.connections?.total ?? 0}`, ok: (s.connections?.errors ?? 0) === 0 },
-                { label: 'Automatizaciones', value: `${s.automations?.active ?? 0} activas`, ok: true },
-                { label: 'Flujos corriendo', value: `${s.flows?.running_sessions ?? 0} sesiones`, ok: true },
+                { label: i.activeConnections, value: `${s.connections?.active ?? 0}/${s.connections?.total ?? 0}`, ok: (s.connections?.errors ?? 0) === 0 },
+                { label: i.automations, value: `${s.automations?.active ?? 0} ${i.active.toLowerCase()}`, ok: true },
+                { label: i.activeFlows, value: `${s.flows?.running_sessions ?? 0} ${i.runningSessions}`, ok: true },
               ].map((row) => (
                 <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -347,11 +499,11 @@ export default function DashboardPage() {
       {/* Recent conversations */}
       <div className="card">
         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>Conversaciones Recientes</span>
-          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => router.push('/inbox')}>Ver Inbox →</button>
+          <span>{i.recentConversations}</span>
+          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => router.push('/inbox')}>{i.viewInbox}</button>
         </div>
         {s.recentConversations.length === 0 ? (
-          <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 20 }}>No hay conversaciones aún</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 20 }}>{i.noConversations}</div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
             {s.recentConversations.map((conv: any) => {
@@ -366,7 +518,7 @@ export default function DashboardPage() {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div style={{ fontWeight: 500, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                      {conv.contact?.fullName || conv.contact?.email || 'Sin contacto'}
+                      {conv.contact?.fullName || conv.contact?.email || i.noContact}
                     </div>
                     <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0, marginLeft: 6 }}>{timeAgo(conv.updated_at)}</span>
                   </div>

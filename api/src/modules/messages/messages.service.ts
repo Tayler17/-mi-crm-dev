@@ -15,6 +15,7 @@ export class MessagesService {
     return this.repo.find({
       where: { conversationId, tenantId, isPrivate: false },
       order: { createdAt: 'ASC' },
+      take: 500,
     });
   }
 
@@ -22,6 +23,7 @@ export class MessagesService {
     return this.repo.find({
       where: { conversationId, tenantId, isPrivate: true },
       order: { createdAt: 'ASC' },
+      take: 200,
     });
   }
 

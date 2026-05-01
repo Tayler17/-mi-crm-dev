@@ -82,7 +82,8 @@ export class QueuesService {
        LEFT JOIN users u ON u.id = c.assigned_user_id
        LEFT JOIN inboxes i ON i.id = c.inbox_id
        WHERE c.queue_id = $1 AND c.tenant_id = $2
-       ORDER BY c.created_at ASC`,
+       ORDER BY c.created_at ASC
+       LIMIT 300`,
       [queueId, tenantId],
     );
   }

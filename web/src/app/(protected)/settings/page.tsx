@@ -3,15 +3,18 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   getSettings, updateSettings,
-  getAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement,
+  getAnnouncements, getSystemAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement,
   getSchedules, createSchedule, updateSchedule, deleteSchedule,
   getScheduleInboxes, assignScheduleInbox, unassignScheduleInbox,
   getScheduleAssignments, addScheduleAssignment, removeScheduleAssignment, getAssignableTargets,
   getInboxes,
   getPlatformSettings, updatePlatformSettings,
+  getAllowedDomains, addAllowedDomain, removeAllowedDomain,
   type TenantSettings, type Announcement, type Schedule, type ScheduleHours,
-  type Inbox, type ScheduleAssignment, type PlatformSettings,
+  type Inbox, type ScheduleAssignment, type PlatformSettings, type AllowedDomain,
 } from '@/lib/api';
+import { useLangCtx } from '@/lib/lang-context';
+import { APP } from '@/lib/i18n/app';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -29,17 +32,14 @@ const LANGUAGES = [
   { code: 'pt', label: 'Português' },
 ];
 
-const CURRENCIES = ['USD', 'EUR', 'COP', 'MXN', 'ARS', 'CLP', 'PEN', 'BRL', 'VES'];
+const CURRENCIES = ['USD', 'EUR', 'GBP', 'COP', 'MXN', 'ARS', 'CLP', 'PEN', 'BRL', 'VES'];
 
 const ANN_TYPES = {
-  info:    { label: 'Información', color: '#3b82f6', bg: '#eff6ff', icon: 'ℹ️' },
-  warning: { label: 'Aviso',       color: '#f59e0b', bg: '#fffbeb', icon: '⚠️' },
-  success: { label: 'Éxito',       color: '#22c55e', bg: '#f0fdf4', icon: '✅' },
-  urgent:  { label: 'Urgente',     color: '#ef4444', bg: '#fef2f2', icon: '🚨' },
+  info:    { color: '#3b82f6', bg: '#eff6ff', icon: 'ℹ️' },
+  warning: { color: '#f59e0b', bg: '#fffbeb', icon: '⚠️' },
+  success: { color: '#22c55e', bg: '#f0fdf4', icon: '✅' },
+  urgent:  { color: '#ef4444', bg: '#fef2f2', icon: '🚨' },
 };
-
-const DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-const DAYS_FULL  = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 const SCH_TIMEZONES = [
   'UTC',
@@ -50,10 +50,10 @@ const SCH_TIMEZONES = [
 ];
 
 const SCHEDULE_TARGET_TYPES = [
-  { key: 'inbox',    label: 'Inboxes',   icon: '📥', desc: 'Aplica el horario a los mensajes recibidos por estos inboxes' },
-  { key: 'bot',      label: 'Call Bots', icon: '🤖', desc: 'Los bots solo operarán dentro de este horario' },
-  { key: 'campaign', label: 'Campañas',  icon: '📣', desc: 'Las campañas envían mensajes solo dentro de este horario' },
-  { key: 'user',     label: 'Usuarios',  icon: '👤', desc: 'Controla la disponibilidad de estos agentes' },
+  { key: 'inbox',    label: 'Inboxes',   icon: '📥' },
+  { key: 'bot',      label: 'Call Bots', icon: '🤖' },
+  { key: 'campaign', label: 'Campañas',  icon: '📣' },
+  { key: 'user',     label: 'Usuarios',  icon: '👤' },
 ];
 
 // ── General UI helpers ────────────────────────────────────────────────────────
@@ -83,13 +83,29 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
 
 // ── Announcement Modal ────────────────────────────────────────────────────────
 
-function AnnouncementModal({ ann, onClose, onSaved }: { ann?: Announcement | null; onClose: () => void; onSaved: () => void }) {
+function AnnouncementModal({
+  ann, onClose, onSaved, isOwner = false, defaultIsSystem = false,
+}: {
+  ann?: Announcement | null;
+  onClose: () => void;
+  onSaved: () => void;
+  isOwner?: boolean;
+  defaultIsSystem?: boolean;
+}) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+  const ANN_LABELS: Record<string, string> = {
+    info: i.annTypeInfo, warning: i.annTypeWarning, success: i.annTypeSuccess, urgent: i.annTypeUrgent,
+  };
+
   const [form, setForm] = useState({
     title: ann?.title ?? '',
     body: ann?.body ?? '',
     type: ann?.type ?? 'info' as Announcement['type'],
     expiresAt: ann?.expires_at ? ann.expires_at.slice(0, 16) : '',
     isActive: ann?.is_active ?? true,
+    isSystem: ann?.is_system ?? defaultIsSystem,
+    targetTenantId: ann?.target_tenant_id ?? '',
   });
   const [saving, setSaving] = useState(false);
   const set = (k: keyof typeof form, v: any) => setForm((p) => ({ ...p, [k]: v }));
@@ -98,7 +114,12 @@ function AnnouncementModal({ ann, onClose, onSaved }: { ann?: Announcement | nul
     if (!form.title.trim() || !form.body.trim()) return;
     setSaving(true);
     try {
-      const payload = { ...form, expiresAt: form.expiresAt || undefined };
+      const payload = {
+        ...form,
+        expiresAt: form.expiresAt || undefined,
+        isSystem: isOwner ? form.isSystem : false,
+        targetTenantId: (isOwner && form.isSystem && form.targetTenantId) ? form.targetTenantId : undefined,
+      };
       if (ann) await updateAnnouncement(ann.id, payload);
       else await createAnnouncement(payload);
       onSaved();
@@ -111,13 +132,27 @@ function AnnouncementModal({ ann, onClose, onSaved }: { ann?: Announcement | nul
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 500 }}>
         <div className="modal-header">
-          <h2 className="modal-title">{ann ? 'Editar anuncio' : 'Nuevo anuncio'}</h2>
+          <h2 className="modal-title">{ann ? i.editAnnouncement : i.newAnnouncement.replace('+ ', '')}</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {isOwner && (
+            <div style={{ padding: '10px 14px', background: form.isSystem ? '#ede9fe' : 'var(--bg-secondary)', borderRadius: 8, border: '1px solid var(--border)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>
+                <input type="checkbox" checked={form.isSystem} onChange={(e) => set('isSystem', e.target.checked)} />
+                📡 Broadcast a todos los tenants
+              </label>
+              {form.isSystem && (
+                <div style={{ marginTop: 8, fontSize: 12, color: '#7c3aed' }}>
+                  Este anuncio aparecerá en el dashboard de todos los tenants (o uno específico si indicas su ID).
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
-            <label className="form-label">Tipo</label>
+            <label className="form-label">{i.annType}</label>
             <div style={{ display: 'flex', gap: 8 }}>
               {(Object.entries(ANN_TYPES) as [Announcement['type'], typeof ANN_TYPES[keyof typeof ANN_TYPES]][]).map(([k, v]) => (
                 <button
@@ -130,28 +165,28 @@ function AnnouncementModal({ ann, onClose, onSaved }: { ann?: Announcement | nul
                     cursor: 'pointer', fontSize: 11, fontWeight: 600, color: form.type === k ? v.color : 'var(--text-muted)',
                   }}
                 >
-                  {v.icon}<br />{v.label}
+                  {v.icon}<br />{ANN_LABELS[k]}
                 </button>
               ))}
             </div>
           </div>
 
           <div>
-            <label className="form-label">Título *</label>
-            <input className="form-input" value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="Ej: Mantenimiento programado" autoFocus />
+            <label className="form-label">{i.annTitleLabel} *</label>
+            <input className="form-input" value={form.title} onChange={(e) => set('title', e.target.value)} autoFocus />
           </div>
           <div>
-            <label className="form-label">Mensaje *</label>
-            <textarea className="form-input" rows={4} value={form.body} onChange={(e) => set('body', e.target.value)} placeholder="Escribe el mensaje del anuncio..." />
+            <label className="form-label">{i.annBodyLabel} *</label>
+            <textarea className="form-input" rows={4} value={form.body} onChange={(e) => set('body', e.target.value)} />
           </div>
           <div>
-            <label className="form-label">Expira el (opcional)</label>
+            <label className="form-label">{i.annExpiresInput}</label>
             <input className="form-input" type="datetime-local" value={form.expiresAt} onChange={(e) => set('expiresAt', e.target.value)} />
           </div>
           {ann && (
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
               <input type="checkbox" checked={form.isActive} onChange={(e) => set('isActive', e.target.checked)} />
-              <span style={{ fontSize: 14 }}>Anuncio activo</span>
+              <span style={{ fontSize: 14 }}>{i.annActiveLabel}</span>
             </label>
           )}
 
@@ -164,9 +199,9 @@ function AnnouncementModal({ ann, onClose, onSaved }: { ann?: Announcement | nul
         </div>
 
         <div className="modal-footer" style={{ marginTop: 20 }}>
-          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-secondary" onClick={onClose}>{i.cancel}</button>
           <button className="btn btn-primary" disabled={saving || !form.title.trim() || !form.body.trim()} onClick={handleSave}>
-            {saving ? 'Guardando...' : ann ? 'Guardar' : 'Publicar anuncio'}
+            {saving ? i.saving : ann ? i.save : i.publishAnn}
           </button>
         </div>
       </div>
@@ -177,6 +212,10 @@ function AnnouncementModal({ ann, onClose, onSaved }: { ann?: Announcement | nul
 // ── Schedule: Hours Grid ───────────────────────────────────────────────────────
 
 function HoursGrid({ hours, onChange }: { hours: ScheduleHours[]; onChange: (h: ScheduleHours[]) => void }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+  const DAYS_FULL = Array.from({ length: 7 }, (_, d) =>
+    new Intl.DateTimeFormat(i.locale, { weekday: 'long' }).format(new Date(2024, 0, d + 7)));
   const sorted = [...hours].sort((a, b) => a.dayOfWeek - b.dayOfWeek);
 
   function update(dayOfWeek: number, patch: Partial<ScheduleHours>) {
@@ -200,7 +239,7 @@ function HoursGrid({ hours, onChange }: { hours: ScheduleHours[]; onChange: (h: 
             <span style={{ fontWeight: 500, fontSize: 13 }}>{DAYS_FULL[h.dayOfWeek]}</span>
           </label>
           {h.isClosed ? (
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>Cerrado</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>{i.schedClosed}</span>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input type="time" value={h.openTime ?? '09:00'} onChange={(e) => update(h.dayOfWeek, { openTime: e.target.value })}
@@ -209,8 +248,8 @@ function HoursGrid({ hours, onChange }: { hours: ScheduleHours[]; onChange: (h: 
               <input type="time" value={h.closeTime ?? '18:00'} onChange={(e) => update(h.dayOfWeek, { closeTime: e.target.value })}
                 style={{ padding: '3px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text)', fontSize: 13 }} />
               {[1, 2, 3, 4, 5].includes(h.dayOfWeek) && (
-                <button type="button" className="btn btn-ghost" style={{ fontSize: 10, padding: '2px 6px', flexShrink: 0 }} onClick={() => copyToWeekdays(h)} title="Copiar a todos los días de semana">
-                  Copiar a lun–vie
+                <button type="button" className="btn btn-ghost" style={{ fontSize: 10, padding: '2px 6px', flexShrink: 0 }} onClick={() => copyToWeekdays(h)}>
+                  {i.schedCopyWeekdays}
                 </button>
               )}
             </div>
@@ -230,8 +269,8 @@ interface ScheduleFormData {
 }
 
 function defaultHours(): ScheduleHours[] {
-  return Array.from({ length: 7 }, (_, i) => ({
-    dayOfWeek: i, isClosed: i === 0 || i === 6, openTime: '09:00', closeTime: '18:00',
+  return Array.from({ length: 7 }, (_, idx) => ({
+    dayOfWeek: idx, isClosed: idx === 0 || idx === 6, openTime: '09:00', closeTime: '18:00',
   }));
 }
 
@@ -240,6 +279,8 @@ function ScheduleModal({ schedule, onSave, onClose }: {
   onSave: (data: ScheduleFormData) => Promise<void>;
   onClose: () => void;
 }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [form, setForm] = useState<ScheduleFormData>({
     name: schedule?.name ?? '',
     timezone: schedule?.timezone ?? 'UTC',
@@ -261,10 +302,10 @@ function ScheduleModal({ schedule, onSave, onClose }: {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.name.trim()) { setError('El nombre es requerido'); return; }
+    if (!form.name.trim()) { setError(i.schedNameReq); return; }
     setSaving(true); setError('');
     try { await onSave(form); onClose(); }
-    catch (err: any) { setError(err.message || 'Error al guardar'); }
+    catch (err: any) { setError(err.message || i.error); }
     finally { setSaving(false); }
   }
 
@@ -272,18 +313,18 @@ function ScheduleModal({ schedule, onSave, onClose }: {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 640, maxHeight: '92vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 style={{ margin: 0, fontSize: 18 }}>{schedule ? 'Editar Schedule' : 'Nuevo Schedule'}</h2>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{schedule ? i.editSchedule : i.newSchedule}</h2>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '16px 0' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label">Nombre *</label>
-              <input className="form-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Horario Principal" />
+              <label className="form-label">{i.name} *</label>
+              <input className="form-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </div>
             <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label">Zona Horaria</label>
+              <label className="form-label">{i.schedTimezone}</label>
               <select className="form-input" value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })}>
                 {SCH_TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
               </select>
@@ -292,14 +333,14 @@ function ScheduleModal({ schedule, onSave, onClose }: {
 
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 14 }}>
             <input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />
-            <span>Horario activo</span>
+            <span>{i.schedActiveLabel}</span>
           </label>
 
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Horario Semanal</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{i.schedWeekly}</div>
               <div style={{ display: 'flex', gap: 6 }}>
-                <button type="button" className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => applyPreset('weekdays')}>Lun–Vie 9–18</button>
+                <button type="button" className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => applyPreset('weekdays')}>{i.schedPresetWeekdays}</button>
                 <button type="button" className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => applyPreset('all-day')}>24/7</button>
               </div>
             </div>
@@ -308,19 +349,19 @@ function ScheduleModal({ schedule, onSave, onClose }: {
 
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>🤖</span> Configuración IA
-              <span style={{ fontSize: 10, background: 'var(--primary)', color: '#fff', borderRadius: 4, padding: '1px 5px' }}>Próximamente</span>
+              <span>{i.schedAIConfig}</span>
+              <span style={{ fontSize: 10, background: 'var(--primary)', color: '#fff', borderRadius: 4, padding: '1px 5px' }}>{i.schedAIComingSoon}</span>
             </div>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 14, marginBottom: 10 }}>
               <input type="checkbox" checked={form.aiEnabled} onChange={(e) => setForm({ ...form, aiEnabled: e.target.checked })} />
-              <span>Habilitar respuestas automáticas con IA fuera de horario</span>
+              <span>{i.schedAIEnable}</span>
             </label>
             {form.aiEnabled && (
               <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Mensaje fuera de horario</label>
+                <label className="form-label">{i.schedAIMessage}</label>
                 <textarea className="form-input" rows={3} value={form.aiFallbackMessage}
                   onChange={(e) => setForm({ ...form, aiFallbackMessage: e.target.value })}
-                  placeholder="Hola, estamos fuera de horario. Nuestro equipo responderá pronto."
+                  placeholder={i.schedAIPlaceholder}
                   style={{ resize: 'vertical' }} />
               </div>
             )}
@@ -328,8 +369,8 @@ function ScheduleModal({ schedule, onSave, onClose }: {
 
           {error && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</button>
+            <button type="button" className="btn btn-secondary" onClick={onClose}>{i.cancel}</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? i.saving : i.save}</button>
           </div>
         </form>
       </div>
@@ -344,7 +385,9 @@ function InboxAssignModal({ schedule, onClose, onRefresh }: {
   onClose: () => void;
   onRefresh: () => void;
 }) {
-  const [assigned, setAssigned] = useState<Inbox[]>([]);
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+  const [assigned, setAssigned] = useState<any[]>([]);
   const [all, setAll] = useState<Inbox[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -355,8 +398,8 @@ function InboxAssignModal({ schedule, onClose, onRefresh }: {
     ]).then(([a, b]) => { setAssigned(a); setAll(b); });
   }, [schedule.id]);
 
-  const assignedIds = new Set(assigned.map((i: any) => i.id ?? i.inbox_id));
-  const available = all.filter((i) => !assignedIds.has(i.id));
+  const assignedIds = new Set(assigned.map((item: any) => item.id ?? item.inbox_id));
+  const available = all.filter((item) => !assignedIds.has(item.id));
 
   async function add(inboxId: string) {
     setSaving(true);
@@ -374,37 +417,37 @@ function InboxAssignModal({ schedule, onClose, onRefresh }: {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 style={{ margin: 0, fontSize: 17 }}>Inboxes — {schedule.name}</h2>
+          <h2 style={{ margin: 0, fontSize: 17 }}>{i.schedInboxesBtn.replace('📥 ', '')} — {schedule.name}</h2>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
 
         <div style={{ padding: '12px 0' }}>
           {assigned.length > 0 && (
             <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>Asignados</div>
-              {assigned.map((i: any) => (
-                <div key={i.id ?? i.inbox_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderRadius: 6, background: '#dcfce7', border: '1px solid #bbf7d0', marginBottom: 4 }}>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>📥 {i.name}</span>
-                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--danger)' }} disabled={saving} onClick={() => remove(i.id ?? i.inbox_id)}>Quitar</button>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>{i.schedAssigned}</div>
+              {assigned.map((item: any) => (
+                <div key={item.id ?? item.inbox_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderRadius: 6, background: '#dcfce7', border: '1px solid #bbf7d0', marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>📥 {item.name}</span>
+                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--danger)' }} disabled={saving} onClick={() => remove(item.id ?? item.inbox_id)}>{i.delete}</button>
                 </div>
               ))}
             </div>
           )}
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
-              {available.length > 0 ? `Disponibles (${available.length})` : 'Sin más inboxes disponibles'}
+              {available.length > 0 ? `${i.schedAvailableLabel} (${available.length})` : i.schedNoMore}
             </div>
-            {available.map((i) => (
-              <div key={i.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderRadius: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border)', marginBottom: 4 }}>
-                <span style={{ fontWeight: 500, fontSize: 13 }}>📥 {i.name}</span>
-                <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px' }} disabled={saving} onClick={() => add(i.id)}>+ Agregar</button>
+            {available.map((item) => (
+              <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderRadius: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border)', marginBottom: 4 }}>
+                <span style={{ fontWeight: 500, fontSize: 13 }}>📥 {item.name}</span>
+                <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px' }} disabled={saving} onClick={() => add(item.id)}>+ {i.add}</button>
               </div>
             ))}
           </div>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-          <button className="btn btn-primary" onClick={onClose}>Listo</button>
+          <button className="btn btn-primary" onClick={onClose}>{i.schedDone}</button>
         </div>
       </div>
     </div>
@@ -418,11 +461,20 @@ function AssignmentsModal({ schedule, onClose, onRefresh }: {
   onClose: () => void;
   onRefresh: () => void;
 }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [assignments, setAssignments] = useState<ScheduleAssignment[]>([]);
   const [activeType, setActiveType] = useState<string>('inbox');
   const [available, setAvailable] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const TARGET_DESCS: Record<string, string> = {
+    inbox:    i.schedTargetInboxDesc,
+    bot:      i.schedTargetBotDesc,
+    campaign: i.schedTargetCampaignDesc,
+    user:     i.schedTargetUserDesc,
+  };
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -455,14 +507,12 @@ function AssignmentsModal({ schedule, onClose, onRefresh }: {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 style={{ margin: 0, fontSize: 17 }}>Asignaciones — {schedule.name}</h2>
+          <h2 style={{ margin: 0, fontSize: 17 }}>{i.schedAssignmentsBtn.replace('⚙ ', '')} — {schedule.name}</h2>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
 
         <div style={{ padding: '12px 0' }}>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>
-            Asigna este schedule a inboxes, bots, campañas o usuarios para controlar cuándo operan.
-          </p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>{i.schedAssignHint}</p>
 
           <div style={{ display: 'flex', gap: 4, marginBottom: 16, flexWrap: 'wrap' }}>
             {SCHEDULE_TARGET_TYPES.map((t) => {
@@ -482,13 +532,13 @@ function AssignmentsModal({ schedule, onClose, onRefresh }: {
             })}
           </div>
 
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>{typeInfo.desc}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>{TARGET_DESCS[activeType]}</div>
 
           {loading ? (
-            <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 16 }}>Cargando…</div>
+            <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 16 }}>{i.loading}</div>
           ) : byType.length > 0 && (
             <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>Asignados actualmente</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>{i.schedCurrentAssigned}</div>
               {byType.map((a) => (
                 <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderRadius: 6, background: '#dcfce7', border: '1px solid #bbf7d0', marginBottom: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -497,7 +547,7 @@ function AssignmentsModal({ schedule, onClose, onRefresh }: {
                   </div>
                   <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--danger)' }}
                     disabled={saving} onClick={() => handleRemove(a.id)}>
-                    Quitar
+                    {i.delete}
                   </button>
                 </div>
               ))}
@@ -506,11 +556,13 @@ function AssignmentsModal({ schedule, onClose, onRefresh }: {
 
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
-              {available.length > 0 ? `Disponibles para agregar (${available.length})` : 'Sin más opciones disponibles'}
+              {available.length > 0 ? `${i.schedAvailableLabel} (${available.length})` : i.schedNoMore}
             </div>
             {available.length === 0 && !loading && (
               <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '16px 0', fontSize: 13 }}>
-                {byType.length === 0 ? `No hay ${typeInfo.label.toLowerCase()} configurados` : `Todos los ${typeInfo.label.toLowerCase()} ya están asignados`}
+                {byType.length === 0
+                  ? `${i.noData} — ${typeInfo.label.toLowerCase()}`
+                  : `${i.schedAssigned} — ${typeInfo.label.toLowerCase()}`}
               </div>
             )}
             {available.map((item) => (
@@ -524,7 +576,7 @@ function AssignmentsModal({ schedule, onClose, onRefresh }: {
                 </div>
                 <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px' }}
                   disabled={saving} onClick={() => handleAdd(item.id)}>
-                  + Agregar
+                  + {i.add}
                 </button>
               </div>
             ))}
@@ -532,7 +584,7 @@ function AssignmentsModal({ schedule, onClose, onRefresh }: {
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-          <button className="btn btn-primary" onClick={onClose}>Listo</button>
+          <button className="btn btn-primary" onClick={onClose}>{i.schedDone}</button>
         </div>
       </div>
     </div>
@@ -541,20 +593,22 @@ function AssignmentsModal({ schedule, onClose, onRefresh }: {
 
 // ── Schedule: Schedule Card ────────────────────────────────────────────────────
 
-function computeIsOpen(schedule: Schedule): { open: boolean; label: string } {
-  if (!schedule.isActive) return { open: false, label: 'Inactivo' };
+type I18nStrings = { inactive: string; schedClosedToday: string; schedOpensAt: string; schedClosedAt: string; schedOpenUntil: string };
+
+function computeIsOpen(schedule: Schedule, s: I18nStrings): { open: boolean; label: string } {
+  if (!schedule.isActive) return { open: false, label: s.inactive };
   const now = new Date();
   const dayOfWeek = now.getDay();
   const h = schedule.hours?.find((x) => x.dayOfWeek === dayOfWeek);
-  if (!h || h.isClosed) return { open: false, label: 'Cerrado hoy' };
+  if (!h || h.isClosed) return { open: false, label: s.schedClosedToday };
   const nowMins = now.getHours() * 60 + now.getMinutes();
   const [oh, om] = (h.openTime ?? '09:00').split(':').map(Number);
   const [ch, cm] = (h.closeTime ?? '18:00').split(':').map(Number);
   const openMins = oh * 60 + om;
   const closeMins = ch * 60 + cm;
-  if (nowMins < openMins) return { open: false, label: `Abre a las ${h.openTime}` };
-  if (nowMins >= closeMins) return { open: false, label: `Cerró a las ${h.closeTime}` };
-  return { open: true, label: `Abierto hasta ${h.closeTime}` };
+  if (nowMins < openMins) return { open: false, label: `${s.schedOpensAt} ${h.openTime}` };
+  if (nowMins >= closeMins) return { open: false, label: `${s.schedClosedAt} ${h.closeTime}` };
+  return { open: true, label: `${s.schedOpenUntil} ${h.closeTime}` };
 }
 
 function ScheduleCard({ schedule, onEdit, onDelete, onAssignInbox, onAssignments }: {
@@ -564,7 +618,13 @@ function ScheduleCard({ schedule, onEdit, onDelete, onAssignInbox, onAssignments
   onAssignInbox: () => void;
   onAssignments: () => void;
 }) {
-  const { open, label } = computeIsOpen(schedule);
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+  const DAYS_SHORT = Array.from({ length: 7 }, (_, d) =>
+    new Intl.DateTimeFormat(i.locale, { weekday: 'short' }).format(new Date(2024, 0, d + 7)).replace(/\.$/, ''));
+  const DAYS_FULL = Array.from({ length: 7 }, (_, d) =>
+    new Intl.DateTimeFormat(i.locale, { weekday: 'long' }).format(new Date(2024, 0, d + 7)));
+  const { open, label } = computeIsOpen(schedule, i);
   const openDays = schedule.hours?.filter((h) => !h.isClosed).map((h) => DAYS_SHORT[h.dayOfWeek]).join(', ');
 
   return (
@@ -580,41 +640,41 @@ function ScheduleCard({ schedule, onEdit, onDelete, onAssignInbox, onAssignments
             }}>
               {open ? '🟢' : '🔴'} {label}
             </span>
-            {!schedule.isActive && <span style={{ fontSize: 11, background: '#f3f4f6', color: '#6b7280', borderRadius: 4, padding: '2px 6px' }}>Inactivo</span>}
+            {!schedule.isActive && <span style={{ fontSize: 11, background: '#f3f4f6', color: '#6b7280', borderRadius: 4, padding: '2px 6px' }}>{i.inactive}</span>}
             {schedule.aiEnabled && <span style={{ fontSize: 11, background: 'var(--primary)', color: '#fff', borderRadius: 4, padding: '2px 6px' }}>🤖 IA</span>}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>🌐 {schedule.timezone}</div>
         </div>
         <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
-          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={onAssignInbox}>📥 Inboxes</button>
-          <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: 12 }} onClick={onAssignments}>⚙ Asignaciones</button>
-          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={onEdit}>Editar</button>
-          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12, color: 'var(--danger)' }} onClick={onDelete}>Eliminar</button>
+          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={onAssignInbox}>{i.schedInboxesBtn}</button>
+          <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: 12 }} onClick={onAssignments}>{i.schedAssignmentsBtn}</button>
+          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={onEdit}>{i.edit}</button>
+          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12, color: 'var(--danger)' }} onClick={onDelete}>{i.delete}</button>
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 4 }}>
-        {Array.from({ length: 7 }, (_, i) => {
-          const h = schedule.hours?.find((hh) => hh.dayOfWeek === i);
+        {Array.from({ length: 7 }, (_, idx) => {
+          const h = schedule.hours?.find((hh) => hh.dayOfWeek === idx);
           const closed = !h || h.isClosed;
-          const isToday = new Date().getDay() === i;
+          const isToday = new Date().getDay() === idx;
           return (
-            <div key={i}
-              title={closed ? `${DAYS_FULL[i]}: Cerrado` : `${DAYS_FULL[i]}: ${h!.openTime} – ${h!.closeTime}`}
+            <div key={idx}
+              title={closed ? `${DAYS_FULL[idx]}: ${i.schedClosed}` : `${DAYS_FULL[idx]}: ${h!.openTime} – ${h!.closeTime}`}
               style={{
                 flex: 1, textAlign: 'center', padding: '5px 2px', borderRadius: 4, fontSize: 11, fontWeight: 600,
                 background: closed ? 'var(--bg-secondary)' : '#dcfce7',
                 color: closed ? 'var(--text-muted)' : '#16a34a',
                 border: `${isToday ? 2 : 1}px solid ${closed ? 'var(--border)' : isToday ? '#15803d' : '#bbf7d0'}`,
               }}>
-              {DAYS_SHORT[i]}
+              {DAYS_SHORT[idx]}
             </div>
           );
         })}
       </div>
 
       {openDays && (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Días activos: {openDays}</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{i.schedActiveDays} {openDays}</div>
       )}
 
       {schedule.aiEnabled && schedule.aiFallbackMessage && (
@@ -629,6 +689,8 @@ function ScheduleCard({ schedule, onEdit, onDelete, onAssignInbox, onAssignments
 // ── Schedule Tab Content ───────────────────────────────────────────────────────
 
 function SchedulesTab() {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -651,7 +713,7 @@ function SchedulesTab() {
   }
 
   async function handleDelete(id: string, name: string) {
-    if (!confirm(`¿Eliminar el schedule "${name}"?`)) return;
+    if (!confirm(`${i.schedConfirmDelete} "${name}"?`)) return;
     await deleteSchedule(id);
     setSchedules((prev) => prev.filter((s) => s.id !== id));
   }
@@ -659,21 +721,19 @@ function SchedulesTab() {
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
-          Horarios de atención — asigna inboxes para que respeten el horario configurado
-        </p>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>{i.schedTabHint}</p>
         <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>
-          + Nuevo Schedule
+          {i.newScheduleBtn}
         </button>
       </div>
 
       {loading ? (
-        <div style={{ color: 'var(--text-muted)', padding: 40, textAlign: 'center' }}>Cargando…</div>
+        <div style={{ color: 'var(--text-muted)', padding: 40, textAlign: 'center' }}>{i.loading}</div>
       ) : schedules.length === 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 280, gap: 16, color: 'var(--text-muted)' }}>
           <div style={{ fontSize: 48 }}>🕐</div>
-          <div style={{ fontSize: 16 }}>No hay schedules configurados</div>
-          <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>+ Crear Schedule</button>
+          <div style={{ fontSize: 16 }}>{i.schedNone}</div>
+          <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>{i.createSchedule}</button>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: 16 }}>
@@ -720,12 +780,19 @@ function SchedulesTab() {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+
   const [tab, setTab] = useState<'general' | 'announcements' | 'schedules' | 'ai' | 'platform'>('general');
   const [settings, setSettings] = useState<TenantSettings | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  const ANN_LABELS: Record<string, string> = {
+    info: i.annTypeInfo, warning: i.annTypeWarning, success: i.annTypeSuccess, urgent: i.annTypeUrgent,
+  };
 
   const [form, setForm] = useState({
     name: '', logo_url: '', timezone: 'America/New_York', language: 'es', currency: 'USD',
@@ -736,31 +803,49 @@ export default function SettingsPage() {
   const [aiSaving, setAiSaving] = useState(false);
   const [aiSaved, setAiSaved] = useState(false);
 
-  // Platform settings (operator-level, admin only)
+  const [domains, setDomains] = useState<AllowedDomain[]>([]);
+  const [newDomain, setNewDomain] = useState('');
+  const [domainSaving, setDomainSaving] = useState(false);
+
   const [platformCfg, setPlatformCfg] = useState<PlatformSettings>({});
   const [platformForm, setPlatformForm] = useState({
     'ai.provider': 'openai', 'ai.api_key': '', 'ai.model': '',
     'voice.provider': 'twilio', 'voice.account_sid': '', 'voice.auth_token': '',
+    'meta.app_id': '', 'meta.app_secret': '',
+    'elevenlabs.api_key': '',
+    'stripe.secret_key': '', 'stripe.webhook_secret': '', 'stripe.publishable_key': '',
+    'backup.enabled': 'false', 'backup.cron': '0 2 * * *', 'backup.retention_days': '7',
+    'backup.s3_bucket': '', 'backup.s3_region': 'us-east-1',
+    'backup.s3_access_key': '', 'backup.s3_secret_key': '', 'backup.s3_prefix': 'backups/',
   });
   const [platformSaving, setPlatformSaving] = useState(false);
   const [platformSaved, setPlatformSaved] = useState(false);
 
-  // Check if current user is admin
   const currentUserRole = typeof window !== 'undefined'
     ? (() => { try { return JSON.parse(localStorage.getItem('user') || '{}').role ?? ''; } catch { return ''; } })()
     : '';
-  const isAdmin = currentUserRole === 'admin';
+  const isOwner = currentUserRole === 'owner';
+  const isAdmin = currentUserRole === 'admin' || isOwner;
 
   const [showAnnModal, setShowAnnModal] = useState(false);
   const [editingAnn, setEditingAnn] = useState<Announcement | null>(null);
+  const [annBroadcastMode, setAnnBroadcastMode] = useState(false);
+  const [systemAnnouncements, setSystemAnnouncements] = useState<Announcement[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [s, a, p] = await Promise.all([
+    const role = typeof window !== 'undefined'
+      ? (() => { try { return JSON.parse(localStorage.getItem('user') || '{}').role ?? ''; } catch { return ''; } })()
+      : '';
+    const [s, a, p, d, sysAnns] = await Promise.all([
       getSettings().catch(() => null),
       getAnnouncements().catch(() => []),
       getPlatformSettings().catch(() => null),
+      getAllowedDomains().catch(() => []),
+      role === 'owner' ? getSystemAnnouncements().catch(() => []) : Promise.resolve([]),
     ]);
+    setDomains(d);
+    setSystemAnnouncements(sysAnns);
     if (s) {
       setSettings(s);
       setForm({
@@ -789,6 +874,20 @@ export default function SettingsPage() {
         'voice.provider':    p['voice.provider']?.value    || 'twilio',
         'voice.account_sid': p['voice.account_sid']?.value || '',
         'voice.auth_token':  p['voice.auth_token']?.masked ? '••••••••' : (p['voice.auth_token']?.value || ''),
+        'meta.app_id':       p['meta.app_id']?.value       || '',
+        'meta.app_secret':      p['meta.app_secret']?.masked       ? '••••••••' : (p['meta.app_secret']?.value || ''),
+        'elevenlabs.api_key':   p['elevenlabs.api_key']?.masked    ? '••••••••' : (p['elevenlabs.api_key']?.value || ''),
+        'stripe.secret_key':    p['stripe.secret_key']?.masked     ? '••••••••' : (p['stripe.secret_key']?.value || ''),
+        'stripe.webhook_secret':p['stripe.webhook_secret']?.masked ? '••••••••' : (p['stripe.webhook_secret']?.value || ''),
+        'stripe.publishable_key':p['stripe.publishable_key']?.value || '',
+        'backup.enabled':         p['backup.enabled']?.value         || 'false',
+        'backup.cron':            p['backup.cron']?.value            || '0 2 * * *',
+        'backup.retention_days':  p['backup.retention_days']?.value  || '7',
+        'backup.s3_bucket':       p['backup.s3_bucket']?.value       || '',
+        'backup.s3_region':       p['backup.s3_region']?.value       || 'us-east-1',
+        'backup.s3_access_key':   p['backup.s3_access_key']?.value   || '',
+        'backup.s3_secret_key':   p['backup.s3_secret_key']?.masked  ? '••••••••' : (p['backup.s3_secret_key']?.value || ''),
+        'backup.s3_prefix':       p['backup.s3_prefix']?.value       || 'backups/',
       });
     }
     setAnnouncements(a);
@@ -796,6 +895,18 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!form.primaryColor || typeof document === 'undefined') return;
+    document.documentElement.style.setProperty('--primary', form.primaryColor);
+    try {
+      const r = parseInt(form.primaryColor.slice(1, 3), 16);
+      const g = parseInt(form.primaryColor.slice(3, 5), 16);
+      const b = parseInt(form.primaryColor.slice(5, 7), 16);
+      const dk = (v: number) => Math.max(0, Math.round(v * 0.78));
+      document.documentElement.style.setProperty('--primary-dark', `rgb(${dk(r)},${dk(g)},${dk(b)})`);
+    } catch {}
+  }, [form.primaryColor]);
 
   const set = (k: keyof typeof form, v: string) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -814,36 +925,37 @@ export default function SettingsPage() {
           supportPhone: form.supportPhone,
         },
       });
+      if (form.primaryColor) localStorage.setItem('primaryColor', form.primaryColor);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } finally { setSaving(false); }
   }
 
   async function handleDeleteAnn(ann: Announcement) {
-    if (!confirm(`¿Eliminar el anuncio "${ann.title}"?`)) return;
+    if (!confirm(`${i.annConfirmDelete} "${ann.title}"?`)) return;
     await deleteAnnouncement(ann.id);
     load();
   }
 
-  if (loading) return <div style={{ padding: 40, color: 'var(--text-muted)', textAlign: 'center' }}>Cargando configuración...</div>;
+  if (loading) return <div style={{ padding: 40, color: 'var(--text-muted)', textAlign: 'center' }}>{i.loading}</div>;
 
   return (
     <div className="page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Configuración</h1>
-          <p className="page-subtitle">Personaliza tu workspace, gestiona anuncios y horarios de atención</p>
+          <h1 className="page-title">{i.settingsTitle}</h1>
+          <p className="page-subtitle">{i.settingsSubtitle}</p>
         </div>
       </div>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 24, borderBottom: '1px solid var(--border)' }}>
         {([
-          { key: 'general',       label: '⚙️ General',             show: true },
-          { key: 'announcements', label: `📢 Anuncios (${announcements.length})`, show: true },
-          { key: 'schedules',     label: '🕐 Horarios de Atención', show: true },
-          { key: 'ai',            label: '🤖 Integraciones IA',     show: true },
-          { key: 'platform',      label: '🔌 Plataforma',           show: isAdmin },
+          { key: 'general',       label: i.tabGeneral,                                       show: true },
+          { key: 'announcements', label: `${i.tabAnnouncements} (${announcements.length})`,  show: true },
+          { key: 'schedules',     label: i.tabSchedules,                                     show: true },
+          { key: 'ai',            label: i.tabAI,                                            show: isOwner || !!settings?.allow_own_api_keys },
+          { key: 'platform',      label: i.tabPlatform,                                      show: isOwner },
         ] as const).filter((t) => t.show).map((t) => (
           <button
             key={t.key}
@@ -865,15 +977,15 @@ export default function SettingsPage() {
         <>
           {saved && (
             <div style={{ padding: '10px 16px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, marginBottom: 16, color: '#15803d', fontWeight: 600, fontSize: 13 }}>
-              ✅ Configuración guardada correctamente
+              {i.settingsSaved}
             </div>
           )}
 
-          <Section title="Información del workspace">
-            <Row label="Nombre de la empresa" hint="Se muestra en todas las comunicaciones">
+          <Section title={i.sectionWorkspace}>
+            <Row label={i.workspaceName} hint={i.workspaceNameHint}>
               <input className="form-input" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Mi Empresa" />
             </Row>
-            <Row label="URL del logo" hint="Imagen pública para el sidebar y emails">
+            <Row label={i.logoUrlLabel} hint={i.logoUrlHint}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <input className="form-input" value={form.logo_url} onChange={(e) => set('logo_url', e.target.value)} placeholder="https://empresa.com/logo.png" />
                 {form.logo_url && (
@@ -881,7 +993,7 @@ export default function SettingsPage() {
                 )}
               </div>
             </Row>
-            <Row label="Plan" hint="Gestiona tu plan en la sección de facturación">
+            <Row label="Plan">
               <span style={{
                 display: 'inline-block', padding: '4px 12px', borderRadius: 12, fontSize: 12, fontWeight: 700,
                 background: settings?.plan === 'pro' ? '#eff6ff' : '#f8fafc',
@@ -894,35 +1006,35 @@ export default function SettingsPage() {
             </Row>
           </Section>
 
-          <Section title="Regionalización">
-            <Row label="Zona horaria" hint="Afecta schedules, agendamientos y reportes">
+          <Section title={i.sectionRegion}>
+            <Row label={i.timezoneLabel} hint={i.timezoneHint}>
               <select className="form-input" value={form.timezone} onChange={(e) => set('timezone', e.target.value)}>
                 {TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
               </select>
             </Row>
-            <Row label="Idioma" hint="Idioma de la interfaz">
+            <Row label={i.languageLabel} hint={i.languageHint}>
               <select className="form-input" value={form.language} onChange={(e) => set('language', e.target.value)}>
                 {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
               </select>
             </Row>
-            <Row label="Moneda" hint="Moneda usada en deals y reportes">
+            <Row label={i.currencyLabel} hint={i.currencyHint}>
               <select className="form-input" value={form.currency} onChange={(e) => set('currency', e.target.value)}>
                 {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </Row>
           </Section>
 
-          <Section title="Contacto de soporte">
-            <Row label="Email de soporte" hint="Visible para los agentes del equipo">
+          <Section title={i.sectionSupport}>
+            <Row label={i.supportEmailLabel} hint={i.supportEmailHint}>
               <input className="form-input" type="email" value={form.supportEmail} onChange={(e) => set('supportEmail', e.target.value)} placeholder="soporte@empresa.com" />
             </Row>
-            <Row label="Teléfono de soporte">
+            <Row label={i.supportPhoneLabel}>
               <input className="form-input" value={form.supportPhone} onChange={(e) => set('supportPhone', e.target.value)} placeholder="+1 555 000 0000" />
             </Row>
           </Section>
 
-          <Section title="Apariencia">
-            <Row label="Color principal" hint="Color de acento del sidebar y botones">
+          <Section title={i.sectionAppearance}>
+            <Row label={i.primaryColorLabel} hint={i.primaryColorHint}>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                 <input type="color" value={form.primaryColor} onChange={(e) => set('primaryColor', e.target.value)} style={{ width: 44, height: 36, border: 'none', borderRadius: 6, cursor: 'pointer', background: 'none' }} />
                 <input className="form-input" value={form.primaryColor} onChange={(e) => set('primaryColor', e.target.value)} style={{ width: 120 }} placeholder="#6366f1" />
@@ -939,10 +1051,70 @@ export default function SettingsPage() {
             </Row>
           </Section>
 
+          <Section title={i.sectionDomains}>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>{i.domainsKbHint}</div>
+
+            {domains.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                {domains.map((d) => (
+                  <span key={d.id} style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '4px 10px', borderRadius: 99, fontSize: 12, fontWeight: 600,
+                    background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe',
+                  }}>
+                    🌐 {d.domain}
+                    <button
+                      onClick={async () => {
+                        await removeAllowedDomain(d.id).catch(() => {});
+                        setDomains((prev) => prev.filter((x) => x.id !== d.id));
+                      }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1d4ed8', padding: 0, fontSize: 13, lineHeight: 1 }}
+                    >×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, maxWidth: 480 }}>
+              <input
+                className="form-input"
+                value={newDomain}
+                onChange={(e) => setNewDomain(e.target.value)}
+                placeholder="miempresa.com"
+                onKeyDown={async (e) => {
+                  if (e.key === 'Enter' && newDomain.trim()) {
+                    setDomainSaving(true);
+                    try {
+                      const d = await addAllowedDomain(newDomain.trim());
+                      setDomains((prev) => [...prev, d]);
+                      setNewDomain('');
+                    } catch (err: any) { alert(err.message); }
+                    finally { setDomainSaving(false); }
+                  }
+                }}
+              />
+              <button
+                className="btn btn-secondary"
+                disabled={domainSaving || !newDomain.trim()}
+                onClick={async () => {
+                  setDomainSaving(true);
+                  try {
+                    const d = await addAllowedDomain(newDomain.trim());
+                    setDomains((prev) => [...prev, d]);
+                    setNewDomain('');
+                  } catch (err: any) { alert(err.message); }
+                  finally { setDomainSaving(false); }
+                }}
+              >
+                {domainSaving ? '…' : i.addDomain}
+              </button>
+            </div>
+          </Section>
+
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <button className="btn btn-secondary" onClick={load}>Cancelar</button>
+            <button className="btn btn-secondary" onClick={load}>{i.cancel}</button>
             <button className="btn btn-primary" disabled={saving} onClick={handleSave}>
-              {saving ? 'Guardando...' : '💾 Guardar configuración'}
+              {saving ? i.saving : i.saveSettingsBtn}
             </button>
           </div>
         </>
@@ -951,65 +1123,141 @@ export default function SettingsPage() {
       {/* ── Announcements Tab ─────────────────────────────────────────────── */}
       {tab === 'announcements' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
-              Los anuncios son visibles para todos los agentes del workspace
-            </p>
-            <button className="btn btn-primary" onClick={() => { setEditingAnn(null); setShowAnnModal(true); }}>
-              + Nuevo anuncio
-            </button>
-          </div>
+          {/* Owner: toggle between workspace announcements and system broadcasts */}
+          {isOwner && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+              <button
+                className={`btn ${!annBroadcastMode ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setAnnBroadcastMode(false)}
+              >📢 Workspace</button>
+              <button
+                className={`btn ${annBroadcastMode ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setAnnBroadcastMode(true)}
+              >📡 Broadcast a Tenants</button>
+            </div>
+          )}
 
-          {announcements.length === 0 ? (
-            <div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
-              <div style={{ fontSize: 32, marginBottom: 12 }}>📢</div>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Sin anuncios</div>
-              <div style={{ fontSize: 13, marginBottom: 20 }}>Crea anuncios para comunicar novedades a tu equipo</div>
-              <button className="btn btn-primary" onClick={() => { setEditingAnn(null); setShowAnnModal(true); }}>+ Crear anuncio</button>
-            </div>
+          {/* ── Broadcasts panel (owner only) ── */}
+          {isOwner && annBroadcastMode ? (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
+                  Anuncios enviados a todos los tenants de la plataforma.
+                </p>
+                <button className="btn btn-primary" onClick={() => { setEditingAnn(null); setAnnBroadcastMode(true); setShowAnnModal(true); }}>
+                  📡 Nuevo broadcast
+                </button>
+              </div>
+              {systemAnnouncements.length === 0 ? (
+                <div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <div style={{ fontSize: 32, marginBottom: 12 }}>📡</div>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Sin broadcasts enviados</div>
+                  <div style={{ fontSize: 13, marginBottom: 20 }}>Crea un anuncio para enviarlo a todos tus tenants.</div>
+                  <button className="btn btn-primary" onClick={() => { setEditingAnn(null); setShowAnnModal(true); }}>Enviar primer broadcast</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {systemAnnouncements.map((a) => {
+                    const meta = ANN_TYPES[a.type] ?? ANN_TYPES.info;
+                    const expired = a.expires_at && new Date(a.expires_at) < new Date();
+                    return (
+                      <div key={a.id} className="card" style={{ borderLeft: `4px solid ${meta.color}`, opacity: !a.is_active || expired ? 0.6 : 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 16 }}>{meta.icon}</span>
+                              <span style={{ fontWeight: 700, fontSize: 15 }}>{a.title}</span>
+                              <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 4, background: '#ede9fe', color: '#7c3aed' }}>
+                                📡 {a.target_tenant_name ? `→ ${a.target_tenant_name}` : 'Todos los tenants'}
+                              </span>
+                              {!a.is_active && <span style={{ fontSize: 10, color: '#64748b', background: '#f1f5f9', padding: '2px 6px', borderRadius: 4 }}>{i.inactive}</span>}
+                              {expired && <span style={{ fontSize: 10, color: '#ef4444', background: '#fef2f2', padding: '2px 6px', borderRadius: 4 }}>{i.expired}</span>}
+                            </div>
+                            <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text)' }}>{a.body}</p>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 12 }}>
+                              <span>{new Date(a.created_at).toLocaleDateString(i.locale)}</span>
+                              {a.expires_at && <span>{i.annExpiresLabel}: {new Date(a.expires_at).toLocaleDateString(i.locale)}</span>}
+                              <span>👁 {a.read_count} leídos</span>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginLeft: 12 }}>
+                            <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => { setEditingAnn(a); setShowAnnModal(true); }}>{i.edit}</button>
+                            <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px', color: '#ef4444', borderColor: '#ef444444' }} onClick={() => handleDeleteAnn(a)}>{i.delete}</button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {announcements.map((a) => {
-                const meta = ANN_TYPES[a.type] ?? ANN_TYPES.info;
-                const expired = a.expires_at && new Date(a.expires_at) < new Date();
-                return (
-                  <div
-                    key={a.id}
-                    className="card"
-                    style={{
-                      borderLeft: `4px solid ${meta.color}`,
-                      opacity: !a.is_active || expired ? 0.6 : 1,
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                          <span style={{ fontSize: 16 }}>{meta.icon}</span>
-                          <span style={{ fontWeight: 700, fontSize: 15 }}>{a.title}</span>
-                          <span style={{
-                            fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
-                            background: meta.bg, color: meta.color, border: `1px solid ${meta.color}44`,
-                          }}>{meta.label}</span>
-                          {!a.is_active && <span style={{ fontSize: 10, color: '#64748b', background: '#f1f5f9', padding: '2px 6px', borderRadius: 4 }}>Inactivo</span>}
-                          {expired && <span style={{ fontSize: 10, color: '#ef4444', background: '#fef2f2', padding: '2px 6px', borderRadius: 4 }}>Expirado</span>}
-                        </div>
-                        <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text)' }}>{a.body}</p>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 12 }}>
-                          {a.author_name && <span>Por: {a.author_name}</span>}
-                          <span>{new Date(a.created_at).toLocaleDateString('es-ES')}</span>
-                          {a.expires_at && <span>Expira: {new Date(a.expires_at).toLocaleDateString('es-ES')}</span>}
-                          <span>👁 {a.read_count} lecturas</span>
+            /* ── Normal workspace announcements ── */
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>{i.annWorkspaceVisibility}</p>
+                <button className="btn btn-primary" onClick={() => { setEditingAnn(null); setShowAnnModal(true); }}>
+                  {i.newAnnouncement}
+                </button>
+              </div>
+
+              {announcements.length === 0 ? (
+                <div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <div style={{ fontSize: 32, marginBottom: 12 }}>📢</div>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>{i.noAnnouncementsYet}</div>
+                  <div style={{ fontSize: 13, marginBottom: 20 }}>{i.noAnnouncementsHint}</div>
+                  <button className="btn btn-primary" onClick={() => { setEditingAnn(null); setShowAnnModal(true); }}>{i.createFirstAnn}</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {announcements.map((a) => {
+                    const meta = ANN_TYPES[a.type] ?? ANN_TYPES.info;
+                    const expired = a.expires_at && new Date(a.expires_at) < new Date();
+                    const isSystemAnn = a.is_system && !isOwner;
+                    return (
+                      <div
+                        key={a.id}
+                        className="card"
+                        style={{ borderLeft: `4px solid ${isSystemAnn ? '#7c3aed' : meta.color}`, opacity: !a.is_active || expired ? 0.6 : 1 }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 16 }}>{meta.icon}</span>
+                              <span style={{ fontWeight: 700, fontSize: 15 }}>{a.title}</span>
+                              <span style={{
+                                fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
+                                background: meta.bg, color: meta.color, border: `1px solid ${meta.color}44`,
+                              }}>{ANN_LABELS[a.type] ?? a.type}</span>
+                              {isSystemAnn && (
+                                <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#ede9fe', color: '#7c3aed' }}>
+                                  📡 De la plataforma
+                                </span>
+                              )}
+                              {!a.is_active && <span style={{ fontSize: 10, color: '#64748b', background: '#f1f5f9', padding: '2px 6px', borderRadius: 4 }}>{i.inactive}</span>}
+                              {expired && <span style={{ fontSize: 10, color: '#ef4444', background: '#fef2f2', padding: '2px 6px', borderRadius: 4 }}>{i.expired}</span>}
+                            </div>
+                            <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text)' }}>{a.body}</p>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 12 }}>
+                              {a.author_name && <span>{i.annBy}: {a.author_name}</span>}
+                              <span>{new Date(a.created_at).toLocaleDateString(i.locale)}</span>
+                              {a.expires_at && <span>{i.annExpiresLabel}: {new Date(a.expires_at).toLocaleDateString(i.locale)}</span>}
+                              <span>👁 {a.read_count} {i.annReads}</span>
+                            </div>
+                          </div>
+                          {!isSystemAnn && (
+                            <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginLeft: 12 }}>
+                              <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => { setEditingAnn(a); setShowAnnModal(true); }}>{i.edit}</button>
+                              <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px', color: '#ef4444', borderColor: '#ef444444' }} onClick={() => handleDeleteAnn(a)}>{i.delete}</button>
+                            </div>
+                          )}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginLeft: 12 }}>
-                        <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => { setEditingAnn(a); setShowAnnModal(true); }}>Editar</button>
-                        <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px', color: '#ef4444', borderColor: '#ef444444' }} onClick={() => handleDeleteAnn(a)}>Eliminar</button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
           )}
         </>
       )}
@@ -1022,33 +1270,25 @@ export default function SettingsPage() {
         <>
           {aiSaved && (
             <div style={{ padding: '10px 16px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, marginBottom: 16, color: '#15803d', fontWeight: 600, fontSize: 13 }}>
-              ✅ API keys guardadas correctamente
+              {i.aiSavedMsg}
             </div>
           )}
 
           <div style={{ padding: '12px 16px', background: '#ede9fe', borderRadius: 8, marginBottom: 20, fontSize: 13, color: '#4c1d95', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
             <span style={{ fontSize: 18 }}>🔐</span>
             <div>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>Seguridad de las API Keys</div>
-              Las claves se almacenan cifradas en tu tenant. Solo se muestran los últimos 4 caracteres.
-              Pega una nueva clave para reemplazar la existente. Estas claves son usadas por los <strong>AI Chatbots</strong> y los módulos de IA.
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>{i.aiKeysSecurity}</div>
+              {i.aiKeysHint}
             </div>
           </div>
 
           <Section title="OpenAI">
-            <Row label="API Key" hint="Modelos: GPT-4o, GPT-4o-mini, GPT-3.5 Turbo, etc.">
+            <Row label="API Key" hint="GPT-4o, GPT-4o-mini, GPT-3.5 Turbo…">
               <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  className="form-input"
-                  type="password"
-                  value={aiKeys.openai}
-                  onChange={(e) => setAiKeys((p) => ({ ...p, openai: e.target.value }))}
-                  placeholder="sk-..."
-                  style={{ flex: 1 }}
-                />
+                <input className="form-input" type="password" value={aiKeys.openai} onChange={(e) => setAiKeys((p) => ({ ...p, openai: e.target.value }))} placeholder="sk-..." style={{ flex: 1 }} />
                 {settings?.settings?.aiKeys?.openai && aiKeys.openai.startsWith('••••') && (
                   <span style={{ fontSize: 11, padding: '6px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-                    ✓ Configurada
+                    {i.aiKeyConfigured}
                   </span>
                 )}
               </div>
@@ -1056,19 +1296,12 @@ export default function SettingsPage() {
           </Section>
 
           <Section title="Anthropic (Claude)">
-            <Row label="API Key" hint="Modelos: Claude Opus, Sonnet, Haiku">
+            <Row label="API Key" hint="Claude Opus, Sonnet, Haiku…">
               <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  className="form-input"
-                  type="password"
-                  value={aiKeys.anthropic}
-                  onChange={(e) => setAiKeys((p) => ({ ...p, anthropic: e.target.value }))}
-                  placeholder="sk-ant-..."
-                  style={{ flex: 1 }}
-                />
+                <input className="form-input" type="password" value={aiKeys.anthropic} onChange={(e) => setAiKeys((p) => ({ ...p, anthropic: e.target.value }))} placeholder="sk-ant-..." style={{ flex: 1 }} />
                 {settings?.settings?.aiKeys?.anthropic && aiKeys.anthropic.startsWith('••••') && (
                   <span style={{ fontSize: 11, padding: '6px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-                    ✓ Configurada
+                    {i.aiKeyConfigured}
                   </span>
                 )}
               </div>
@@ -1076,39 +1309,32 @@ export default function SettingsPage() {
           </Section>
 
           <Section title="Google Gemini">
-            <Row label="API Key" hint="Modelos: Gemini 1.5 Pro, 1.5 Flash, 2.0 Flash">
+            <Row label="API Key" hint="Gemini 1.5 Pro, 1.5 Flash, 2.0 Flash…">
               <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  className="form-input"
-                  type="password"
-                  value={aiKeys.gemini}
-                  onChange={(e) => setAiKeys((p) => ({ ...p, gemini: e.target.value }))}
-                  placeholder="AIza..."
-                  style={{ flex: 1 }}
-                />
+                <input className="form-input" type="password" value={aiKeys.gemini} onChange={(e) => setAiKeys((p) => ({ ...p, gemini: e.target.value }))} placeholder="AIza..." style={{ flex: 1 }} />
                 {settings?.settings?.aiKeys?.gemini && aiKeys.gemini.startsWith('••••') && (
                   <span style={{ fontSize: 11, padding: '6px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-                    ✓ Configurada
+                    {i.aiKeyConfigured}
                   </span>
                 )}
               </div>
             </Row>
           </Section>
 
-          <Section title="Cómo usar las integraciones IA">
+          <Section title={i.aiSectionUsage}>
             <div style={{ fontSize: 13, color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ display: 'flex', gap: 10, padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 8 }}>
                 <span style={{ fontSize: 20 }}>🧠</span>
                 <div>
-                  <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>AI Chatbots automáticos</div>
-                  Crea bots en <strong>AI Chatbots</strong>, asígnalos a inboxes y actívalos. Cuando llegue un mensaje en esos inboxes, el bot responderá automáticamente usando el provider e API key configurados.
+                  <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>{i.aiChatbotsSection}</div>
+                  {i.aiChatbotsHint}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 10, padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 8 }}>
                 <span style={{ fontSize: 20 }}>✨</span>
                 <div>
-                  <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>AI Prompts asistidos</div>
-                  Los prompts en <strong>Prompts IA</strong> se ejecutan usando la API key del provider correspondiente.
+                  <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>{i.aiPromptsSection}</div>
+                  {i.aiPromptsHint}
                 </div>
               </div>
             </div>
@@ -1122,7 +1348,6 @@ export default function SettingsPage() {
                 setAiSaving(true); setAiSaved(false);
                 try {
                   const patch: Record<string, string> = {};
-                  // Only send keys that are new (not masked)
                   if (aiKeys.openai    && !aiKeys.openai.startsWith('••••'))    patch.openai    = aiKeys.openai;
                   if (aiKeys.anthropic && !aiKeys.anthropic.startsWith('••••')) patch.anthropic = aiKeys.anthropic;
                   if (aiKeys.gemini    && !aiKeys.gemini.startsWith('••••'))    patch.gemini    = aiKeys.gemini;
@@ -1135,37 +1360,36 @@ export default function SettingsPage() {
                 } finally { setAiSaving(false); }
               }}
             >
-              {aiSaving ? 'Guardando...' : '🔐 Guardar API Keys'}
+              {aiSaving ? i.saving : i.aiSaveKeys}
             </button>
           </div>
         </>
       )}
 
-      {/* ── Platform Tab (admin only) ─────────────────────────────────────── */}
-      {tab === 'platform' && isAdmin && (
+      {/* ── Platform Tab (owner only) ─────────────────────────────────────── */}
+      {tab === 'platform' && isOwner && (
         <>
           {platformSaved && (
             <div style={{ padding: '10px 16px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, marginBottom: 16, color: '#15803d', fontWeight: 600, fontSize: 13 }}>
-              ✅ Configuración de plataforma guardada
+              {i.platformSavedMsg}
             </div>
           )}
 
           <div style={{ padding: '12px 16px', background: '#fef9f0', border: '1px solid #fed7aa', borderRadius: 8, marginBottom: 20, fontSize: 13, color: '#9a3412', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
             <span style={{ fontSize: 18 }}>🔑</span>
             <div>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>Credenciales del operador</div>
-              Estas credenciales son usadas por todos los bots de todos los tenants. Solo los administradores pueden cambiarlas.
-              Los valores marcados como <strong>•••</strong> ya están configurados — déjalos así si no quieres cambiarlos.
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>{i.platformOperatorCreds}</div>
+              {i.platformCredHint}
               {Object.values(platformCfg).some((v) => v.fromEnv) && (
                 <div style={{ marginTop: 6, padding: '6px 10px', background: '#fef3c7', borderRadius: 6, fontSize: 12 }}>
-                  ⚠️ Algunos valores están configurados via variables de entorno. Al guardar desde aquí, se almacenan en BD y tienen prioridad sobre las env vars.
+                  {i.platformEnvHint}
                 </div>
               )}
             </div>
           </div>
 
-          <Section title="🤖 Inteligencia Artificial">
-            <Row label="Proveedor" hint="El proveedor de IA que usan todos los call bots y chatbots">
+          <Section title="🤖 AI">
+            <Row label="Provider" hint="AI provider for all call bots and chatbots">
               <select className="form-input" style={{ maxWidth: 240 }}
                 value={platformForm['ai.provider']}
                 onChange={(e) => setPlatformForm((p) => ({ ...p, 'ai.provider': e.target.value }))}>
@@ -1174,7 +1398,7 @@ export default function SettingsPage() {
                 <option value="gemini">Google Gemini</option>
               </select>
             </Row>
-            <Row label="API Key" hint="Clave del proveedor de IA seleccionado">
+            <Row label="API Key" hint="Key for the selected AI provider">
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <input className="form-input" type="password"
                   value={platformForm['ai.api_key']}
@@ -1182,11 +1406,11 @@ export default function SettingsPage() {
                   placeholder={platformForm['ai.provider'] === 'anthropic' ? 'sk-ant-...' : platformForm['ai.provider'] === 'gemini' ? 'AIza...' : 'sk-...'}
                   style={{ flex: 1, maxWidth: 400 }} />
                 {platformCfg['ai.api_key']?.masked && platformForm['ai.api_key'] === '••••••••' && (
-                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>✓ Configurada</span>
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
                 )}
               </div>
             </Row>
-            <Row label="Modelo" hint="Deja vacío para usar el modelo por defecto del proveedor">
+            <Row label="Model" hint="Leave empty to use the provider default">
               <input className="form-input" style={{ maxWidth: 300 }}
                 value={platformForm['ai.model']}
                 onChange={(e) => setPlatformForm((p) => ({ ...p, 'ai.model': e.target.value }))}
@@ -1194,8 +1418,44 @@ export default function SettingsPage() {
             </Row>
           </Section>
 
-          <Section title="📞 Voz (Telefonía)">
-            <Row label="Proveedor" hint="Proveedor de telefonía para los call bots">
+          <Section title="🔵 Meta (Facebook / Instagram)">
+            <Row label="App ID" hint="developers.facebook.com → Basic settings">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" style={{ maxWidth: 300 }}
+                  value={platformForm['meta.app_id']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'meta.app_id': e.target.value }))}
+                  placeholder="123456789012345" />
+                {platformCfg['meta.app_id']?.value && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
+                )}
+              </div>
+            </Row>
+            <Row label="App Secret" hint="Keep confidential">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" type="password" style={{ maxWidth: 400 }}
+                  value={platformForm['meta.app_secret']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'meta.app_secret': e.target.value }))}
+                  placeholder="••••••••••••••••••••••••••••••••" />
+                {platformCfg['meta.app_secret']?.masked && platformForm['meta.app_secret'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
+                )}
+              </div>
+            </Row>
+            <Row label="Callback URL" hint="Register this URL in Meta dashboard as Redirect URI">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                <code style={{ fontSize: 12, flex: 1, wordBreak: 'break-all' }}>
+                  {typeof window !== 'undefined' ? `${window.location.origin.replace('3000', '4000')}/connections/meta/callback` : 'http://localhost:4000/connections/meta/callback'}
+                </code>
+                <button type="button" className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px', flexShrink: 0 }}
+                  onClick={() => navigator.clipboard?.writeText(`${window.location.origin.replace('3000', '4000')}/connections/meta/callback`)}>
+                  {i.platformCopy}
+                </button>
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="📞 Voice (Telephony)">
+            <Row label="Provider" hint="Telephony provider for call bots">
               <select className="form-input" style={{ maxWidth: 240 }}
                 value={platformForm['voice.provider']}
                 onChange={(e) => setPlatformForm((p) => ({ ...p, 'voice.provider': e.target.value }))}>
@@ -1204,22 +1464,190 @@ export default function SettingsPage() {
                 <option value="telnyx">Telnyx</option>
               </select>
             </Row>
-            <Row label="Account SID" hint="ID de cuenta del proveedor de telefonía">
+            <Row label="Account SID" hint="Telephony provider account ID">
               <input className="form-input" style={{ maxWidth: 400 }}
                 value={platformForm['voice.account_sid']}
                 onChange={(e) => setPlatformForm((p) => ({ ...p, 'voice.account_sid': e.target.value }))}
                 placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
             </Row>
-            <Row label="Auth Token" hint="Token de autenticación del proveedor de telefonía">
+            <Row label="Auth Token" hint="Telephony provider auth token">
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <input className="form-input" type="password" style={{ flex: 1, maxWidth: 400 }}
                   value={platformForm['voice.auth_token']}
                   onChange={(e) => setPlatformForm((p) => ({ ...p, 'voice.auth_token': e.target.value }))}
                   placeholder="••••••••••••••••••••••••••••••••" />
                 {platformCfg['voice.auth_token']?.masked && platformForm['voice.auth_token'] === '••••••••' && (
-                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>✓ Configurado</span>
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
                 )}
               </div>
+            </Row>
+            <Row label="Webhook URLs" hint="Configure these URLs in Twilio for each call bot">
+              <div style={{ background: '#1e293b', borderRadius: 8, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 2 }}>
+                  Twilio → Phone Numbers → Voice webhook
+                </div>
+                {[
+                  { label: 'Voice webhook (A call comes in)', path: '/call-bots/twilio/{botId}/voice' },
+                  { label: 'Status callback', path: '/call-bots/twilio/{botId}/status' },
+                ].map(({ label, path }) => {
+                  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+                  const full = `${apiUrl}${path}`;
+                  return (
+                    <div key={path}>
+                      <div style={{ fontSize: 10, color: '#64748b', marginBottom: 3 }}>{label}:</div>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <code style={{ fontSize: 11, color: '#7dd3fc', wordBreak: 'break-all', flex: 1 }}>{full}</code>
+                        <button
+                          onClick={() => navigator.clipboard.writeText(full)}
+                          style={{ background: 'none', border: '1px solid #475569', borderRadius: 4, color: '#94a3b8', cursor: 'pointer', padding: '2px 8px', fontSize: 10, flexShrink: 0 }}
+                        >{i.platformCopy}</button>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
+                  Replace <code style={{ background: '#334155', padding: '1px 4px', borderRadius: 3, color: '#f8fafc' }}>{'{botId}'}</code> with the call bot ID.
+                </div>
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="🎙️ ElevenLabs">
+            <Row label="API Key" hint="Optional. If configured, call bots can use it as TTS provider">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" type="password" style={{ flex: 1, maxWidth: 400 }}
+                  value={platformForm['elevenlabs.api_key']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'elevenlabs.api_key': e.target.value }))}
+                  placeholder="sk_••••••••••••••••••••••••••••••••" />
+                {platformCfg['elevenlabs.api_key']?.masked && platformForm['elevenlabs.api_key'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
+                )}
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="💳 Stripe">
+            <Row label="Secret Key" hint="Stripe Dashboard → Developers → API keys → Secret key">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" type="password" style={{ flex: 1, maxWidth: 400 }}
+                  value={platformForm['stripe.secret_key']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'stripe.secret_key': e.target.value }))}
+                  placeholder="sk_live_••••••••••••••••••••••••••••••••" />
+                {platformCfg['stripe.secret_key']?.masked && platformForm['stripe.secret_key'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
+                )}
+              </div>
+            </Row>
+            <Row label="Publishable Key" hint="Stripe Dashboard → Developers → API keys → Publishable key">
+              <input className="form-input" style={{ maxWidth: 400 }}
+                value={platformForm['stripe.publishable_key']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'stripe.publishable_key': e.target.value }))}
+                placeholder="pk_live_••••••••••••••••••••••••••••••••" />
+            </Row>
+            <Row label="Webhook Secret" hint="Stripe Dashboard → Developers → Webhooks → Signing secret">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" type="password" style={{ flex: 1, maxWidth: 400 }}
+                  value={platformForm['stripe.webhook_secret']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'stripe.webhook_secret': e.target.value }))}
+                  placeholder="whsec_••••••••••••••••••••••••••••••••" />
+                {platformCfg['stripe.webhook_secret']?.masked && platformForm['stripe.webhook_secret'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
+                )}
+              </div>
+            </Row>
+            <Row label="Webhook URL" hint="Register this URL in Stripe → Developers → Webhooks">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                <code style={{ fontSize: 12, flex: 1, wordBreak: 'break-all' }}>
+                  {typeof window !== 'undefined' ? `${window.location.origin.replace('3000', '4000')}/billing/webhook` : 'http://localhost:4000/billing/webhook'}
+                </code>
+                <button type="button" className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px', flexShrink: 0 }}
+                  onClick={() => navigator.clipboard?.writeText(`${window.location.origin.replace('3000', '4000')}/billing/webhook`)}>
+                  {i.platformCopy}
+                </button>
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="💾 Backups">
+            <Row label="Enable backups" hint="Automatic pg_dump according to configured cron">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+                <div
+                  onClick={() => setPlatformForm((p) => ({ ...p, 'backup.enabled': p['backup.enabled'] === 'true' ? 'false' : 'true' }))}
+                  style={{
+                    width: 36, height: 20, borderRadius: 10, cursor: 'pointer', transition: 'background 0.2s',
+                    background: platformForm['backup.enabled'] === 'true' ? 'var(--primary)' : '#d1d5db',
+                    position: 'relative', flexShrink: 0,
+                  }}
+                >
+                  <div style={{
+                    position: 'absolute', top: 2, left: platformForm['backup.enabled'] === 'true' ? 18 : 2,
+                    width: 16, height: 16, borderRadius: '50%', background: '#fff',
+                    transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                  }} />
+                </div>
+                <span style={{ fontSize: 13 }}>{platformForm['backup.enabled'] === 'true' ? i.enabled : i.disabled}</span>
+              </label>
+            </Row>
+            <Row label="Schedule (cron)" hint="UTC cron expression. E.g: '0 2 * * *' = daily at 2am">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" style={{ maxWidth: 200, fontFamily: 'monospace' }}
+                  value={platformForm['backup.cron']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'backup.cron': e.target.value }))}
+                  placeholder="0 2 * * *" />
+                <select className="form-input" style={{ maxWidth: 180 }}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'backup.cron': e.target.value }))}
+                  value="">
+                  <option value="">{i.platformBackupPresets}</option>
+                  <option value="0 2 * * *">{i.platformBackupDaily}</option>
+                  <option value="0 2 * * 0">{i.platformBackupWeekly}</option>
+                  <option value="0 2 1 * *">{i.platformBackupMonthly}</option>
+                  <option value="0 */6 * * *">{i.platformBackupEvery6h}</option>
+                </select>
+              </div>
+            </Row>
+            <Row label="Retention (days)" hint="Older backups are deleted automatically">
+              <input type="number" className="form-input" style={{ maxWidth: 120 }}
+                value={platformForm['backup.retention_days']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'backup.retention_days': e.target.value }))}
+                min={1} max={365} />
+            </Row>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', margin: '12px 0 4px', padding: '0 0 4px', borderBottom: '1px solid var(--border)' }}>
+              S3 (optional — if not configured, backups are stored locally on the server)
+            </div>
+            <Row label="Bucket" hint="S3 bucket name (or compatible: DigitalOcean Spaces, MinIO…)">
+              <input className="form-input" style={{ maxWidth: 300 }}
+                value={platformForm['backup.s3_bucket']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'backup.s3_bucket': e.target.value }))}
+                placeholder="mi-crm-backups" />
+            </Row>
+            <Row label="Region" hint="AWS region of the bucket">
+              <input className="form-input" style={{ maxWidth: 200 }}
+                value={platformForm['backup.s3_region']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'backup.s3_region': e.target.value }))}
+                placeholder="us-east-1" />
+            </Row>
+            <Row label="Access Key ID" hint="AWS IAM Access Key ID with s3:PutObject on the bucket">
+              <input className="form-input" style={{ maxWidth: 340 }}
+                value={platformForm['backup.s3_access_key']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'backup.s3_access_key': e.target.value }))}
+                placeholder="AKIAIOSFODNN7EXAMPLE" />
+            </Row>
+            <Row label="Secret Access Key" hint="AWS IAM Secret Access Key">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" type="password" style={{ flex: 1, maxWidth: 400 }}
+                  value={platformForm['backup.s3_secret_key']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'backup.s3_secret_key': e.target.value }))}
+                  placeholder="••••••••••••••••••••••••••••••••" />
+                {platformCfg['backup.s3_secret_key']?.masked && platformForm['backup.s3_secret_key'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
+                )}
+              </div>
+            </Row>
+            <Row label="Prefix (path)" hint="Folder inside the bucket">
+              <input className="form-input" style={{ maxWidth: 240 }}
+                value={platformForm['backup.s3_prefix']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'backup.s3_prefix': e.target.value }))}
+                placeholder="backups/" />
             </Row>
           </Section>
 
@@ -1234,7 +1662,7 @@ export default function SettingsPage() {
                   setTimeout(() => setPlatformSaved(false), 3000);
                 } finally { setPlatformSaving(false); }
               }}>
-              {platformSaving ? 'Guardando...' : '💾 Guardar configuración de plataforma'}
+              {platformSaving ? i.saving : i.platformSaveBtn}
             </button>
           </div>
         </>
@@ -1245,6 +1673,8 @@ export default function SettingsPage() {
           ann={editingAnn}
           onClose={() => setShowAnnModal(false)}
           onSaved={() => { setShowAnnModal(false); load(); }}
+          isOwner={isOwner}
+          defaultIsSystem={annBroadcastMode}
         />
       )}
     </div>

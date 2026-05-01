@@ -6,12 +6,10 @@ import {
   getCompanyContacts, getCompanyDeals,
   type Company,
 } from '@/lib/api';
+import { useLangCtx } from '@/lib/lang-context';
+import { APP } from '@/lib/i18n/app';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function currency(v: string | number) {
-  return new Intl.NumberFormat('es', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(v) || 0);
-}
 
 const INDUSTRIES = [
   'Tecnología', 'Salud', 'Educación', 'Finanzas', 'Retail',
@@ -31,6 +29,8 @@ interface CompanyModalProps {
 }
 
 function CompanyModal({ company, onClose, onSaved }: CompanyModalProps) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [form, setForm] = useState({
     name: company?.name ?? '',
     industry: company?.industry ?? '',
@@ -39,6 +39,10 @@ function CompanyModal({ company, onClose, onSaved }: CompanyModalProps) {
   const [saving, setSaving] = useState(false);
 
   const set = (k: keyof typeof form, v: string) => setForm((p) => ({ ...p, [k]: v }));
+
+  function currency(v: string | number) {
+    return new Intl.NumberFormat(i.locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(v) || 0);
+  }
 
   async function handleSave() {
     if (!form.name.trim()) return;
@@ -54,32 +58,32 @@ function CompanyModal({ company, onClose, onSaved }: CompanyModalProps) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 440 }}>
         <div className="modal-header">
-          <h2 className="modal-title">{company ? 'Editar empresa' : 'Nueva empresa'}</h2>
+          <h2 className="modal-title">{company ? i.editCompany : i.newCompany}</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
-            <label className="form-label">Nombre *</label>
+            <label className="form-label">{i.name} *</label>
             <input className="form-input" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Ej: Acme Corp" autoFocus />
           </div>
           <div>
-            <label className="form-label">Industria</label>
+            <label className="form-label">{i.industry}</label>
             <select className="form-input" value={form.industry} onChange={(e) => set('industry', e.target.value)}>
-              <option value="">— Seleccionar —</option>
-              {INDUSTRIES.map((i) => <option key={i} value={i}>{i}</option>)}
+              <option value="">— {i.none} —</option>
+              {INDUSTRIES.map((ind) => <option key={ind} value={ind}>{ind}</option>)}
             </select>
           </div>
           <div>
-            <label className="form-label">Sitio web</label>
+            <label className="form-label">{i.website}</label>
             <input className="form-input" value={form.website} onChange={(e) => set('website', e.target.value)} placeholder="https://empresa.com" type="url" />
           </div>
         </div>
 
         <div className="modal-footer" style={{ marginTop: 20 }}>
-          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-secondary" onClick={onClose}>{i.cancel}</button>
           <button className="btn btn-primary" disabled={saving || !form.name.trim()} onClick={handleSave}>
-            {saving ? 'Guardando...' : company ? 'Guardar cambios' : 'Crear empresa'}
+            {saving ? i.saving : company ? i.save : i.newCompany}
           </button>
         </div>
       </div>
@@ -90,10 +94,16 @@ function CompanyModal({ company, onClose, onSaved }: CompanyModalProps) {
 // ── Company Detail Drawer ─────────────────────────────────────────────────────
 
 function CompanyDetail({ company, onClose, onEdit }: { company: Company; onClose: () => void; onEdit: () => void }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [tab, setTab] = useState<'contacts' | 'deals'>('contacts');
   const [contacts, setContacts] = useState<any[]>([]);
   const [deals, setDeals] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+
+  function currency(v: string | number) {
+    return new Intl.NumberFormat(i.locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(v) || 0);
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -138,7 +148,7 @@ function CompanyDetail({ company, onClose, onEdit }: { company: Company; onClose
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={onEdit}>Editar</button>
+              <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={onEdit}>{i.edit}</button>
               <button className="modal-close" onClick={onClose}>✕</button>
             </div>
           </div>
@@ -146,9 +156,9 @@ function CompanyDetail({ company, onClose, onEdit }: { company: Company; onClose
           {/* Stats */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1, background: 'var(--border)', borderRadius: 8, overflow: 'hidden', marginTop: 16 }}>
             {[
-              { label: 'Contactos', value: company.contact_count ?? 0, color: '#6366f1' },
-              { label: 'Deals', value: company.deal_count ?? 0, color: '#3b82f6' },
-              { label: 'Pipeline', value: currency(company.pipeline_value ?? 0), color: '#22c55e' },
+              { label: i.contacts, value: company.contact_count ?? 0, color: '#6366f1' },
+              { label: i.deals, value: company.deal_count ?? 0, color: '#3b82f6' },
+              { label: i.pipeline, value: currency(company.pipeline_value ?? 0), color: '#22c55e' },
             ].map((s) => (
               <div key={s.label} style={{ background: 'var(--bg-card)', padding: '12px 0', textAlign: 'center' }}>
                 <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.value}</div>
@@ -170,18 +180,18 @@ function CompanyDetail({ company, onClose, onEdit }: { company: Company; onClose
                 color: tab === t ? 'var(--primary)' : 'var(--text-muted)',
               }}
             >
-              {t === 'contacts' ? `Contactos (${contacts.length})` : `Deals (${deals.length})`}
+              {t === 'contacts' ? `${i.contacts} (${contacts.length})` : `${i.deals} (${deals.length})`}
             </button>
           ))}
         </div>
 
         {/* Content */}
         <div style={{ padding: '16px 24px', flex: 1 }}>
-          {loading && <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Cargando...</div>}
+          {loading && <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>{i.loading}</div>}
 
           {!loading && tab === 'contacts' && (
             contacts.length === 0
-              ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Sin contactos asociados.</div>
+              ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>{i.noContactsLinked}</div>
               : contacts.map((c) => (
                 <div key={c.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)', display: 'flex', gap: 10, alignItems: 'center' }}>
                   <div style={{
@@ -201,7 +211,7 @@ function CompanyDetail({ company, onClose, onEdit }: { company: Company; onClose
 
           {!loading && tab === 'deals' && (
             deals.length === 0
-              ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Sin deals asociados.</div>
+              ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>{i.noDealsLinked}</div>
               : deals.map((d) => (
                 <div key={d.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
@@ -228,6 +238,13 @@ function CompanyDetail({ company, onClose, onEdit }: { company: Company; onClose
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function CompaniesPage() {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+
+  function currency(v: string | number) {
+    return new Intl.NumberFormat(i.locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(v) || 0);
+  }
+
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -251,7 +268,7 @@ export default function CompaniesPage() {
   );
 
   async function handleDelete(c: Company) {
-    if (!confirm(`¿Eliminar "${c.name}"?`)) return;
+    if (!confirm(`${i.delete} "${c.name}"?`)) return;
     await deleteCompany(c.id);
     setSelected(null);
     load();
@@ -263,20 +280,20 @@ export default function CompaniesPage() {
     <div className="page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Empresas</h1>
-          <p className="page-subtitle">Gestiona las empresas de tus contactos y deals</p>
+          <h1 className="page-title">{i.companies}</h1>
+          <p className="page-subtitle">{i.companiesSubtitle}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>+ Nueva empresa</button>
+        <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>+ {i.newCompany}</button>
       </div>
 
       {/* Summary stats */}
       {!loading && companies.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
           {[
-            { label: 'Total empresas', value: companies.length, color: '#6366f1' },
-            { label: 'Con contactos', value: companies.filter((c) => (c.contact_count ?? 0) > 0).length, color: '#3b82f6' },
-            { label: 'Con deals', value: companies.filter((c) => (c.deal_count ?? 0) > 0).length, color: '#22c55e' },
-            { label: 'Pipeline total', value: currency(companies.reduce((s, c) => s + Number(c.pipeline_value ?? 0), 0)), color: '#f59e0b' },
+            { label: i.totalCompanies, value: companies.length, color: '#6366f1' },
+            { label: i.withContacts, value: companies.filter((c) => (c.contact_count ?? 0) > 0).length, color: '#3b82f6' },
+            { label: i.withDeals, value: companies.filter((c) => (c.deal_count ?? 0) > 0).length, color: '#22c55e' },
+            { label: i.totalPipeline, value: currency(companies.reduce((s, c) => s + Number(c.pipeline_value ?? 0), 0)), color: '#f59e0b' },
           ].map((s) => (
             <div key={s.label} className="card" style={{ padding: '16px 20px' }}>
               <div style={{ fontSize: 22, fontWeight: 700, color: s.color }}>{s.value}</div>
@@ -291,7 +308,7 @@ export default function CompaniesPage() {
         <input
           className="form-input"
           style={{ maxWidth: 320 }}
-          placeholder="Buscar empresa o industria..."
+          placeholder={i.searchCompanyHint}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -299,19 +316,19 @@ export default function CompaniesPage() {
 
       {/* Table */}
       {loading ? (
-        <div style={{ color: 'var(--text-muted)', padding: 40, textAlign: 'center' }}>Cargando empresas...</div>
+        <div style={{ color: 'var(--text-muted)', padding: 40, textAlign: 'center' }}>{i.loading}</div>
       ) : filtered.length === 0 ? (
         <div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>🏢</div>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>{search ? 'Sin resultados' : 'No hay empresas aún'}</div>
-          {!search && <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => { setEditing(null); setShowModal(true); }}>+ Crear primera empresa</button>}
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>{search ? i.noResults : i.noCompaniesYet}</div>
+          {!search && <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => { setEditing(null); setShowModal(true); }}>+ {i.createFirstCompany}</button>}
         </div>
       ) : (
         <div className="card" style={{ overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: 'var(--bg-hover)', borderBottom: '1px solid var(--border)' }}>
-                {['Empresa', 'Industria', 'Sitio web', 'Contactos', 'Deals', 'Pipeline', 'Acciones'].map((h) => (
+                {[i.companyLabel, i.industry, i.website, i.contacts, i.deals, i.pipeline, i.actions].map((h) => (
                   <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
@@ -356,8 +373,8 @@ export default function CompaniesPage() {
                   </td>
                   <td style={{ padding: '12px 16px' }} onClick={(e) => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => { setEditing(c); setShowModal(true); }}>Editar</button>
-                      <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px', color: '#ef4444', borderColor: '#ef444444' }} onClick={() => handleDelete(c)}>Eliminar</button>
+                      <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => { setEditing(c); setShowModal(true); }}>{i.edit}</button>
+                      <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px', color: '#ef4444', borderColor: '#ef444444' }} onClick={() => handleDelete(c)}>{i.delete}</button>
                     </div>
                   </td>
                 </tr>

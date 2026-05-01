@@ -2,13 +2,15 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import {
-  getConversationsReport, getDealsReport, getTeamsReport, getContactsReport,
+  getConversationsReport, getDealsReport, getTeamsReport, getContactsReport, getCallsReport, getSlaReport, getCsatReport,
 } from '@/lib/api';
+import { useLangCtx } from '@/lib/lang-context';
+import { APP } from '@/lib/i18n/app';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function currency(v: any) {
-  return new Intl.NumberFormat('es', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(v) || 0);
+function makeCurrency(locale: string) {
+  return (v: any) => new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(v) || 0);
 }
 
 function pct(a: number, b: number) {
@@ -94,15 +96,30 @@ function DateRange({ from, to, onChange }: { from: string; to: string; onChange:
 
 // ── Tab types ─────────────────────────────────────────────────────────────────
 
-type TabKey = 'conversations' | 'deals' | 'teams' | 'contacts';
+type TabKey = 'conversations' | 'deals' | 'calls' | 'teams' | 'contacts' | 'sla' | 'csat';
+
+// ── CSV export ────────────────────────────────────────────────────────────────
+
+function exportCSV(rows: Record<string, any>[], filename: string) {
+  if (!rows?.length) return;
+  const headers = Object.keys(rows[0]);
+  const csv = [headers.join(','), ...rows.map((r) => headers.map((h) => JSON.stringify(r[h] ?? '')).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = filename;
+  a.click();
+}
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ReportsPage() {
+  const { lang } = useLangCtx();
+  const i18n = APP[lang];
+  const currency = makeCurrency(i18n.locale);
   const [tab, setTab] = useState<TabKey>('conversations');
   const [from, setFrom] = useState(() => new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10));
   const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
-  const [data, setData] = useState<Record<TabKey, any>>({ conversations: null, deals: null, teams: null, contacts: null });
+  const [data, setData] = useState<Record<TabKey, any>>({ conversations: null, deals: null, calls: null, teams: null, contacts: null, sla: null, csat: null });
   const [loading, setLoading] = useState(false);
 
   const loadTab = useCallback(async (t: TabKey, f: string, toDate: string) => {
@@ -111,8 +128,11 @@ export default function ReportsPage() {
       let result: any;
       if (t === 'conversations') result = await getConversationsReport(f, toDate);
       else if (t === 'deals') result = await getDealsReport(f, toDate);
+      else if (t === 'calls') result = await getCallsReport(f, toDate);
       else if (t === 'teams') result = await getTeamsReport();
       else if (t === 'contacts') result = await getContactsReport(f, toDate);
+      else if (t === 'sla') result = await getSlaReport(f, toDate);
+      else if (t === 'csat') result = await getCsatReport(f, toDate);
       setData((p) => ({ ...p, [t]: result }));
     } catch { /* ignore */ }
     finally { setLoading(false); }
@@ -123,18 +143,21 @@ export default function ReportsPage() {
   const d = data[tab];
 
   const TABS: { key: TabKey; label: string; icon: string }[] = [
-    { key: 'conversations', label: 'Conversaciones', icon: '💬' },
-    { key: 'deals',         label: 'Ventas / Deals',  icon: '💼' },
-    { key: 'teams',         label: 'Equipos & Colas', icon: '🏆' },
-    { key: 'contacts',      label: 'Contactos',       icon: '👥' },
+    { key: 'conversations', label: i18n.conversations,     icon: '💬' },
+    { key: 'deals',         label: i18n.reportsSalesDeals, icon: '💼' },
+    { key: 'calls',         label: i18n.reportsCalls,      icon: '📞' },
+    { key: 'teams',         label: i18n.reportsTeams,      icon: '🏆' },
+    { key: 'contacts',      label: i18n.contacts,          icon: '👥' },
+    { key: 'sla',           label: i18n.reportsSla,        icon: '⏱️' },
+    { key: 'csat',          label: 'CSAT',                 icon: '⭐' },
   ];
 
   return (
     <div className="page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Reportes & Analytics</h1>
-          <p className="page-subtitle">Métricas detalladas de todos los módulos del CRM</p>
+          <h1 className="page-title">{i18n.reportsTitle}</h1>
+          <p className="page-subtitle">{i18n.reportsSubtitle}</p>
         </div>
       </div>
 
@@ -152,14 +175,29 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {/* Date range (not for teams) */}
+      {/* Date range + export */}
       {tab !== 'teams' && (
-        <div style={{ marginBottom: 20 }}>
+        <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
           <DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
+          <button
+            className="btn btn-secondary"
+            style={{ fontSize: 12, padding: '5px 12px' }}
+            onClick={() => {
+              if (!d) return;
+              if (tab === 'conversations') exportCSV(d.byDay, `conversaciones_${from}_${to}.csv`);
+              else if (tab === 'deals') exportCSV(d.byDay, `deals_${from}_${to}.csv`);
+              else if (tab === 'calls') exportCSV(d.byDay, `llamadas_${from}_${to}.csv`);
+              else if (tab === 'contacts') exportCSV(d.byDay, `contactos_${from}_${to}.csv`);
+              else if (tab === 'sla') exportCSV(d.byDay, `sla_${from}_${to}.csv`);
+              else if (tab === 'csat') exportCSV(d.recent, `csat_${from}_${to}.csv`);
+            }}
+          >
+            ⬇ {i18n.exportCSV}
+          </button>
         </div>
       )}
 
-      {loading && <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Cargando reporte...</div>}
+      {loading && <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>{i18n.loading}</div>}
 
       {/* ── Conversations Tab ──────────────────────────────────────────────── */}
       {!loading && tab === 'conversations' && d && (
@@ -297,6 +335,74 @@ export default function ReportsPage() {
         </>
       )}
 
+      {/* ── Calls Tab ─────────────────────────────────────────────────────── */}
+      {!loading && tab === 'calls' && d && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+            <Stat label="Total llamadas"   value={d.summary.total}     color="#6366f1" />
+            <Stat label="Atendidas"        value={d.summary.handled}   color="#22c55e" sub={d.summary.total ? `${Math.round(d.summary.handled/d.summary.total*100)}%` : '0%'} />
+            <Stat label="Abandonadas"      value={d.summary.abandoned} color="#f59e0b" />
+            <Stat label="Duración media"   value={`${Math.floor((d.summary.avg_duration_secs||0)/60)}m ${(d.summary.avg_duration_secs||0)%60}s`} color="#3b82f6" />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 16 }}>
+            <Section title="Llamadas por día">
+              <BarChart data={d.byDay} valueKey="total" labelKey="day" color="#6366f1" height={80} />
+            </Section>
+            <Section title="Por resultado">
+              {d.byOutcome.map((o: any) => {
+                const cfg: Record<string, string> = { handled: '#22c55e', abandoned: '#f59e0b', failed: '#ef4444' };
+                const label: Record<string, string> = { handled: 'Atendida', abandoned: 'Abandonada', failed: 'Fallida' };
+                return (
+                  <div key={o.outcome} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ fontSize: 13, color: cfg[o.outcome] ?? 'var(--text)', fontWeight: 600 }}>{label[o.outcome] ?? o.outcome}</span>
+                    <span style={{ fontWeight: 700 }}>{o.count}</span>
+                  </div>
+                );
+              })}
+            </Section>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <Section title="Rendimiento por bot">
+              {d.byBot.length === 0
+                ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Sin datos</div>
+                : d.byBot.map((b: any) => (
+                  <div key={b.bot} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+                    <span style={{ fontWeight: 500 }}>🤖 {b.bot}</span>
+                    <div style={{ display: 'flex', gap: 12, color: 'var(--text-muted)' }}>
+                      <span style={{ color: '#22c55e' }}>✓ {b.handled}</span>
+                      <span>{b.total} total</span>
+                      <span>{Math.floor((b.avg_duration||0)/60)}m avg</span>
+                    </div>
+                  </div>
+                ))
+              }
+            </Section>
+            <Section title="Duración de llamadas">
+              {[
+                { label: '< 1 minuto', value: d.avgDuration.under_1min, color: '#f59e0b' },
+                { label: '1 – 5 minutos', value: d.avgDuration.one_to_5min, color: '#22c55e' },
+                { label: '> 5 minutos', value: d.avgDuration.over_5min, color: '#6366f1' },
+              ].map((r) => {
+                const total = d.summary.total || 1;
+                return (
+                  <div key={r.label} style={{ marginBottom: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ color: r.color, fontWeight: 600 }}>{r.label}</span>
+                      <span>{r.value} ({Math.round((r.value/total)*100)}%)</span>
+                    </div>
+                    <div style={{ height: 6, background: 'var(--border)', borderRadius: 3 }}>
+                      <div style={{ width: `${(r.value/total)*100}%`, height: '100%', background: r.color, borderRadius: 3 }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </Section>
+          </div>
+        </>
+      )}
+
       {/* ── Teams Tab ──────────────────────────────────────────────────────── */}
       {!loading && tab === 'teams' && d && (
         <>
@@ -416,6 +522,159 @@ export default function ReportsPage() {
           </div>
         </>
       )}
+
+      {/* ── SLA Tab ───────────────────────────────────────────────────────── */}
+      {!loading && tab === 'sla' && d && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+            <Stat
+              label="Tiempo 1ª respuesta (prom)"
+              value={d.summary.avg_first_response_secs != null ? fmtSecs(d.summary.avg_first_response_secs) : '—'}
+              color="#3b82f6"
+            />
+            <Stat
+              label="Mediana 1ª respuesta"
+              value={d.summary.median_first_response_secs != null ? fmtSecs(d.summary.median_first_response_secs) : '—'}
+              color="#6366f1"
+            />
+            <Stat
+              label="Tiempo resolución (prom)"
+              value={d.summary.avg_resolution_secs != null ? fmtSecs(d.summary.avg_resolution_secs) : '—'}
+              color="#f59e0b"
+            />
+            <Stat
+              label="Resueltas en ≤5 min"
+              value={pct(d.summary.within_5min, d.summary.with_response)}
+              sub={`${d.summary.within_5min} de ${d.summary.with_response} conv`}
+              color="#22c55e"
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 16 }}>
+            <Section title="Tiempo de 1ª respuesta por día (segundos)">
+              <BarChart data={d.byDay} valueKey="avg_secs" labelKey="day" color="#3b82f6" height={80} />
+            </Section>
+            <Section title="Por agente (prom. segundos)">
+              {d.byAgent.length === 0
+                ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Sin datos</div>
+                : d.byAgent.map((a: any) => (
+                  <div key={a.agent} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+                    <span>{a.agent}</span>
+                    <span style={{ fontWeight: 700, color: '#3b82f6' }}>{fmtSecs(a.avg_secs)}</span>
+                  </div>
+                ))
+              }
+            </Section>
+          </div>
+
+          <Section title="Conversaciones con mayor tiempo de respuesta">
+            {d.worst.length === 0
+              ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Sin datos en el período</div>
+              : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                      <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Asunto</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Contacto</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Espera 1ª resp.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.worst.map((w: any) => (
+                      <tr key={w.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '6px 8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{w.subject || '(Sin asunto)'}</td>
+                        <td style={{ padding: '6px 8px', color: 'var(--text-muted)' }}>{w.contact_name || '—'}</td>
+                        <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: '#ef4444' }}>{fmtSecs(w.first_response_secs)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )
+            }
+          </Section>
+        </>
+      )}
+
+      {/* ── CSAT Tab ──────────────────────────────────────────────────────── */}
+      {!loading && tab === 'csat' && d && (() => {
+        const s = d.summary ?? {};
+        const total = s.total_responses ?? 0;
+        const dist: { stars: number; count: number; color: string }[] = [
+          { stars: 5, count: s.five_star  ?? 0, color: '#22c55e' },
+          { stars: 4, count: s.four_star  ?? 0, color: '#84cc16' },
+          { stars: 3, count: s.three_star ?? 0, color: '#f59e0b' },
+          { stars: 2, count: s.two_star   ?? 0, color: '#f97316' },
+          { stars: 1, count: s.one_star   ?? 0, color: '#ef4444' },
+        ];
+        return (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+              <Stat label="Puntuación media" value={s.avg_score != null ? `${Number(s.avg_score).toFixed(2)} ★` : '—'} color="#f59e0b" />
+              <Stat label="Respuestas recibidas" value={String(total)} color="#3b82f6" />
+              <Stat label="Pendientes" value={String(s.pending ?? 0)} color="#6366f1" />
+              <Stat label="Tasa de respuesta" value={total + (s.pending ?? 0) > 0 ? pct(total, total + (s.pending ?? 0)) : '—'} color="#22c55e" />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 16, marginBottom: 16 }}>
+              <Section title="Distribución de valoraciones">
+                {dist.map(({ stars, count, color }) => (
+                  <div key={stars} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 13, width: 20, textAlign: 'right', color: 'var(--text-muted)' }}>{stars}★</span>
+                    <div style={{ flex: 1, background: 'var(--border)', borderRadius: 4, height: 14, overflow: 'hidden' }}>
+                      <div style={{ width: total > 0 ? `${(count / total) * 100}%` : '0%', background: color, height: '100%', borderRadius: 4 }} />
+                    </div>
+                    <span style={{ fontSize: 12, width: 28, textAlign: 'right', color: 'var(--text-muted)' }}>{count}</span>
+                  </div>
+                ))}
+              </Section>
+              <Section title="Puntuación media por día">
+                <BarChart data={d.byDay} valueKey="avg_score" labelKey="day" color="#f59e0b" height={80} />
+              </Section>
+            </div>
+
+            <Section title="Valoraciones recientes">
+              {d.recent.length === 0
+                ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Sin valoraciones en el período</div>
+                : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                        <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Contacto</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Asunto</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600 }}>Nota</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Comentario</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Fecha</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {d.recent.map((r: any) => (
+                        <tr key={r.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '6px 8px' }}>{r.contact_name || '—'}</td>
+                          <td style={{ padding: '6px 8px', color: 'var(--text-muted)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.subject || '—'}</td>
+                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                            <span style={{ fontWeight: 700, color: ['','#ef4444','#f97316','#f59e0b','#84cc16','#22c55e'][r.score] }}>{r.score}★</span>
+                          </td>
+                          <td style={{ padding: '6px 8px', color: 'var(--text-muted)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.comment || '—'}</td>
+                          <td style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{new Date(r.submitted_at).toLocaleDateString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )
+              }
+            </Section>
+          </>
+        );
+      })()}
     </div>
   );
+}
+
+function fmtSecs(s: number): string {
+  if (s == null || isNaN(s)) return '—';
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }

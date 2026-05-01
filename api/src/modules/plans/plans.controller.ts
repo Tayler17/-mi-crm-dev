@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantId } from '../../common/decorators/tenant.decorator';
+import { calculateOverage } from '../../common/utils/limits';
 
 /** Public endpoint — no JWT required */
 @Controller('plans/public')
@@ -31,7 +32,9 @@ export class PlansController {
       `SELECT t.*, p.name AS plan_name, p.slug AS plan_slug,
               p.max_users, p.max_contacts, p.max_inboxes, p.max_campaigns,
               p.max_automations, p.max_flows, p.max_call_bots, p.max_ai_chatbots,
-              p.max_messages_month, p.has_call_bots, p.has_ai_chatbots,
+              p.max_messages_month, p.max_call_minutes, p.allow_own_api_keys, p.allow_overage,
+              p.extra_message_price, p.extra_call_minute_price,
+              p.has_call_bots, p.has_ai_chatbots,
               p.has_automations, p.has_flows, p.has_reports, p.has_api_access,
               p.has_webhooks, p.price, p.billing_period, p.color
        FROM tenants t
@@ -40,31 +43,48 @@ export class PlansController {
       [tenantId],
     );
 
-    const [[users], [contacts], [inboxes], [campaigns], [automations], [flows], [callBots], [aiChatbots]] =
-      await Promise.all([
-        this.db.query(`SELECT COUNT(*)::int AS count FROM users WHERE tenant_id=$1 AND is_active=true`, [tenantId]),
-        this.db.query(`SELECT COUNT(*)::int AS count FROM contacts WHERE tenant_id=$1`, [tenantId]),
-        this.db.query(`SELECT COUNT(*)::int AS count FROM inboxes WHERE tenant_id=$1`, [tenantId]),
-        this.db.query(`SELECT COUNT(*)::int AS count FROM campaigns WHERE tenant_id=$1`, [tenantId]),
-        this.db.query(`SELECT COUNT(*)::int AS count FROM automation_rules WHERE tenant_id=$1`, [tenantId]),
-        this.db.query(`SELECT COUNT(*)::int AS count FROM conversation_flows WHERE tenant_id=$1`, [tenantId]),
-        this.db.query(`SELECT COUNT(*)::int AS count FROM call_bots WHERE tenant_id=$1`, [tenantId]),
-        this.db.query(`SELECT COUNT(*)::int AS count FROM ai_chatbots WHERE tenant_id=$1`, [tenantId]),
-      ]);
+    const [
+      [users], [contacts], [inboxes], [campaigns], [automations], [flows], [callBots], [aiChatbots],
+      [aiMessages], [callStats],
+    ] = await Promise.all([
+      this.db.query(`SELECT COUNT(*)::int AS count FROM users WHERE tenant_id=$1 AND is_active=true`, [tenantId]),
+      this.db.query(`SELECT COUNT(*)::int AS count FROM contacts WHERE tenant_id=$1`, [tenantId]),
+      this.db.query(`SELECT COUNT(*)::int AS count FROM inboxes WHERE tenant_id=$1`, [tenantId]),
+      this.db.query(`SELECT COUNT(*)::int AS count FROM campaigns WHERE tenant_id=$1`, [tenantId]),
+      this.db.query(`SELECT COUNT(*)::int AS count FROM automation_rules WHERE tenant_id=$1`, [tenantId]),
+      this.db.query(`SELECT COUNT(*)::int AS count FROM conversation_flows WHERE tenant_id=$1`, [tenantId]),
+      this.db.query(`SELECT COUNT(*)::int AS count FROM call_bots WHERE tenant_id::text=$1`, [tenantId]),
+      this.db.query(`SELECT COUNT(*)::int AS count FROM ai_chatbots WHERE tenant_id::text=$1`, [tenantId]),
+      this.db.query(
+        `SELECT COUNT(*)::int AS count FROM messages m
+         JOIN conversations cv ON cv.id = m.conversation_id
+         WHERE cv.tenant_id=$1 AND m.sender_type='bot' AND m.created_at >= date_trunc('month', NOW())`,
+        [tenantId],
+      ),
+      this.db.query(
+        `SELECT COUNT(*)::int AS calls, COALESCE(SUM(duration),0)::int AS seconds
+         FROM call_logs WHERE tenant_id::text=$1 AND created_at >= date_trunc('month', NOW())`,
+        [tenantId],
+      ),
+    ]);
 
-    return {
-      tenant,
-      usage: {
-        users:       users.count,
-        contacts:    contacts.count,
-        inboxes:     inboxes.count,
-        campaigns:   campaigns.count,
-        automations: automations.count,
-        flows:       flows.count,
-        callBots:    callBots.count,
-        aiChatbots:  aiChatbots.count,
-      },
+    const usageObj = {
+      users:            users.count,
+      contacts:         contacts.count,
+      inboxes:          inboxes.count,
+      campaigns:        campaigns.count,
+      automations:      automations.count,
+      flows:            flows.count,
+      callBots:         callBots.count,
+      aiChatbots:       aiChatbots.count,
+      aiMessagesMonth:  aiMessages.count,
+      callsMonth:       callStats.calls,
+      callMinutesMonth: Math.ceil(callStats.seconds / 60),
     };
+
+    const overage = tenant ? calculateOverage(usageObj, tenant) : null;
+
+    return { tenant, usage: usageObj, overage };
   }
 
   // ── Admin: CRUD plans ──────────────────────────────────────────────────────
@@ -85,10 +105,12 @@ export class PlansController {
     const [plan] = await this.db.query(
       `INSERT INTO plans (name, slug, description, price, currency, billing_period, position, color,
          max_users, max_contacts, max_inboxes, max_campaigns, max_automations, max_flows,
-         max_call_bots, max_ai_chatbots, max_messages_month,
+         max_call_bots, max_ai_chatbots, max_messages_month, max_call_minutes,
          has_call_bots, has_ai_chatbots, has_automations, has_flows, has_reports,
-         has_api_access, has_webhooks, is_active, is_public)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+         has_api_access, has_webhooks, allow_own_api_keys, allow_overage,
+         extra_message_price, extra_call_minute_price,
+         is_active, is_public, stripe_price_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
        RETURNING *`,
       [
         dto.name, dto.slug, dto.description ?? null, dto.price ?? 0, dto.currency ?? 'USD',
@@ -96,10 +118,14 @@ export class PlansController {
         dto.maxUsers ?? 3, dto.maxContacts ?? 1000, dto.maxInboxes ?? 2,
         dto.maxCampaigns ?? 5, dto.maxAutomations ?? 10, dto.maxFlows ?? 5,
         dto.maxCallBots ?? 0, dto.maxAiChatbots ?? 0, dto.maxMessagesMonth ?? 1000,
+        dto.maxCallMinutes ?? 0,
         dto.hasCallBots ?? false, dto.hasAiChatbots ?? false,
         dto.hasAutomations ?? true, dto.hasFlows ?? true, dto.hasReports ?? false,
         dto.hasApiAccess ?? false, dto.hasWebhooks ?? false,
+        dto.allowOwnApiKeys ?? false, dto.allowOverage ?? false,
+        dto.extraMessagePrice ?? 0, dto.extraCallMinutePrice ?? 0,
         dto.isActive ?? true, dto.isPublic ?? true,
+        dto.stripePriceId ?? null,
       ],
     );
     return plan;
@@ -115,10 +141,13 @@ export class PlansController {
       maxUsers: 'max_users', maxContacts: 'max_contacts', maxInboxes: 'max_inboxes',
       maxCampaigns: 'max_campaigns', maxAutomations: 'max_automations', maxFlows: 'max_flows',
       maxCallBots: 'max_call_bots', maxAiChatbots: 'max_ai_chatbots',
-      maxMessagesMonth: 'max_messages_month', hasCallBots: 'has_call_bots',
-      hasAiChatbots: 'has_ai_chatbots', hasAutomations: 'has_automations',
-      hasFlows: 'has_flows', hasReports: 'has_reports', hasApiAccess: 'has_api_access',
-      hasWebhooks: 'has_webhooks', isActive: 'is_active', isPublic: 'is_public',
+      maxMessagesMonth: 'max_messages_month', maxCallMinutes: 'max_call_minutes',
+      hasCallBots: 'has_call_bots', hasAiChatbots: 'has_ai_chatbots',
+      hasAutomations: 'has_automations', hasFlows: 'has_flows', hasReports: 'has_reports',
+      hasApiAccess: 'has_api_access', hasWebhooks: 'has_webhooks',
+      allowOwnApiKeys: 'allow_own_api_keys', allowOverage: 'allow_overage',
+      extraMessagePrice: 'extra_message_price', extraCallMinutePrice: 'extra_call_minute_price',
+      isActive: 'is_active', isPublic: 'is_public', stripePriceId: 'stripe_price_id',
     };
     for (const [k, col] of Object.entries(map)) {
       if (dto[k] !== undefined) { values.push(dto[k]); fields.push(`${col}=$${values.length}`); }

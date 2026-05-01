@@ -1,0 +1,61 @@
+{
+  "slug": "restaurante",
+  "name": "Restaurante",
+  "description": "Gestión de reservas, pedidos y atención al cliente para restaurantes y cafeterías",
+  "icon": "🍽️",
+  "pipelines": [
+    {
+      "name": "Reservas",
+      "stages": ["Solicitud", "Confirmada", "En mesa", "Completada", "Cancelada"]
+    },
+    {
+      "name": "Pedidos Delivery",
+      "stages": ["Recibido", "En cocina", "En camino", "Entregado", "Cancelado"]
+    }
+  ],
+  "tags": [
+    { "name": "vip", "color": "#f59e0b" },
+    { "name": "grupo", "color": "#8b5cf6" },
+    { "name": "urgente", "color": "#ef4444" },
+    { "name": "delivery", "color": "#3b82f6" },
+    { "name": "alergia", "color": "#f97316" },
+    { "name": "cumpleaños", "color": "#ec4899" }
+  ],
+  "cannedResponses": [
+    {
+      "title": "Confirmación de reserva",
+      "shortCode": "res-confirmada",
+      "category": "Reservas",
+      "content": "¡Hola {{contact.name}}! Tu reserva ha sido confirmada para el {{date}} a las {{time}} para {{guests}} personas. Te esperamos. 🍽️"
+    },
+    {
+      "title": "Recordatorio de reserva",
+      "shortCode": "res-recordatorio",
+      "category": "Reservas",
+      "content": "Hola {{contact.name}}, te recordamos que tienes una reserva mañana a las {{time}}. ¡Te esperamos!"
+    },
+    {
+      "title": "Pedido recibido",
+      "shortCode": "pedido-recibido",
+      "category": "Delivery",
+      "content": "¡Hola! Recibimos tu pedido #{{order}} y ya está en preparación. Tiempo estimado: 30-45 min. ¡Gracias por tu preferencia!"
+    },
+    {
+      "title": "Pedido en camino",
+      "shortCode": "pedido-camino",
+      "category": "Delivery",
+      "content": "🛵 Tu pedido #{{order}} ya va en camino. Llegará en aproximadamente 15-20 minutos."
+    },
+    {
+      "title": "Cancelación amistosa",
+      "shortCode": "cancelacion",
+      "category": "General",
+      "content": "Lamentamos cancelar tu reserva. Si deseas reagendar, con gusto te ayudamos. ¡Esperamos verte pronto!"
+    }
+  ],
+  "queues": [
+    { "name": "Reservaciones", "description": "Solicitudes y confirmaciones de reservas" },
+    { "name": "Delivery", "description": "Pedidos para entrega a domicilio" },
+    { "name": "Atención general", "description": "Consultas generales y reclamos" }
+  ]
+}

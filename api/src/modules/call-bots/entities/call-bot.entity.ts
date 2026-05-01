@@ -53,8 +53,20 @@ export class CallBot {
   @Column({ name: 'transferred_calls', default: 0 })
   transferredCalls: number;
 
+  @Column({ name: 'inbox_id', nullable: true, type: 'uuid' })
+  inboxId?: string;
+
   @Column({ name: 'queue_ids', type: 'uuid', array: true, nullable: true, default: [] })
   queueIds: string[];
+
+  @Column({ name: 'tts_provider', default: 'twilio_basic' })
+  ttsProvider: string;
+
+  @Column({ name: 'tts_voice_id', nullable: true })
+  ttsVoiceId?: string;
+
+  @Column({ name: 'transfer_to_number', nullable: true })
+  transferToNumber?: string;
 
   @Column({ name: 'created_by', nullable: true, type: 'uuid' })
   createdBy?: string;

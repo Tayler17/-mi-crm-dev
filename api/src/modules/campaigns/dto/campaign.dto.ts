@@ -5,7 +5,7 @@ export class CreateCampaignDto {
   @IsNotEmpty()
   name: string;
 
-  @IsEnum(['email', 'whatsapp', 'sms'])
+  @IsEnum(['email', 'whatsapp', 'sms', 'phone'])
   @IsOptional()
   type?: string;
 
@@ -27,11 +27,19 @@ export class CreateCampaignDto {
 
   @IsString()
   @IsOptional()
+  botId?: string;
+
+  @IsString()
+  @IsOptional()
   scheduleId?: string;
 
   @IsBoolean()
   @IsOptional()
   confirmationEnabled?: boolean;
+
+  @IsString()
+  @IsOptional()
+  queueId?: string;
 
   @IsDateString()
   @IsOptional()
@@ -43,7 +51,7 @@ export class UpdateCampaignDto {
   @IsOptional()
   name?: string;
 
-  @IsEnum(['email', 'whatsapp', 'sms'])
+  @IsEnum(['email', 'whatsapp', 'sms', 'phone'])
   @IsOptional()
   type?: string;
 
@@ -69,11 +77,19 @@ export class UpdateCampaignDto {
 
   @IsString()
   @IsOptional()
+  botId?: string;
+
+  @IsString()
+  @IsOptional()
   scheduleId?: string;
 
   @IsBoolean()
   @IsOptional()
   confirmationEnabled?: boolean;
+
+  @IsString()
+  @IsOptional()
+  queueId?: string;
 
   @IsDateString()
   @IsOptional()

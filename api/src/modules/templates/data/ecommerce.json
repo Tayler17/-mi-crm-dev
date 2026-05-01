@@ -1,0 +1,67 @@
+{
+  "slug": "ecommerce",
+  "name": "E-commerce / Retail",
+  "description": "Gestión de pedidos, devoluciones y soporte para tiendas online y comercios minoristas.",
+  "icon": "🛒",
+  "pipelines": [
+    {
+      "name": "Pedidos",
+      "stages": ["Recibido", "Procesando", "Preparando envío", "En tránsito", "Entregado", "Completado"]
+    },
+    {
+      "name": "Devoluciones",
+      "stages": ["Solicitud recibida", "Autorizada", "Producto recibido", "Revisión", "Reembolso emitido", "Cerrada"]
+    }
+  ],
+  "tags": [
+    { "name": "cliente-frecuente", "color": "#f59e0b" },
+    { "name": "primera-compra",    "color": "#22c55e" },
+    { "name": "devolucion",        "color": "#ef4444" },
+    { "name": "mayorista",         "color": "#8b5cf6" },
+    { "name": "vip",               "color": "#ec4899" },
+    { "name": "reclamo",           "color": "#f97316" }
+  ],
+  "cannedResponses": [
+    {
+      "title": "Confirmación de pedido",
+      "shortCode": "eco-pedido",
+      "category": "Pedidos",
+      "content": "¡Hola {{contact.name}}! Tu pedido #{{order}} ha sido recibido y está siendo procesado. Te notificaremos cuando sea despachado. ¡Gracias por tu compra! 🛍️"
+    },
+    {
+      "title": "Número de seguimiento",
+      "shortCode": "eco-tracking",
+      "category": "Pedidos",
+      "content": "¡Buenas noticias, {{contact.name}}! Tu pedido #{{order}} ya fue despachado. Puedes seguirlo con el código {{tracking}} en {{carrier}}."
+    },
+    {
+      "title": "Demora en entrega",
+      "shortCode": "eco-demora",
+      "category": "Pedidos",
+      "content": "Hola {{contact.name}}, lamentamos informarte que tu pedido #{{order}} presenta una demora. Nuevo tiempo estimado: {{new_date}}. Disculpa los inconvenientes."
+    },
+    {
+      "title": "Iniciar devolución",
+      "shortCode": "eco-devolucion",
+      "category": "Devoluciones",
+      "content": "Hola {{contact.name}}, entendemos que deseas hacer una devolución. Para iniciar el proceso necesitamos: número de pedido, motivo y fotos del producto. ¿Puedes enviarnos esa información?"
+    },
+    {
+      "title": "Devolución aprobada",
+      "shortCode": "eco-dev-aprobada",
+      "category": "Devoluciones",
+      "content": "¡Hola {{contact.name}}! Tu solicitud de devolución ha sido aprobada. El reembolso de {{amount}} se procesará en 5-7 días hábiles a tu método de pago original."
+    },
+    {
+      "title": "Producto agotado",
+      "shortCode": "eco-agotado",
+      "category": "Consultas",
+      "content": "Hola {{contact.name}}, lamentablemente el producto que buscas está agotado momentáneamente. ¿Te gustaría que te avisemos cuando esté disponible nuevamente?"
+    }
+  ],
+  "queues": [
+    { "name": "Pedidos",       "description": "Consultas sobre estado de pedidos y envíos" },
+    { "name": "Devoluciones",  "description": "Gestión de cambios y reembolsos" },
+    { "name": "Soporte",       "description": "Problemas con productos y consultas generales" }
+  ]
+}

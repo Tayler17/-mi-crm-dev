@@ -1,21 +1,136 @@
-import { Injectable, UnauthorizedException, ConflictException, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import {
+  Injectable, UnauthorizedException, ConflictException,
+  NotFoundException, ForbiddenException, BadRequestException,
+} from '@nestjs/common';
+import { checkPlanLimit } from '../../common/utils/limits';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
+import * as nodemailer from 'nodemailer';
 import { User } from './entities/user.entity';
+import { Tenant } from './entities/tenant.entity';
 import { LoginDto } from './dto/login.dto';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
+import { CreateTenantDto, UpdateTenantDto, RegisterDto } from './dto/tenant.dto';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     private readonly jwtService: JwtService,
-  ) {}
+    @InjectDataSource() private readonly db: DataSource,
+  ) {
+    this.ensureResetColumns();
+  }
 
-  async login(dto: LoginDto, tenantId: string) {
+  private async ensureResetColumns() {
+    await this.db.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS reset_token VARCHAR(255),
+        ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(255),
+        ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ
+    `).catch(() => {});
+  }
+
+  private createTransporter() {
+    return nodemailer.createTransport({
+      host:   process.env.SMTP_HOST   || 'smtp.gmail.com',
+      port:   Number(process.env.SMTP_PORT) || 587,
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    });
+  }
+
+  private async sendVerificationEmail(to: string, token: string, fullName: string, frontendUrl: string) {
+    const url = `${frontendUrl}/verify-email?token=${token}`;
+    await this.createTransporter().sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      to,
+      subject: 'Verifica tu email — CRM SaaS',
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
+          <h2 style="color:#6366f1">¡Bienvenido, ${fullName}!</h2>
+          <p>Tu workspace está listo. Solo falta verificar tu dirección de email para completar el registro.</p>
+          <a href="${url}" style="display:inline-block;margin:20px 0;padding:12px 28px;background:#6366f1;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+            Verificar email
+          </a>
+          <p style="color:#94a3b8;font-size:12px">El enlace es válido por 24 horas.</p>
+          <p style="color:#94a3b8;font-size:12px">Si no creaste una cuenta, ignora este email.</p>
+          <p style="color:#94a3b8;font-size:12px">O copia este enlace: ${url}</p>
+        </div>
+      `,
+    });
+  }
+
+  private async sendResetEmail(to: string, token: string, frontendUrl: string) {
+    const url = `${frontendUrl}/reset-password?token=${token}`;
+    await this.createTransporter().sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      to,
+      subject: 'Restablecer contraseña — CRM SaaS',
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
+          <h2 style="color:#6366f1">Restablecer contraseña</h2>
+          <p>Recibiste este email porque solicitaste restablecer tu contraseña.</p>
+          <p>El enlace es válido por <strong>1 hora</strong>.</p>
+          <a href="${url}" style="display:inline-block;margin:20px 0;padding:12px 28px;background:#6366f1;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+            Restablecer contraseña
+          </a>
+          <p style="color:#94a3b8;font-size:12px">Si no solicitaste este cambio, ignora este email.</p>
+          <p style="color:#94a3b8;font-size:12px">O copia este enlace: ${url}</p>
+        </div>
+      `,
+    });
+  }
+
+  async forgotPassword(email: string, workspace: string): Promise<void> {
+    const tenantId = await this.resolveTenantId(workspace).catch(() => null);
+    if (!tenantId) return; // silent — avoid workspace enumeration
+    const user = await this.userRepo.findOne({ where: { email, tenantId, isActive: true } });
+    if (!user) return; // silent — avoid email enumeration
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 60 * 60 * 1000); // 1h
+    await this.userRepo.update(user.id, { resetToken: token, resetTokenExpiresAt: expires });
+
+    const frontend = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',')[0].trim();
+    await this.sendResetEmail(user.email, token, frontend);
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const user = await this.userRepo.findOne({ where: { resetToken: token } });
+    if (!user || !user.resetTokenExpiresAt || user.resetTokenExpiresAt < new Date()) {
+      throw new BadRequestException('El enlace es inválido o ha expirado. Solicita uno nuevo.');
+    }
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.userRepo.update(user.id, { passwordHash, resetToken: null, resetTokenExpiresAt: null });
+  }
+
+  // ── Tenant resolution ─────────────────────────────────────────────────────
+
+  private async resolveTenantId(slugOrUuid: string): Promise<string> {
+    const where: any = UUID_RE.test(slugOrUuid)
+      ? [{ id: slugOrUuid }, { slug: slugOrUuid }]
+      : [{ slug: slugOrUuid }];
+    const tenant = await this.tenantRepo.findOne({ where });
+    if (!tenant) throw new UnauthorizedException('Workspace no encontrado');
+    if (!tenant.isActive) throw new UnauthorizedException('Workspace inactivo');
+    return tenant.id;
+  }
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+
+  async login(dto: LoginDto, tenantSlugOrId: string) {
+    const tenantId = await this.resolveTenantId(tenantSlugOrId);
+
     const user = await this.userRepo.findOne({
       where: { email: dto.email, tenantId, isActive: true },
     });
@@ -34,7 +149,7 @@ export class AuthService {
         email: user.email,
         fullName: user.fullName,
         role: user.role,
-        tenantId: user.tenantId,
+        tenantId,
       },
     };
   }
@@ -46,17 +161,24 @@ export class AuthService {
   getAgents(tenantId: string) {
     return this.userRepo.find({
       where: { tenantId, isActive: true },
-      select: ['id', 'fullName', 'email', 'role'],
+      select: ['id', 'fullName', 'email', 'role', 'availability'],
       order: { fullName: 'ASC' },
     });
   }
 
-  // ── Users CRUD ─────────────────────────────────────────────────────────────
+  async setAvailability(userId: string, tenantId: string, availability: string) {
+    const allowed = ['online', 'away', 'busy', 'offline'];
+    if (!allowed.includes(availability)) availability = 'online';
+    await this.userRepo.update({ id: userId, tenantId }, { availability } as any);
+    return { availability };
+  }
+
+  // ── Users CRUD ────────────────────────────────────────────────────────────
 
   getUsers(tenantId: string) {
     return this.userRepo.find({
       where: { tenantId },
-      select: ['id', 'fullName', 'email', 'role', 'isActive', 'createdAt'],
+      select: ['id', 'fullName', 'email', 'role', 'isActive', 'createdAt', 'availability'],
       order: { fullName: 'ASC' },
     });
   }
@@ -64,13 +186,14 @@ export class AuthService {
   async getUser(id: string, tenantId: string) {
     const user = await this.userRepo.findOne({
       where: { id, tenantId },
-      select: ['id', 'fullName', 'email', 'role', 'isActive', 'createdAt'],
+      select: ['id', 'fullName', 'email', 'role', 'isActive', 'createdAt', 'availability'],
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
     return user;
   }
 
   async createUser(dto: CreateUserDto, tenantId: string) {
+    await checkPlanLimit(this.db, tenantId, 'users');
     const exists = await this.userRepo.findOne({ where: { email: dto.email, tenantId } });
     if (exists) throw new ConflictException('Ya existe un usuario con ese email en este tenant');
     const passwordHash = await bcrypt.hash(dto.password, 10);
@@ -104,5 +227,152 @@ export class AuthService {
     if (!user) throw new NotFoundException('Usuario no encontrado');
     user.isActive = false;
     await this.userRepo.save(user);
+  }
+
+  // ── Public self-registration ──────────────────────────────────────────────
+
+  async register(dto: RegisterDto) {
+    const slugExists = await this.tenantRepo.findOne({ where: { slug: dto.slug } });
+    if (slugExists) throw new ConflictException('Ya existe un workspace con ese slug. Elige otro nombre.');
+
+    const tenant = this.tenantRepo.create({
+      name: dto.workspaceName,
+      slug: dto.slug,
+      plan: 'free',
+      isActive: true,
+    });
+    const savedTenant = await this.tenantRepo.save(tenant);
+
+    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const user = this.userRepo.create({
+      tenantId: savedTenant.id,
+      email: dto.email,
+      fullName: dto.fullName,
+      passwordHash,
+      role: 'owner',
+      isActive: true,
+      emailVerificationToken: verificationToken,
+    });
+    const savedUser = await this.userRepo.save(user);
+
+    // Send verification email fire-and-forget — don't block registration on SMTP errors
+    const frontend = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',')[0].trim();
+    this.sendVerificationEmail(savedUser.email, verificationToken, savedUser.fullName, frontend)
+      .catch((err) => console.error('Error sending verification email:', err?.message));
+
+    const payload = { sub: savedUser.id, email: savedUser.email, tenantId: savedTenant.id, role: 'owner' };
+    const accessToken = this.jwtService.sign(payload);
+
+    return {
+      accessToken,
+      emailVerified: false,
+      user: {
+        id: savedUser.id,
+        email: savedUser.email,
+        fullName: savedUser.fullName,
+        role: 'owner',
+        tenantId: savedTenant.id,
+      },
+    };
+  }
+
+  async verifyEmail(token: string): Promise<void> {
+    const user = await this.userRepo.findOne({ where: { emailVerificationToken: token } });
+    if (!user) throw new BadRequestException('El enlace de verificación es inválido o ya fue usado.');
+    if (user.emailVerifiedAt) return; // already verified — idempotent
+    await this.userRepo.update(user.id, {
+      emailVerifiedAt: new Date(),
+      emailVerificationToken: null,
+    });
+  }
+
+  // ── Tenants CRUD (super-admin) ─────────────────────────────────────────────
+
+  async getTenants() {
+    const rows = await this.db.query(`
+      SELECT
+        t.id, t.name, t.slug, t.plan, t.is_active AS "isActive",
+        t.plan_id AS "planId",
+        t.plan_expires_at AS "planExpiresAt",
+        t.trial_ends_at AS "trialEndsAt",
+        t.billing_email AS "billingEmail",
+        t.billing_notes AS "billingNotes",
+        t.created_at AS "createdAt",
+        p.name AS "planName", p.color AS "planColor", p.slug AS "planSlug",
+        p.price AS "planPrice", p.currency AS "planCurrency",
+        p.billing_period AS "planBillingPeriod",
+        COUNT(DISTINCT u.id)::int AS "userCount",
+        COUNT(DISTINCT c.id)::int AS "contactCount",
+        (SELECT COUNT(*)::int FROM messages m JOIN conversations cv ON cv.id = m.conversation_id
+         WHERE cv.tenant_id = t.id AND m.sender_type = 'bot'
+           AND m.created_at >= date_trunc('month', NOW())) AS "aiMessagesMonth",
+        (SELECT COALESCE(SUM(cl.duration),0)::int FROM call_logs cl
+         WHERE cl.tenant_id::text = t.id::text
+           AND cl.created_at >= date_trunc('month', NOW())) AS "callSecondsMonth"
+      FROM tenants t
+      LEFT JOIN plans p ON p.id = t.plan_id
+      LEFT JOIN users u ON u.tenant_id = t.id
+      LEFT JOIN contacts c ON c.tenant_id = t.id
+      GROUP BY t.id, p.id
+      ORDER BY t.created_at DESC
+    `);
+    return rows;
+  }
+
+  async getTenantUsers(tenantId: string) {
+    return this.db.query(
+      `SELECT id, full_name AS "fullName", email, role, is_active AS "isActive",
+              availability, created_at AS "createdAt"
+       FROM users WHERE tenant_id = $1 ORDER BY role, full_name`,
+      [tenantId],
+    );
+  }
+
+  async getTenant(id: string) {
+    const tenant = await this.tenantRepo.findOne({ where: { id } });
+    if (!tenant) throw new NotFoundException('Tenant no encontrado');
+    return tenant;
+  }
+
+  async createTenant(dto: CreateTenantDto) {
+    const slugExists = await this.tenantRepo.findOne({ where: { slug: dto.slug } });
+    if (slugExists) throw new ConflictException('Ya existe un workspace con ese slug');
+
+    const tenant = this.tenantRepo.create({
+      name: dto.name,
+      slug: dto.slug,
+      plan: dto.plan ?? 'free',
+      isActive: true,
+    });
+    const savedTenant = await this.tenantRepo.save(tenant);
+
+    const passwordHash = await bcrypt.hash(dto.adminPassword, 10);
+    const adminUser = this.userRepo.create({
+      tenantId: savedTenant.id,
+      email: dto.adminEmail,
+      fullName: dto.adminName ?? 'Admin',
+      passwordHash,
+      role: 'admin',
+      isActive: true,
+    });
+    await this.userRepo.save(adminUser);
+
+    return savedTenant;
+  }
+
+  async updateTenant(id: string, dto: UpdateTenantDto) {
+    const sets: string[] = ['updated_at = NOW()'];
+    const params: any[] = [id];
+    let i = 2;
+    if (dto.name       !== undefined) { sets.push(`name = $${i++}`);           params.push(dto.name); }
+    if (dto.plan       !== undefined) { sets.push(`plan = $${i++}`);           params.push(dto.plan); }
+    if (dto.isActive   !== undefined) { sets.push(`is_active = $${i++}`);      params.push(dto.isActive); }
+    if (dto.planId     !== undefined) { sets.push(`plan_id = $${i++}`);        params.push(dto.planId || null); }
+    if (dto.billingEmail  !== undefined) { sets.push(`billing_email = $${i++}`);   params.push(dto.billingEmail); }
+    if (dto.billingNotes  !== undefined) { sets.push(`billing_notes = $${i++}`);   params.push(dto.billingNotes); }
+    if (dto.planExpiresAt !== undefined) { sets.push(`plan_expires_at = $${i++}`); params.push(dto.planExpiresAt || null); }
+    await this.db.query(`UPDATE tenants SET ${sets.join(', ')} WHERE id = $1`, params);
+    return { ok: true };
   }
 }

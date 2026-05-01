@@ -15,6 +15,6 @@ VALUES (
     'admin@demo.com',
     '$2b$10$1RqVFdmpsiEbVoyF0.minec8i8x1dDxR6zZkg7n3x9d4FY4Rg59Gy',
     'Admin Demo',
-    'admin',
+    'owner',
     TRUE
 ) ON CONFLICT DO NOTHING;

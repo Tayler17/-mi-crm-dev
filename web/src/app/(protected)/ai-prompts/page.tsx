@@ -6,12 +6,14 @@ import {
   deleteAiPrompt, duplicateAiPrompt, runAiPrompt, getQueues,
   type AiPrompt, type AiPromptVariable, type Queue,
 } from '@/lib/api';
+import { useLangCtx } from '@/lib/lang-context';
+import { APP } from '@/lib/i18n/app';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const PROVIDERS = [
-  { value: 'openai',    label: 'OpenAI',    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
-  { value: 'anthropic', label: 'Anthropic', models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'] },
+  { value: 'openai',    label: 'OpenAI',        models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
+  { value: 'anthropic', label: 'Anthropic',     models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'] },
   { value: 'gemini',    label: 'Google Gemini', models: ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-2.0-flash'] },
 ];
 
@@ -76,10 +78,6 @@ const TEMPLATE_PROMPTS: Partial<AiPrompt>[] = [
   },
 ];
 
-function fmtDate(dt: string) {
-  return new Date(dt).toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
 function ProviderBadge({ provider }: { provider: string }) {
   const cfg: Record<string, { bg: string; color: string; icon: string }> = {
     openai:    { bg: '#e7f7ef', color: '#065f46', icon: '🟢' },
@@ -94,15 +92,6 @@ function ProviderBadge({ provider }: { provider: string }) {
   );
 }
 
-function CategoryBadge({ category }: { category: string }) {
-  const c = CATEGORIES.find((c) => c.value === category) ?? { label: category, icon: '💬' };
-  return (
-    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: 'var(--bg-secondary)', color: 'var(--text-muted)', fontWeight: 500 }}>
-      {c.icon} {c.label}
-    </span>
-  );
-}
-
 // ── Variable Row ──────────────────────────────────────────────────────────────
 
 function VariableRow({ v, onChange, onRemove }: {
@@ -110,11 +99,11 @@ function VariableRow({ v, onChange, onRemove }: {
 }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr 1fr auto', gap: 6, alignItems: 'center' }}>
-      <input className="form-input" style={{ fontSize: 12 }} placeholder="nombre" value={v.name}
+      <input className="form-input" style={{ fontSize: 12 }} placeholder="name" value={v.name}
         onChange={(e) => onChange({ ...v, name: e.target.value })} />
-      <input className="form-input" style={{ fontSize: 12 }} placeholder="descripción" value={v.description}
+      <input className="form-input" style={{ fontSize: 12 }} placeholder="description" value={v.description}
         onChange={(e) => onChange({ ...v, description: e.target.value })} />
-      <input className="form-input" style={{ fontSize: 12 }} placeholder="ejemplo" value={v.example ?? ''}
+      <input className="form-input" style={{ fontSize: 12 }} placeholder="example" value={v.example ?? ''}
         onChange={(e) => onChange({ ...v, example: e.target.value })} />
       <button className="btn btn-ghost" style={{ padding: '4px 8px', color: 'var(--danger)' }} onClick={onRemove}>✕</button>
     </div>
@@ -133,6 +122,9 @@ type PromptForm = {
 function PromptModal({ prompt, queues, onSave, onClose }: {
   prompt: AiPrompt | null; queues: Queue[]; onSave: (f: PromptForm) => Promise<void>; onClose: () => void;
 }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+
   const [tab, setTab] = useState<'edit' | 'variables' | 'settings'>('edit');
   const [form, setForm] = useState<PromptForm>({
     name: prompt?.name ?? '',
@@ -151,8 +143,7 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
 
   const providerModels = PROVIDERS.find((p) => p.value === form.provider)?.models ?? [];
 
-  // Extract {variable} tokens from prompt text
-  const detectedVars = [...new Set([...form.prompt_text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))];
+  const detectedVars = Array.from(new Set(Array.from(form.prompt_text.matchAll(/\{(\w+)\}/g), (m) => m[1])));
   const missingVars = detectedVars.filter((v) => !form.variables.find((fv) => fv.name === v));
 
   function addVariable() {
@@ -164,11 +155,11 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
   }
 
   async function handleSave() {
-    if (!form.name.trim()) { setError('El nombre es requerido'); return; }
-    if (!form.prompt_text.trim()) { setError('El texto del prompt es requerido'); return; }
+    if (!form.name.trim()) { setError(i.aiPromptNameReq); return; }
+    if (!form.prompt_text.trim()) { setError(i.aiPromptTextReq); return; }
     setSaving(true); setError('');
     try { await onSave(form); onClose(); }
-    catch (err: any) { setError(err.message || 'Error'); }
+    catch (err: any) { setError(err.message || i.error); }
     finally { setSaving(false); }
   }
 
@@ -182,7 +173,7 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 700, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 style={{ margin: 0, fontSize: 18 }}>{prompt ? 'Editar Prompt' : 'Nuevo Prompt de IA'}</h2>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{prompt ? i.editPromptTitle : i.newPromptTitle}</h2>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
 
@@ -191,7 +182,7 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
           <button style={tabStyle('variables')} onClick={() => setTab('variables')}>
             {'{ }'} Variables {form.variables.length > 0 && <span style={{ marginLeft: 4, background: 'var(--primary)', color: '#fff', borderRadius: 8, padding: '0 5px', fontSize: 10 }}>{form.variables.length}</span>}
           </button>
-          <button style={tabStyle('settings')} onClick={() => setTab('settings')}>⚙ Modelo</button>
+          <button style={tabStyle('settings')} onClick={() => setTab('settings')}>⚙ {i.modelLabel}</button>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
@@ -199,25 +190,25 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12 }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Nombre *</label>
+                  <label className="form-label">{i.name} *</label>
                   <input className="form-input" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} placeholder="Respuesta de soporte empática" />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Categoría</label>
+                  <label className="form-label">{i.categoryLabel}</label>
                   <select className="form-input" value={form.category} onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))}>
                     {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.icon} {c.label}</option>)}
                   </select>
                 </div>
               </div>
               <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Descripción</label>
-                <input className="form-input" value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} placeholder="Para qué sirve este prompt…" />
+                <label className="form-label">{i.descriptionLabel}</label>
+                <input className="form-input" value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} />
               </div>
               <div className="form-group" style={{ margin: 0 }}>
                 <label className="form-label">
-                  Texto del Prompt *
+                  Prompt *
                   <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 8 }}>
-                    Usa {'{variable}'} para datos dinámicos
+                    {i.aiPromptVarHint}
                   </span>
                 </label>
                 <textarea
@@ -225,18 +216,16 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
                   rows={9}
                   value={form.prompt_text}
                   onChange={(e) => setForm((p) => ({ ...p, prompt_text: e.target.value }))}
-                  placeholder="Eres un agente de soporte de {company}. El cliente {contact_name} tiene el siguiente problema: {issue}. Genera una respuesta profesional y empática…"
                   style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6 }}
                 />
               </div>
-              {/* Detected vars hint */}
               {missingVars.length > 0 && (
                 <div style={{ padding: '10px 14px', background: '#fef3c7', borderRadius: 8, fontSize: 12, color: '#92400e' }}>
-                  <strong>Variables detectadas sin definir:</strong>{' '}
+                  <strong>{i.aiPromptDetectedVars}</strong>{' '}
                   {missingVars.map((v) => (
                     <button key={v} onClick={() => { addDetectedVar(v); setTab('variables'); }}
                       style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 6, border: '1px solid #f59e0b', background: '#fff', cursor: 'pointer', fontSize: 11, fontFamily: 'monospace', color: '#92400e' }}>
-                      {'{' + v + '}'} + Agregar
+                      {'{' + v + '}'} {i.aiPromptAddVar}
                     </button>
                   ))}
                 </div>
@@ -247,23 +236,23 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
           {tab === 'variables' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ padding: '10px 14px', background: '#e0f2fe', borderRadius: 8, fontSize: 13, color: '#0369a1' }}>
-                Define las variables dinámicas del prompt. En el texto usa <code style={{ background: '#bae6fd', padding: '0 4px', borderRadius: 3 }}>{'{nombre}'}</code>. Al ejecutar el prompt, cada variable se reemplaza con el valor real.
+                {i.aiPromptVarHint}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr 1fr auto', gap: 6 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', padding: '0 4px' }}>NOMBRE</div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', padding: '0 4px' }}>DESCRIPCIÓN</div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', padding: '0 4px' }}>EJEMPLO</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', padding: '0 4px' }}>{i.name.toUpperCase()}</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', padding: '0 4px' }}>{i.descriptionLabel.toUpperCase()}</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', padding: '0 4px' }}>{i.exampleLabel.toUpperCase()}</div>
                 <div />
               </div>
-              {form.variables.map((v, i) => (
+              {form.variables.map((v, idx) => (
                 <VariableRow
-                  key={i}
+                  key={idx}
                   v={v}
-                  onChange={(nv) => setForm((p) => ({ ...p, variables: p.variables.map((x, j) => j === i ? nv : x) }))}
-                  onRemove={() => setForm((p) => ({ ...p, variables: p.variables.filter((_, j) => j !== i) }))}
+                  onChange={(nv) => setForm((p) => ({ ...p, variables: p.variables.map((x, j) => j === idx ? nv : x) }))}
+                  onRemove={() => setForm((p) => ({ ...p, variables: p.variables.filter((_, j) => j !== idx) }))}
                 />
               ))}
-              <button className="btn btn-secondary" style={{ alignSelf: 'flex-start' }} onClick={addVariable}>+ Agregar variable</button>
+              <button className="btn btn-secondary" style={{ alignSelf: 'flex-start' }} onClick={addVariable}>{i.aiPromptAddVar}</button>
             </div>
           )}
 
@@ -271,7 +260,7 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Proveedor</label>
+                  <label className="form-label">{i.providerLabel}</label>
                   <select className="form-input" value={form.provider} onChange={(e) => {
                     const prov = e.target.value;
                     const firstModel = PROVIDERS.find((p) => p.value === prov)?.models[0] ?? '';
@@ -281,7 +270,7 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
                   </select>
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Modelo</label>
+                  <label className="form-label">{i.modelLabel}</label>
                   <select className="form-input" value={form.model} onChange={(e) => setForm((p) => ({ ...p, model: e.target.value }))}>
                     {providerModels.map((m) => <option key={m} value={m}>{m}</option>)}
                   </select>
@@ -289,32 +278,24 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Temperatura: {form.temperature}</label>
+                  <label className="form-label">{i.temperatureLabel}: {form.temperature}</label>
                   <input type="range" min={0} max={1} step={0.05} value={form.temperature}
                     onChange={(e) => setForm((p) => ({ ...p, temperature: +e.target.value }))}
                     style={{ width: '100%', marginTop: 8 }} />
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)' }}>
-                    <span>Preciso (0)</span><span>Creativo (1)</span>
+                    <span>{i.aiPromptPrecise} (0)</span><span>{i.aiPromptCreative} (1)</span>
                   </div>
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Máx. tokens</label>
+                  <label className="form-label">{i.maxTokensLabel}</label>
                   <input type="number" className="form-input" value={form.max_tokens}
                     onChange={(e) => setForm((p) => ({ ...p, max_tokens: +e.target.value }))} min={50} max={4000} />
                 </div>
               </div>
-              <div style={{ padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-                La API key se configura en <strong>Configuración → Integraciones de IA</strong>. El proveedor seleccionado aquí determina qué clave se usará al ejecutar el prompt.
-              </div>
-
-              {/* Queue selector */}
               {queues.length > 0 && (
                 <div>
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-                    📬 Colas de atención (opcional)
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-                    Asocia este prompt a colas específicas para que esté disponible como acción rápida al atender esas colas.
+                    📬 {i.queuesTitle}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {queues.map((q) => {
@@ -352,9 +333,9 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
         </div>
 
         <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-secondary" onClick={onClose}>{i.cancel}</button>
           <button className="btn btn-primary" disabled={saving} onClick={handleSave}>
-            {saving ? 'Guardando…' : prompt ? 'Guardar cambios' : 'Crear Prompt'}
+            {saving ? i.saving : prompt ? i.update : i.create}
           </button>
         </div>
       </div>
@@ -365,6 +346,9 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
 // ── Run Prompt Modal ──────────────────────────────────────────────────────────
 
 function RunPromptModal({ prompt, onClose }: { prompt: AiPrompt; onClose: () => void }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+
   const [values, setValues] = useState<Record<string, string>>(
     Object.fromEntries(prompt.variables.map((v) => [v.name, '']))
   );
@@ -380,7 +364,7 @@ function RunPromptModal({ prompt, onClose }: { prompt: AiPrompt; onClose: () => 
       const res = await runAiPrompt(prompt.id, values, context || undefined);
       setResult(res.filled_prompt);
     } catch (err: any) {
-      setError(err.message || 'Error');
+      setError(err.message || i.error);
     } finally { setRunning(false); }
   }
 
@@ -395,14 +379,13 @@ function RunPromptModal({ prompt, onClose }: { prompt: AiPrompt; onClose: () => 
       <div className="modal" style={{ maxWidth: 640, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>Ejecutar: {prompt.name}</h2>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Completa las variables y genera la respuesta</div>
+            <h2 style={{ margin: 0, fontSize: 18 }}>{i.aiPromptRun}: {prompt.name}</h2>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{i.runPromptHint}</div>
           </div>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Variables */}
           {prompt.variables.length > 0 && (
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Variables</div>
@@ -417,7 +400,7 @@ function RunPromptModal({ prompt, onClose }: { prompt: AiPrompt; onClose: () => 
                       className="form-input"
                       value={values[v.name] ?? ''}
                       onChange={(e) => setValues((p) => ({ ...p, [v.name]: e.target.value }))}
-                      placeholder={v.example ?? `Valor para ${v.name}`}
+                      placeholder={v.example ?? v.name}
                     />
                   </div>
                 ))}
@@ -425,41 +408,37 @@ function RunPromptModal({ prompt, onClose }: { prompt: AiPrompt; onClose: () => 
             </div>
           )}
 
-          {/* Optional context */}
           <div className="form-group" style={{ margin: 0 }}>
-            <label className="form-label">Contexto adicional (opcional)</label>
+            <label className="form-label">{i.runPromptContext}</label>
             <textarea
               className="form-input"
               rows={3}
               value={context}
               onChange={(e) => setContext(e.target.value)}
-              placeholder="Pega aquí el historial de conversación o cualquier contexto adicional…"
               style={{ resize: 'vertical', fontSize: 12 }}
             />
           </div>
 
-          {/* Preview of filled prompt */}
           <div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Vista previa del prompt</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{i.runPromptPreview}</div>
             <div style={{ padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.6, color: 'var(--text-muted)', maxHeight: 120, overflowY: 'auto' }}>
               {prompt.prompt_text.replace(/\{(\w+)\}/g, (_, k) => values[k] ? `[${values[k]}]` : `{${k}}`)}
             </div>
           </div>
 
-          {/* Result */}
           {result && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#065f46', textTransform: 'uppercase', letterSpacing: '0.05em' }}>✅ Prompt preparado</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#065f46', textTransform: 'uppercase', letterSpacing: '0.05em' }}>✅ {i.runPromptResult}</div>
                 <button className="btn btn-ghost" style={{ fontSize: 12, padding: '3px 8px' }} onClick={handleCopy}>
-                  {copied ? '✓ Copiado' : '📋 Copiar'}
+                  {copied ? `✓ ${i.aiPromptsCopied}` : `📋 ${i.copy}`}
                 </button>
               </div>
               <div style={{ padding: '12px 16px', background: '#d1fae5', borderRadius: 8, fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', border: '1px solid #6ee7b7' }}>
                 {result}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-                Este es el prompt listo para enviar a {PROVIDERS.find((p) => p.value === prompt.provider)?.label} ({prompt.model}). Cópialo o úsalo directamente en el inbox.
+                {i.runPromptPreparing} {PROVIDERS.find((p) => p.value === prompt.provider)?.label} ({prompt.model})
               </div>
             </div>
           )}
@@ -468,9 +447,9 @@ function RunPromptModal({ prompt, onClose }: { prompt: AiPrompt; onClose: () => 
         </div>
 
         <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button className="btn btn-secondary" onClick={onClose}>Cerrar</button>
+          <button className="btn btn-secondary" onClick={onClose}>{i.close}</button>
           <button className="btn btn-primary" disabled={running} onClick={handleRun}>
-            {running ? '⏳ Preparando…' : '▶ Preparar Prompt'}
+            {running ? `⏳ ${i.runPromptPreparing}…` : `▶ ${i.aiPromptRun}`}
           </button>
         </div>
       </div>
@@ -481,19 +460,22 @@ function RunPromptModal({ prompt, onClose }: { prompt: AiPrompt; onClose: () => 
 // ── Template Picker ───────────────────────────────────────────────────────────
 
 function TemplatePicker({ onSelect, onClose }: { onSelect: (t: Partial<AiPrompt>) => void; onClose: () => void }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 600 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 style={{ margin: 0, fontSize: 18 }}>Plantillas de Prompts</h2>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{i.promptTemplatesTitle}</h2>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
         <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {TEMPLATE_PROMPTS.map((t, i) => {
+          {TEMPLATE_PROMPTS.map((t, idx) => {
             const cat = CATEGORIES.find((c) => c.value === t.category) ?? { label: t.category, icon: '💬' };
             return (
               <div
-                key={i}
+                key={idx}
                 onClick={() => { onSelect(t); onClose(); }}
                 style={{ padding: '12px 16px', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', transition: 'all 0.15s' }}
                 onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.background = 'var(--primary)10'; }}
@@ -522,6 +504,9 @@ function TemplatePicker({ onSelect, onClose }: { onSelect: (t: Partial<AiPrompt>
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function AiPromptsPage() {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+
   const [prompts, setPrompts] = useState<AiPrompt[]>([]);
   const [categories, setCategories] = useState<{ category: string; count: number }[]>([]);
   const [queues, setQueues] = useState<Queue[]>([]);
@@ -551,7 +536,7 @@ export default function AiPromptsPage() {
   }
 
   async function handleDelete(p: AiPrompt) {
-    if (!confirm(`¿Eliminar el prompt "${p.name}"?`)) return;
+    if (!confirm(`${i.delete} "${p.name}"?`)) return;
     await deleteAiPrompt(p.id);
     setPrompts((prev) => prev.filter((x) => x.id !== p.id));
   }
@@ -573,34 +558,28 @@ export default function AiPromptsPage() {
     return true;
   });
 
-  // Group by category for display
   const grouped = CATEGORIES.map((cat) => ({
     ...cat,
     items: filtered.filter((p) => p.category === cat.value),
   })).filter((g) => g.items.length > 0);
 
-  // Add uncategorized
   const knownCats = new Set(CATEGORIES.map((c) => c.value));
   const otherItems = filtered.filter((p) => !knownCats.has(p.category));
-  if (otherItems.length > 0) grouped.push({ value: 'other', label: 'Otros', icon: '💬', items: otherItems });
+  if (otherItems.length > 0) grouped.push({ value: 'other', label: i.aiPromptsOther, icon: '💬', items: otherItems });
 
   return (
     <div style={{ padding: 24 }}>
-      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Prompts de IA</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
-            Plantillas de instrucciones para generar respuestas asistidas por IA
-          </p>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>{i.aiPromptsTitle}</h1>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>{i.aiPromptsSubtitle}</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-secondary" onClick={() => setShowTemplates(true)}>📋 Plantillas</button>
-          <button className="btn btn-primary" onClick={() => { setEditing(null); setInitialForm(null); setShowModal(true); }}>+ Nuevo Prompt</button>
+          <button className="btn btn-secondary" onClick={() => setShowTemplates(true)}>📋 {i.aiPromptsTemplatesBtn}</button>
+          <button className="btn btn-primary" onClick={() => { setEditing(null); setInitialForm(null); setShowModal(true); }}>+ {i.newPromptTitle}</button>
         </div>
       </div>
 
-      {/* Stats bar */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 20, padding: '12px 16px', background: 'var(--bg-secondary)', borderRadius: 10 }}>
         <div style={{ fontSize: 13 }}>
           <span style={{ fontWeight: 700, color: 'var(--primary)', fontSize: 18 }}>{prompts.length}</span>
@@ -609,29 +588,28 @@ export default function AiPromptsPage() {
         <div style={{ width: 1, background: 'var(--border)' }} />
         <div style={{ fontSize: 13 }}>
           <span style={{ fontWeight: 700, color: '#10b981', fontSize: 18 }}>{prompts.filter((p) => p.is_active).length}</span>
-          <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>activos</span>
+          <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>{i.active.toLowerCase()}</span>
         </div>
         <div style={{ width: 1, background: 'var(--border)' }} />
         <div style={{ fontSize: 13 }}>
           <span style={{ fontWeight: 700, color: '#f59e0b', fontSize: 18 }}>{prompts.reduce((s, p) => s + p.usage_count, 0)}</span>
-          <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>usos totales</span>
+          <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>{i.aiPromptsUsageTotal}</span>
         </div>
         <div style={{ width: 1, background: 'var(--border)' }} />
         <div style={{ fontSize: 13 }}>
           <span style={{ fontWeight: 700, color: '#6366f1', fontSize: 18 }}>{categories.length}</span>
-          <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>categorías</span>
+          <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>{i.allCategories}</span>
         </div>
       </div>
 
-      {/* Filters */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-        <input className="form-input" style={{ maxWidth: 260 }} placeholder="Buscar prompts…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <input className="form-input" style={{ maxWidth: 260 }} placeholder={`${i.search} prompts…`} value={search} onChange={(e) => setSearch(e.target.value)} />
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <button
             className={`btn ${!filterCategory ? 'btn-primary' : 'btn-secondary'}`}
             style={{ fontSize: 12, padding: '5px 12px' }}
             onClick={() => setFilterCategory('')}
-          >Todos</button>
+          >{i.all}</button>
           {categories.map((c) => {
             const cat = CATEGORIES.find((x) => x.value === c.category) ?? { label: c.category, icon: '💬' };
             return (
@@ -646,19 +624,16 @@ export default function AiPromptsPage() {
         </div>
       </div>
 
-      {/* Content */}
       {loading ? (
-        <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 60 }}>Cargando…</div>
+        <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 60 }}>{i.loading}</div>
       ) : filtered.length === 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 80, gap: 14, color: 'var(--text-muted)' }}>
           <div style={{ fontSize: 56 }}>🤖</div>
-          <div style={{ fontSize: 17, fontWeight: 600 }}>No hay prompts de IA aún</div>
-          <div style={{ fontSize: 13, textAlign: 'center', maxWidth: 360 }}>
-            Crea prompts reutilizables para que tu equipo genere respuestas consistentes y de alta calidad.
-          </div>
+          <div style={{ fontSize: 17, fontWeight: 600 }}>{i.noAiPromptsYet}</div>
+          <div style={{ fontSize: 13, textAlign: 'center', maxWidth: 360 }}>{i.noAiPromptsHint}</div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-secondary" onClick={() => setShowTemplates(true)}>📋 Ver plantillas</button>
-            <button className="btn btn-primary" onClick={() => { setEditing(null); setInitialForm(null); setShowModal(true); }}>+ Crear prompt</button>
+            <button className="btn btn-secondary" onClick={() => setShowTemplates(true)}>📋 {i.aiPromptsTemplatesBtn}</button>
+            <button className="btn btn-primary" onClick={() => { setEditing(null); setInitialForm(null); setShowModal(true); }}>+ {i.create}</button>
           </div>
         </div>
       ) : (
@@ -672,16 +647,14 @@ export default function AiPromptsPage() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
                 {group.items.map((p) => (
                   <div key={p.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10, opacity: p.is_active ? 1 : 0.65 }}>
-                    {/* Header */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                       <div>
                         <div style={{ fontWeight: 600, fontSize: 14 }}>{p.name}</div>
                         {p.description && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{p.description}</div>}
                       </div>
-                      {!p.is_active && <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 8, background: '#f3f4f6', color: '#6b7280', flexShrink: 0 }}>Inactivo</span>}
+                      {!p.is_active && <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 8, background: '#f3f4f6', color: '#6b7280', flexShrink: 0 }}>{i.inactive}</span>}
                     </div>
 
-                    {/* Badges */}
                     <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                       <ProviderBadge provider={p.provider} />
                       <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 10, background: 'var(--bg-secondary)', color: 'var(--text-muted)' }}>{p.model}</span>
@@ -692,26 +665,23 @@ export default function AiPromptsPage() {
                       )}
                     </div>
 
-                    {/* Prompt preview */}
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: 6, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {p.prompt_text.substring(0, 90)}{p.prompt_text.length > 90 ? '…' : ''}
                     </div>
 
-                    {/* Stats */}
                     <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--text-muted)' }}>
-                      <span>🔥 {p.usage_count} usos</span>
+                      <span>🔥 {p.usage_count}</span>
                       <span>🌡 {p.temperature}</span>
                       <span>📝 {p.max_tokens} tokens</span>
-                      <span style={{ marginLeft: 'auto' }}>{fmtDate(p.created_at)}</span>
+                      <span style={{ marginLeft: 'auto' }}>{new Date(p.created_at).toLocaleDateString(i.locale, { day: '2-digit', month: 'short', year: 'numeric' })}</span>
                     </div>
 
-                    {/* Actions */}
                     <div style={{ display: 'flex', gap: 6, paddingTop: 4, borderTop: '1px solid var(--border)' }}>
                       <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '5px 0', justifyContent: 'center' }} onClick={() => setRunning(p)}>
-                        ▶ Ejecutar
+                        ▶ {i.aiPromptRun}
                       </button>
-                      <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 8px' }} onClick={() => { setEditing(p); setInitialForm(null); setShowModal(true); }}>Editar</button>
-                      <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 8px' }} onClick={() => handleDuplicate(p)}>Copiar</button>
+                      <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 8px' }} onClick={() => { setEditing(p); setInitialForm(null); setShowModal(true); }}>{i.edit}</button>
+                      <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 8px' }} onClick={() => handleDuplicate(p)}>{i.copy}</button>
                       <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 8px', color: 'var(--danger)' }} onClick={() => handleDelete(p)}>✕</button>
                     </div>
                   </div>
@@ -722,7 +692,6 @@ export default function AiPromptsPage() {
         </div>
       )}
 
-      {/* Modals */}
       {showModal && (
         <PromptModal
           prompt={editing ?? (initialForm ? { ...initialForm } as AiPrompt : null)}

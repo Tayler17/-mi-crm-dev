@@ -3,6 +3,8 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
 import { BotActionsService } from './bot-actions.service';
+import { ElevenLabsTtsService } from './elevenlabs-tts.service';
+import { KnowledgeBaseService } from '../knowledge-base/knowledge-base.service';
 import * as https from 'https';
 import * as http from 'http';
 
@@ -34,13 +36,35 @@ const VOICE_MAP: Record<string, { name: string; language: string }> = {
   'male_pt-BR':    { name: 'Polly.Ricardo',  language: 'pt-BR' },
 };
 
+// Instant acknowledgment templates when AI triggers a CRM tool.
+// Avoids a second AI round-trip — tools run in background while bot speaks.
+const TOOL_ACK: Record<string, Record<string, string>> = {
+  es: {
+    create_deal:  'Perfecto, he registrado el trato. ¿En qué más puedo ayudarte?',
+    create_task:  'Listo, he creado la tarea. ¿Hay algo más?',
+    add_tag:      'De acuerdo, he etiquetado el contacto. ¿Algo más?',
+    update_deal:  'Hecho, he actualizado el trato. ¿En qué más te puedo ayudar?',
+    default:      'Listo, lo he registrado. ¿En qué más puedo ayudarte?',
+  },
+  en: {
+    create_deal:  "Done, I've registered the deal. Anything else?",
+    create_task:  "Done, I've created the task. Anything else?",
+    add_tag:      "Done, I've tagged the contact. Anything else?",
+    update_deal:  "Done, I've updated the deal. Anything else?",
+    default:      "Done, I've recorded that. Anything else?",
+  },
+};
+
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 type CallMeta = { contactId: string | null; tenantId: string; contactName?: string | null };
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
-function buildTools(stageNames: string[]): Array<{ name: string; description: string; parameters: any }> {
+function buildTools(stageNames: string[], tagNames: string[] = []): Array<{ name: string; description: string; parameters: any }> {
   const stagesDesc = stageNames.length ? `Available stages: ${stageNames.join(', ')}.` : '';
+  const tagsDesc = tagNames.length
+    ? `MANDATORY — as soon as you identify the caller's main intent, call add_tag with the most appropriate tag from this list: ${tagNames.join(', ')}. Call it in the same turn you identify the intent, do not wait until the end of the call. If the topic changes, use add_tag for the new one.`
+    : 'Add a categorization tag to the contact based on the conversation topic.';
   return [
     {
       name: 'create_deal',
@@ -59,12 +83,12 @@ function buildTools(stageNames: string[]): Array<{ name: string; description: st
     },
     {
       name: 'create_task',
-      description: 'Create a follow-up task in the CRM. Use for callbacks, follow-ups, or reminders about this caller.',
+      description: 'Create a follow-up task, callback reminder, or leave an internal note in the CRM. Use when: the caller asks you to "leave a note", "call them back", "remind someone", or requests a follow-up of any kind.',
       parameters: {
         type: 'object',
         properties: {
-          title:       { type: 'string', description: 'Task title, e.g. "Llamar para confirmar entrega"' },
-          description: { type: 'string', description: 'Task details (optional)' },
+          title:       { type: 'string', description: 'Task title, e.g. "Llamar de vuelta a cliente" or "Nota: cliente interesado en plan premium"' },
+          description: { type: 'string', description: 'Full details of the note or task' },
           due_date:    { type: 'string', description: 'Due date in YYYY-MM-DD format (optional)' },
           priority:    { type: 'string', enum: ['low', 'medium', 'high'] },
         },
@@ -73,11 +97,11 @@ function buildTools(stageNames: string[]): Array<{ name: string; description: st
     },
     {
       name: 'add_tag',
-      description: 'Add a tag/label to this contact. Use to categorize or mark the contact based on conversation.',
+      description: tagsDesc,
       parameters: {
         type: 'object',
         properties: {
-          tag_name: { type: 'string', description: 'Tag name to add to the contact' },
+          tag_name: { type: 'string', description: tagNames.length ? `Tag to assign. Choose from: ${tagNames.join(', ')}` : 'Tag name to add to the contact' },
         },
         required: ['tag_name'],
       },
@@ -137,12 +161,12 @@ function twiml(inner: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?><Response>${inner.trim()}</Response>`;
 }
 
-function httpPost(url: string, body: string, headers: Record<string, string>): Promise<string> {
+function httpPost(url: string, body: string, headers: Record<string, string>, timeoutMs = 12_000): Promise<string> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const lib = parsed.protocol === 'https:' ? https : http;
     const req = lib.request(
-      { hostname: parsed.hostname, path: parsed.pathname + parsed.search, method: 'POST', headers },
+      { hostname: parsed.hostname, path: parsed.pathname + parsed.search, method: 'POST', headers, timeout: timeoutMs },
       (res) => {
         let data = '';
         res.on('data', (chunk) => (data += chunk));
@@ -150,6 +174,7 @@ function httpPost(url: string, body: string, headers: Record<string, string>): P
       },
     );
     req.on('error', reject);
+    req.on('timeout', () => { req.destroy(new Error(`httpPost timeout after ${timeoutMs}ms`)); });
     req.write(body);
     req.end();
   });
@@ -158,15 +183,148 @@ function httpPost(url: string, body: string, headers: Record<string, string>): P
 @Injectable()
 export class CallBotTwilioService {
   private readonly logger = new Logger(CallBotTwilioService.name);
-  private readonly callHistories  = new Map<string, ChatMessage[]>();
-  private readonly callTranscripts = new Map<string, string>();   // callSid → transcript text
-  private readonly callMeta        = new Map<string, CallMeta>(); // callSid → contact + tenant
+  private readonly callHistories   = new Map<string, ChatMessage[]>();
+  private readonly callTranscripts = new Map<string, string>();
+  private readonly callMeta        = new Map<string, CallMeta>();
+  private readonly ttsFiles        = new Map<string, string[]>();
+
+  // ── TTL caches — avoid repeated DB queries on every voice turn ────────────────
+  private readonly botCache    = new Map<string, { v: any;   exp: number }>();
+  private readonly queuesCache = new Map<string, { v: any[]; exp: number }>();
+  private readonly ctxCache    = new Map<string, { v: any;   exp: number }>();
+
+  /** callSid → timestamp of last activity, for TTL eviction */
+  private readonly callLastSeen = new Map<string, number>();
 
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly platformSettings: PlatformSettingsService,
     private readonly botActions: BotActionsService,
-  ) {}
+    private readonly elevenLabs: ElevenLabsTtsService,
+    private readonly kbSvc: KnowledgeBaseService,
+  ) {
+    // Evict stale call state every 10 min (handles calls where status callback never fires)
+    setInterval(() => this.evictStaleCalls(), 10 * 60 * 1_000);
+  }
+
+  private evictStaleCalls(): void {
+    const TTL = 60 * 60 * 1_000; // 1 hour
+    const now = Date.now();
+    for (const [sid, ts] of this.callLastSeen) {
+      if (now - ts > TTL) {
+        const files = this.ttsFiles.get(sid) ?? [];
+        files.forEach((f) => this.elevenLabs.cleanup(f));
+        this.callHistories.delete(sid);
+        this.callTranscripts.delete(sid);
+        this.callMeta.delete(sid);
+        this.ttsFiles.delete(sid);
+        this.callLastSeen.delete(sid);
+        this.logger.warn(`[callbot] Evicted stale call state for ${sid} (no status callback in 1h)`);
+      }
+    }
+  }
+
+  // ── Cached getters ────────────────────────────────────────────────────────────
+
+  private async getBot(botId: string): Promise<any> {
+    const c = this.botCache.get(botId);
+    if (c && c.exp > Date.now()) return c.v;
+    const [bot] = await this.db.query(`SELECT * FROM call_bots WHERE id = $1`, [botId]);
+    if (bot) this.botCache.set(botId, { v: bot, exp: Date.now() + 30_000 }); // 30s
+    return bot ?? null;
+  }
+
+  private async getQueues(botId: string, tenantId: string): Promise<any[]> {
+    const c = this.queuesCache.get(botId);
+    if (c && c.exp > Date.now()) return c.v;
+    const rows = await this.db.query(
+      `SELECT DISTINCT q.name AS queue_name, cb.name AS bot_name
+       FROM queues q
+       INNER JOIN call_bots cb ON q.tenant_id::text = cb.tenant_id AND q.id = ANY(cb.queue_ids::uuid[])
+       WHERE q.tenant_id::text = $1 AND q.is_active = true AND cb.status = 'active' AND cb.id != $2
+       ORDER BY q.name`,
+      [tenantId, botId],
+    ).catch(() => []);
+    this.queuesCache.set(botId, { v: rows, exp: Date.now() + 30_000 }); // 30s
+    return rows;
+  }
+
+  private async getCrmCtx(tenantId: string): Promise<{ stages: any[]; tags: any[] }> {
+    const c = this.ctxCache.get(tenantId);
+    if (c && c.exp > Date.now()) return c.v;
+    const ctx = await this.botActions.getContext(tenantId).catch(() => ({ stages: [], tags: [] }));
+    this.ctxCache.set(tenantId, { v: ctx, exp: Date.now() + 300_000 }); // 5 min
+    return ctx;
+  }
+
+  // ── TTS element builder ───────────────────────────────────────────────────────
+
+  /** Build a <Say> or <Play> element depending on the bot's TTS provider. */
+  private async ttsElement(
+    text: string,
+    bot: any,
+    callSid: string,
+    baseUrl: string,
+  ): Promise<string> {
+    if (bot.tts_provider === 'elevenlabs') {
+      const apiKey = (await this.platformSettings.get('elevenlabs.api_key').catch(() => '')) as string;
+      if (apiKey) {
+        try {
+          const filename = await this.elevenLabs.generateAudio(text, apiKey, bot.tts_voice_id ?? '');
+          const prev = this.ttsFiles.get(callSid) ?? [];
+          this.ttsFiles.set(callSid, [...prev, filename]);
+          return `<Play>${baseUrl}/call-bots/twilio/tts/${filename}</Play>`;
+        } catch (err) {
+          this.logger.warn(`[ElevenLabs] TTS failed, falling back to Twilio Say: ${err}`);
+        }
+      }
+    } else if (bot.tts_provider === 'openai_tts') {
+      const { apiKey: oaiKey } = await this.platformSettings.getAI().catch(() => ({ apiKey: '' }));
+      if (oaiKey) {
+        try {
+          const filename = await this.generateOpenAiTts(text, oaiKey);
+          const prev = this.ttsFiles.get(callSid) ?? [];
+          this.ttsFiles.set(callSid, [...prev, filename]);
+          return `<Play>${baseUrl}/call-bots/twilio/tts/${filename}</Play>`;
+        } catch (err) {
+          this.logger.warn(`[OpenAI TTS] failed, falling back: ${err}`);
+        }
+      }
+    }
+    // Default: Twilio Polly <Say> — fastest option, no extra API call
+    const voice = resolveVoice(bot.voice_type, bot.language);
+    return `<Say voice="${voice.name}" language="${voice.language}">${xe(text)}</Say>`;
+  }
+
+  private async generateOpenAiTts(text: string, apiKey: string): Promise<string> {
+    const fs = await import('fs');
+    const path = await import('path');
+    const TTS_DIR = '/app/uploads/tts';
+    fs.mkdirSync(TTS_DIR, { recursive: true });
+    const body = JSON.stringify({ model: 'tts-1', input: text.slice(0, 4096), voice: 'nova', response_format: 'mp3' });
+    const audioBuffer = await new Promise<Buffer>((resolve, reject) => {
+      const req = https.request(
+        { hostname: 'api.openai.com', path: '/v1/audio/speech', method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, 'Content-Length': Buffer.byteLength(body) } },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c) => chunks.push(c));
+          res.on('end', () => {
+            const buf = Buffer.concat(chunks);
+            (res.statusCode ?? 0) >= 400 ? reject(new Error(`OpenAI TTS ${res.statusCode}`)) : resolve(buf);
+          });
+        },
+      );
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`;
+    fs.writeFileSync(path.join(TTS_DIR, filename), audioBuffer);
+    return filename;
+  }
+
+  // ── Incoming call ─────────────────────────────────────────────────────────────
 
   /**
    * Called when Twilio receives an inbound call on the bot's phone number.
@@ -179,15 +337,14 @@ export class CallBotTwilioService {
     to: string,
     baseUrl: string,
   ): Promise<string> {
-    const [bot] = await this.db.query(
-      `SELECT * FROM call_bots WHERE id = $1 AND status = 'active'`,
-      [botId],
-    );
+    const bot = await this.getBot(botId);
 
-    if (!bot) {
+    if (!bot || bot.status !== 'active') {
       this.logger.warn(`Incoming call to inactive/missing bot ${botId}`);
       return twiml(`<Say>This service is not available. Goodbye.</Say><Hangup/>`);
     }
+
+    this.callLastSeen.set(callSid, Date.now());
 
     // Check if this is a transferred call (same callSid re-entering from <Redirect>)
     const isTransferredCall = this.callHistories.has(callSid);
@@ -202,6 +359,43 @@ export class CallBotTwilioService {
       this.callMeta.set(callSid, { contactId: contact?.id ?? null, tenantId: bot.tenant_id, contactName: contact?.name });
     }
 
+    // Auto-create contact for unknown callers so CRM actions work
+    if (!contact && !isTransferredCall && from) {
+      // Try insert first; if phone already exists fall back to SELECT
+      const [created] = await this.db.query(
+        `INSERT INTO contacts (tenant_id, full_name, phone, created_at, updated_at)
+         VALUES ($1, $2, $3, NOW(), NOW())
+         ON CONFLICT DO NOTHING
+         RETURNING id, full_name AS name, email`,
+        [bot.tenant_id, `Llamada entrante ${from}`, from],
+      ).catch(() => [null]);
+
+      if (created) {
+        contact = created;
+        this.logger.log(`[callbot] Auto-created contact for ${from}: ${contact!.id}`);
+      } else {
+        // Contact already existed — look it up by phone
+        const digits = from.replace(/\D/g, '');
+        const last9  = digits.slice(-9);
+        const [existing] = await this.db.query(
+          `SELECT id, full_name AS name, email FROM contacts
+           WHERE tenant_id = $1
+             AND phone IS NOT NULL
+             AND (phone = $2
+               OR REGEXP_REPLACE(phone, '[^0-9]', '', 'g') = $3
+               OR REGEXP_REPLACE(phone, '[^0-9]', '', 'g') LIKE $4)
+           LIMIT 1`,
+          [bot.tenant_id, from, digits, `%${last9}`],
+        ).catch(() => [null]);
+        if (existing) contact = existing;
+      }
+
+      if (contact) {
+        this.callMeta.set(callSid, { contactId: contact.id, tenantId: bot.tenant_id, contactName: contact.name });
+        this.logger.log(`[callbot] Contact resolved for ${from}: ${contact.id}`);
+      }
+    }
+
     if (contact) {
       this.logger.log(`[callbot] Call ${callSid} identified contact "${contact.name}" (${contact.id}) transferred=${isTransferredCall}`);
     } else {
@@ -213,44 +407,46 @@ export class CallBotTwilioService {
       const pc = bot.provider_config ?? {};
       const hasTransfer = !!(pc.transferToNumber ?? pc.transfer_to_number);
 
-      // Load CRM context for function calling
-      const crmCtx = await this.botActions.getContext(bot.tenant_id);
+      // Load all context in parallel
+      const [crmCtx, transferableQueues, prevLogs] = await Promise.all([
+        this.getCrmCtx(bot.tenant_id),
+        this.getQueues(botId, bot.tenant_id),
+        (!isTransferredCall && from)
+          ? this.db.query(
+              `SELECT transcript FROM call_logs
+               WHERE from_number = $1 AND transcript IS NOT NULL AND LENGTH(transcript) > 20
+               ORDER BY started_at DESC LIMIT 2`,
+              [from],
+            ).catch(() => [])
+          : Promise.resolve([]),
+      ]);
+
       const contactLine = contact ? `CONTACTO IDENTIFICADO: ${contact.name}${contact.email ? ` (${contact.email})` : ''}.` : '';
 
-      // Load previous call transcript for this number (persistent memory)
       let memoryNote = '';
-      if (!isTransferredCall && from) {
-        const prevLogs = await this.db.query(
-          `SELECT transcript FROM call_logs
-           WHERE from_number = $1 AND transcript IS NOT NULL AND LENGTH(transcript) > 20
-           ORDER BY started_at DESC LIMIT 2`,
-          [from],
-        ).catch(() => []);
-        if (prevLogs.length > 0) {
-          const summaries = prevLogs.map((l: any, i: number) => `[Llamada anterior ${i + 1}]:\n${l.transcript}`).join('\n\n');
-          memoryNote = `MEMORIA DE LLAMADAS ANTERIORES (mismo contacto):\n${summaries}`;
-        }
+      if (prevLogs.length > 0) {
+        const summaries = prevLogs.map((l: any, i: number) => `[Llamada anterior ${i + 1}]:\n${l.transcript}`).join('\n\n');
+        memoryNote = `MEMORIA DE LLAMADAS ANTERIORES (mismo contacto):\n${summaries}`;
       }
 
-      // Load available queues with call bots for queue-transfer instructions
-      const transferableQueues = await this.db.query(
-        `SELECT DISTINCT q.name AS queue_name, cb.name AS bot_name
-         FROM queues q
-         INNER JOIN call_bots cb ON q.tenant_id::text = cb.tenant_id AND q.id = ANY(cb.queue_ids::uuid[])
-         WHERE q.tenant_id::text = $1 AND q.is_active = true AND cb.status = 'active' AND cb.id != $2
-         ORDER BY q.name`,
-        [bot.tenant_id, botId],
-      ).catch((e: any) => { this.logger.error(`[callbot] transferableQueues query error: ${e.message}`); return []; });
+      // Generate clean ASCII slugs for queue transfer
+      const toSlug = (name: string) =>
+        name.replace(/[^\w\s]/g, ' ').trim().toLowerCase().replace(/\s+/g, '-').replace(/-+/g, '-');
 
-      // Use bot names as transfer keys — more natural for AI than queue names
       const queueLines = transferableQueues.map((q: any) => {
-        const key = q.bot_name.toLowerCase().replace(/\s+/g, '-');
-        return `  - ${q.bot_name}: escribe [QUEUE:${key}]`;
+        const key = toSlug(q.bot_name);
+        const label = q.bot_name.replace(/^[\p{Emoji}\s]+/u, '').trim();
+        return `  - "${label}": escribe [QUEUE:${key}]`;
       }).join('\n');
 
-      const crmInstructions = crmCtx.stages.length
-        ? `HERRAMIENTAS CRM DISPONIBLES: Puedes registrar tratos, tareas y etiquetas en el CRM durante la llamada usando las funciones disponibles. Úsalas de forma silenciosa y continúa la conversación sin mencionar el CRM al cliente.${crmCtx.stages.length ? ` Etapas de pipeline disponibles: ${crmCtx.stages.map((s: any) => s.name).join(', ')}.` : ''}`
-        : '';
+      const addTagInstruction = crmCtx.tags.length
+        ? `- add_tag: OBLIGATORIO — en cuanto identifiques la intención principal del cliente, aplica la etiqueta más apropiada de esta lista: ${crmCtx.tags.map((t: any) => t.name).join(', ')}. Úsala en el mismo turno en que queda clara la intención, no esperes al final de la llamada.`
+        : `- add_tag: para etiquetar al contacto según el tema de la llamada.`;
+      const crmInstructions = `HERRAMIENTAS CRM DISPONIBLES: Durante la llamada puedes usar las funciones del CRM de forma silenciosa sin mencionárselas al cliente.
+- create_deal: cuando el cliente muestra interés, hace una reserva, o se cierra una venta.
+- create_task: cuando el cliente pide que le llamen, pide que le dejen una nota, o necesita seguimiento. También úsalo si te piden "dejar una nota" o "recordatorio".
+${addTagInstruction}
+- update_deal: para actualizar un trato existente.${crmCtx.stages.length ? `\nEtapas de pipeline: ${crmCtx.stages.map((s: any) => s.pipeline_name ? `${s.name} (${s.pipeline_name})` : s.name).join(', ')}.` : ''}`;
 
       const instructions = [
         bot.system_prompt,
@@ -268,7 +464,6 @@ export class CallBotTwilioService {
       ].filter(Boolean).join('\n\n');
 
       if (isTransferredCall) {
-        // Transfer case: keep previous conversation turns but replace the system prompt with this bot's instructions
         const prevHistory = this.callHistories.get(callSid)!;
         const prevTurns = prevHistory.filter((m) => m.role !== 'system');
         const prevSummaryLine = prevTurns.length > 0
@@ -287,18 +482,20 @@ export class CallBotTwilioService {
     const voice  = resolveVoice(bot.voice_type, bot.language);
     const gather = `${baseUrl}/call-bots/twilio/${botId}/gather`;
 
-    const welcome = xe(
+    const welcomeText =
       bot.welcome_message ||
-        (bot.language.startsWith('es') ? 'Hola, bienvenido. ¿En qué puedo ayudarte?' : 'Hello, how can I help you today?'),
-    );
+      (bot.language.startsWith('es') ? 'Hola, bienvenido. ¿En qué puedo ayudarte?' : 'Hello, how can I help you today?');
+    const welcomeEl = await this.ttsElement(welcomeText, bot, callSid, baseUrl);
 
     return twiml(`
-      <Gather input="speech" action="${gather}" timeout="5" speechTimeout="auto" language="${voice.language}">
-        <Say voice="${voice.name}" language="${voice.language}">${welcome}</Say>
+      <Gather input="speech" action="${gather}" timeout="6" speechTimeout="auto" language="${voice.language}">
+        ${welcomeEl}
       </Gather>
       <Redirect method="POST">${gather}</Redirect>
     `);
   }
+
+  // ── Gather handler (called every user turn) ───────────────────────────────────
 
   /**
    * Called after the user speaks (Gather result).
@@ -310,11 +507,7 @@ export class CallBotTwilioService {
     speechResult: string,
     baseUrl: string,
   ): Promise<string> {
-    const [bot] = await this.db.query(
-      `SELECT * FROM call_bots WHERE id = $1`,
-      [botId],
-    );
-
+    const bot = await this.getBot(botId);
     if (!bot) return twiml(`<Hangup/>`);
 
     const voice   = resolveVoice(bot.voice_type, bot.language);
@@ -322,129 +515,117 @@ export class CallBotTwilioService {
     const keyword = (bot.handoff_keyword || 'agent').toLowerCase();
     const speech  = (speechResult || '').trim();
 
-    // Append user speech to transcript
-    const prevTranscript = this.callTranscripts.get(callSid) ?? '';
-
     // No speech captured → re-gather silently
     if (!speech) {
+      const stillThereEl = await this.ttsElement(
+        bot.language.startsWith('es') ? '¿Sigues ahí?' : 'Are you still there?',
+        bot, callSid, baseUrl,
+      );
       return twiml(`
-        <Gather input="speech" action="${gather}" timeout="5" speechTimeout="auto" language="${voice.language}">
-          <Say voice="${voice.name}" language="${voice.language}">${xe(bot.language.startsWith('es') ? '¿Sigues ahí?' : 'Are you still there?')}</Say>
+        <Gather input="speech" action="${gather}" timeout="6" speechTimeout="auto" language="${voice.language}">
+          ${stillThereEl}
         </Gather>
         <Hangup/>
       `);
     }
 
+    this.callLastSeen.set(callSid, Date.now());
+
     // Append user turn to transcript
+    const prevTranscript = this.callTranscripts.get(callSid) ?? '';
     this.callTranscripts.set(callSid, prevTranscript + `[Usuario]: ${speech}\n`);
 
     const pc = bot.provider_config ?? {};
     const { apiKey: aiApiKey, provider: aiProvider, model: aiPlatformModel } = await this.platformSettings.getAI();
-    const transferToNum  = pc.transferToNumber ?? pc.transfer_to_number ?? '';
-
-    // Load queues that have an active call bot (for two-step transfer classification)
-    const transferableQueues: Array<{ queue_name: string; bot_name: string }> = aiApiKey
-      ? await this.db.query(
-          `SELECT DISTINCT q.name AS queue_name, cb.name AS bot_name
-           FROM queues q
-           INNER JOIN call_bots cb ON q.tenant_id::text = cb.tenant_id AND q.id = ANY(cb.queue_ids::uuid[])
-           WHERE q.tenant_id::text = $1 AND q.is_active = true AND cb.status = 'active' AND cb.id != $2
-           ORDER BY q.name`,
-          [bot.tenant_id, botId],
-        ).catch((e: any) => { this.logger.error(`[callbot] handleGather queues query error: ${e.message}`); return []; })
-      : [];
+    const transferToNum = pc.transferToNumber ?? pc.transfer_to_number ?? '';
 
     // Keyword fallback (only when no AI configured)
     const hasAi = !!aiApiKey;
     if (!hasAi && speech.toLowerCase().includes(keyword)) {
       this.callHistories.delete(callSid);
       await this.db.query(`UPDATE call_bots SET transferred_calls=transferred_calls+1, updated_at=NOW() WHERE id=$1`, [botId]).catch(() => {});
-      const msg = xe(bot.language.startsWith('es') ? 'Un momento, te transfiero con un agente.' : 'One moment, transferring you.');
+      const transferMsg = bot.language.startsWith('es') ? 'Un momento, te transfiero con un agente.' : 'One moment, transferring you.';
+      const transferEl = await this.ttsElement(transferMsg, bot, callSid, baseUrl);
       if (transferToNum) {
-        return twiml(`<Say voice="${voice.name}" language="${voice.language}">${msg}</Say><Dial timeout="30" callerId="${bot.phone_number ?? ''}">${xe(transferToNum)}</Dial>`);
+        return twiml(`${transferEl}<Dial timeout="30" callerId="${bot.phone_number ?? ''}">${xe(transferToNum)}</Dial>`);
       }
-      return twiml(`<Say voice="${voice.name}" language="${voice.language}">${msg}</Say><Hangup/>`);
+      return twiml(`${transferEl}<Hangup/>`);
     }
 
     if (aiApiKey && bot.system_prompt) {
-      // Play a brief filler to mask AI latency
-      const rawReply = await this.callAi(bot, callSid, speech, aiProvider, aiApiKey, aiPlatformModel);
+      // Parallel: load queues (cached) + RAG search — don't block on either
+      const [transferableQueues, ragContext] = await Promise.all([
+        this.getQueues(botId, bot.tenant_id),
+        this.kbSvc.searchRelevantContext(botId, bot.tenant_id, speech).catch(() => ''),
+      ]);
+
+      const rawReply = await this.callAi(bot, callSid, speech, aiProvider, aiApiKey, aiPlatformModel, ragContext);
       if (rawReply) {
         const wantsTransfer  = rawReply.includes('[TRANSFER]');
         const wantsHangup    = rawReply.includes('[HANGUP]');
-        const transferQueue  = this.extractQueueTag(rawReply);  // [QUEUE:nombre]
+        const transferQueue  = this.extractQueueTag(rawReply);
         const cleanReply     = rawReply
           .replace(/\[TRANSFER\]/g, '').replace(/\[HANGUP\]/g, '').replace(/\[QUEUE:[^\]]+\]/g, '').trim();
 
         // Append bot turn to transcript
         this.callTranscripts.set(callSid, (this.callTranscripts.get(callSid) ?? '') + `[Bot]: ${cleanReply}\n`);
 
-        // Transfer to another queue's bot — same call, no extra phone number needed
+        // Transfer to another queue's bot
         if (transferQueue) {
           const destBotId = await this.resolveQueueBotId(bot.tenant_id, transferQueue, botId);
           this.logger.log(`[callbot] Queue transfer "${transferQueue}" → destBotId=${destBotId ?? 'NOT FOUND'}`);
           if (destBotId) {
             await this.db.query(`UPDATE call_bots SET transferred_calls=transferred_calls+1, updated_at=NOW() WHERE id=$1`, [botId]).catch(() => {});
-            // Keep callHistories alive — dest bot's handleIncomingCall will reuse them with its own system prompt
             const destVoiceUrl = `${baseUrl}/call-bots/twilio/${destBotId}/voice`;
-            return twiml(`
-              <Say voice="${voice.name}" language="${voice.language}">${xe(cleanReply)}</Say>
-              <Redirect method="POST">${destVoiceUrl}</Redirect>
-            `);
+            const replyEl = await this.ttsElement(cleanReply, bot, callSid, baseUrl);
+            return twiml(`${replyEl}<Redirect method="POST">${destVoiceUrl}</Redirect>`);
           }
           this.logger.warn(`[callbot] No bot found for queue "${transferQueue}", falling through`);
         }
 
-        // Transfer: AI said [TRANSFER] — classify whether it's a queue or a human agent
+        // Transfer: AI said [TRANSFER]
         if (wantsTransfer) {
-          // Two-step: if there are other bots available, ask AI to classify destination
           if (transferableQueues.length > 0) {
             const destBotName = await this.classifyQueueTransfer(bot, callSid, aiProvider, aiApiKey, aiPlatformModel, transferableQueues);
             this.logger.log(`[callbot] Two-step classification result: "${destBotName}"`);
 
             if (destBotName && destBotName !== 'human') {
-              const slug = destBotName.toLowerCase().replace(/\s+/g, '-');
+              const toSlugLocal = (n: string) =>
+                n.replace(/[^\w\s]/g, ' ').trim().toLowerCase().replace(/\s+/g, '-').replace(/-+/g, '-');
+              const slug = toSlugLocal(destBotName);
               const destBotId = await this.resolveQueueBotId(bot.tenant_id, slug, botId);
               this.logger.log(`[callbot] Classified queue "${destBotName}" slug="${slug}" → destBotId=${destBotId ?? 'NOT FOUND'}`);
               if (destBotId) {
                 await this.db.query(`UPDATE call_bots SET transferred_calls=transferred_calls+1, updated_at=NOW() WHERE id=$1`, [botId]).catch(() => {});
-                // Keep callHistories alive — dest bot will reuse them with its own system prompt
                 const destVoiceUrl = `${baseUrl}/call-bots/twilio/${destBotId}/voice`;
-                return twiml(`
-                  <Say voice="${voice.name}" language="${voice.language}">${xe(cleanReply)}</Say>
-                  <Redirect method="POST">${destVoiceUrl}</Redirect>
-                `);
+                const classReplyEl = await this.ttsElement(cleanReply, bot, callSid, baseUrl);
+                return twiml(`${classReplyEl}<Redirect method="POST">${destVoiceUrl}</Redirect>`);
               }
             }
           }
 
-          // Fall back to human agent dial
           if (transferToNum) {
             await this.db.query(`UPDATE call_bots SET transferred_calls=transferred_calls+1, updated_at=NOW() WHERE id=$1`, [botId]).catch(() => {});
-            // Keep transcript in map — handleStatus will save and clean it
             this.callHistories.delete(callSid);
-            return twiml(`
-              <Say voice="${voice.name}" language="${voice.language}">${xe(cleanReply)}</Say>
-              <Dial timeout="30" callerId="${bot.phone_number ?? ''}">${xe(transferToNum)}</Dial>
-            `);
+            const humanReplyEl = await this.ttsElement(cleanReply, bot, callSid, baseUrl);
+            return twiml(`${humanReplyEl}<Dial timeout="30" callerId="${bot.phone_number ?? ''}">${xe(transferToNum)}</Dial>`);
           }
 
-          // No human number configured either — just continue conversation
           this.logger.warn(`[callbot] [TRANSFER] detected but no destination available, continuing`);
         }
 
         if (wantsHangup) {
           this.callHistories.delete(callSid);
           this.callTranscripts.delete(callSid);
-          return twiml(`
-            <Say voice="${voice.name}" language="${voice.language}">${xe(cleanReply)}</Say>
-            <Hangup/>
-          `);
+          this.ttsFiles.delete(callSid);
+          const hangupEl = await this.ttsElement(cleanReply, bot, callSid, baseUrl);
+          return twiml(`${hangupEl}<Hangup/>`);
         }
 
+        const replyEl = await this.ttsElement(cleanReply, bot, callSid, baseUrl);
         return twiml(`
           <Gather input="speech" action="${gather}" timeout="8" speechTimeout="auto" language="${voice.language}">
-            <Say voice="${voice.name}" language="${voice.language}">${xe(cleanReply)}</Say>
+            ${replyEl}
           </Gather>
           <Redirect method="POST">${gather}</Redirect>
         `);
@@ -452,10 +633,11 @@ export class CallBotTwilioService {
     }
 
     // Fallback
-    const fallback = xe(bot.fallback_message || (bot.language.startsWith('es') ? 'Lo siento, no entendí. ¿Puedes repetirlo?' : 'I did not understand. Could you repeat that?'));
+    const fallbackText = bot.fallback_message || (bot.language.startsWith('es') ? 'Lo siento, no entendí. ¿Puedes repetirlo?' : 'I did not understand. Could you repeat that?');
+    const fallbackEl = await this.ttsElement(fallbackText, bot, callSid, baseUrl);
     return twiml(`
-      <Gather input="speech" action="${gather}" timeout="5" speechTimeout="auto" language="${voice.language}">
-        <Say voice="${voice.name}" language="${voice.language}">${fallback}</Say>
+      <Gather input="speech" action="${gather}" timeout="6" speechTimeout="auto" language="${voice.language}">
+        ${fallbackEl}
       </Gather>
       <Hangup/>
     `);
@@ -467,26 +649,20 @@ export class CallBotTwilioService {
   }
 
   private async resolveQueueBotId(tenantId: string, queueKey: string, excludeBotId: string): Promise<string | null> {
-    // queueKey is slugified bot name e.g. "bot-de-ventas"
-    // Convert slug back to fuzzy search: "bot-de-ventas" → "bot de ventas"
-    const fuzzy = '%' + queueKey.replace(/-/g, '%') + '%';
-    const [row] = await this.db.query(
-      `SELECT cb.id
-       FROM call_bots cb
-       INNER JOIN queues q ON q.tenant_id::text = cb.tenant_id AND q.id = ANY(cb.queue_ids::uuid[])
-       WHERE cb.tenant_id = $1
-         AND cb.status = 'active'
-         AND cb.id != $3
-         AND (LOWER(cb.name) LIKE LOWER($2) OR LOWER(q.name) LIKE LOWER($2))
-       LIMIT 1`,
-      [tenantId, fuzzy, excludeBotId],
+    const toSlug = (name: string) =>
+      name.replace(/[^\w\s]/g, ' ').trim().toLowerCase().replace(/\s+/g, '-').replace(/-+/g, '-');
+
+    const bots = await this.db.query(
+      `SELECT id, name FROM call_bots WHERE tenant_id = $1 AND status = 'active' AND id != $2`,
+      [tenantId, excludeBotId],
     ).catch((e: any) => { this.logger.error(`[callbot] resolveQueueBotId error: ${e.message}`); return []; });
-    return row?.id ?? null;
+
+    const match = bots.find((b: any) => toSlug(b.name) === queueKey);
+    return match?.id ?? null;
   }
 
   /**
-   * Second AI call: given the conversation history, classify which bot/queue the caller wants.
-   * Returns the matched bot name from the queues list, or "human" if none match.
+   * Second AI call: classify which bot/queue the caller wants.
    */
   private async classifyQueueTransfer(
     bot: any,
@@ -511,8 +687,7 @@ export class CallBotTwilioService {
 
       if (provider === 'openai') {
         const model = platformModel || 'gpt-4o-mini';
-        const messages = [{ role: 'user', content: classifyPrompt }];
-        const body = JSON.stringify({ model, messages, max_tokens: 30, temperature: 0 });
+        const body = JSON.stringify({ model, messages: [{ role: 'user', content: classifyPrompt }], max_tokens: 20, temperature: 0 });
         const raw = await httpPost(
           'https://api.openai.com/v1/chat/completions',
           body,
@@ -522,7 +697,7 @@ export class CallBotTwilioService {
 
       } else if (provider === 'anthropic') {
         const model = platformModel || 'claude-haiku-4-5-20251001';
-        const body = JSON.stringify({ model, messages: [{ role: 'user', content: classifyPrompt }], max_tokens: 30 });
+        const body = JSON.stringify({ model, messages: [{ role: 'user', content: classifyPrompt }], max_tokens: 20 });
         const raw = await httpPost(
           'https://api.anthropic.com/v1/messages',
           body,
@@ -532,7 +707,7 @@ export class CallBotTwilioService {
 
       } else if (provider === 'gemini') {
         const model = platformModel || 'gemini-1.5-flash';
-        const body = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: classifyPrompt }] }], generationConfig: { maxOutputTokens: 30, temperature: 0 } });
+        const body = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: classifyPrompt }] }], generationConfig: { maxOutputTokens: 20, temperature: 0 } });
         const raw = await httpPost(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
           body,
@@ -543,7 +718,6 @@ export class CallBotTwilioService {
 
       if (!reply) return 'human';
 
-      // Match reply to a known bot name (case-insensitive, partial)
       const replyLower = reply.toLowerCase();
       const matched = botNames.find((name) => replyLower.includes(name.toLowerCase()) || name.toLowerCase().includes(replyLower));
       this.logger.log(`[callbot classify] reply="${reply}" matched="${matched ?? 'none'}" options="${optionsList}"`);
@@ -555,10 +729,18 @@ export class CallBotTwilioService {
     }
   }
 
+  // ── AI call with background tool execution ────────────────────────────────────
+
   /**
-   * Calls the configured AI provider with the conversation history.
-   * Supports function calling (one tool-use loop) for create_deal, create_task, add_tag, update_deal.
-   * Returns the AI text response (may contain [TRANSFER] or [HANGUP] signals), or null on failure.
+   * Calls the configured AI provider.
+   *
+   * Optimization: when the AI triggers CRM tools, the tools execute in the
+   * background (fire-and-forget) while the bot immediately responds with a
+   * short acknowledgment — eliminating the second AI round-trip (~1-2s saved).
+   *
+   * If the AI already included text content alongside the tool call (common
+   * with GPT-4o and Claude), that text is used directly, making the response
+   * feel natural without any template.
    */
   private async callAi(
     bot: any,
@@ -567,145 +749,132 @@ export class CallBotTwilioService {
     provider: string,
     apiKey: string,
     platformModel: string,
+    ragContext = '',
   ): Promise<string | null> {
     const history: ChatMessage[] = this.callHistories.get(callSid) ?? [
       { role: 'system', content: bot.system_prompt ?? '' },
     ];
 
-    history.push({ role: 'user', content: userMessage });
+    const userContent = ragContext
+      ? `[Contexto relevante de la base de conocimiento:\n${ragContext}]\n\n${userMessage}`
+      : userMessage;
+    history.push({ role: 'user', content: userContent });
 
-    const meta = this.callMeta.get(callSid);
-    const crmCtx = meta ? await this.botActions.getContext(meta.tenantId).catch(() => ({ stages: [], tags: [] })) : { stages: [], tags: [] };
-    const tools = buildTools(crmCtx.stages.map((s: any) => s.name));
+    const meta    = this.callMeta.get(callSid);
+    const tenantId = meta?.tenantId ?? bot.tenant_id;
+    const crmCtx  = await this.getCrmCtx(tenantId);
+    const tools   = buildTools(
+      crmCtx.stages.map((s: any) => s.pipeline_name ? `${s.name} (${s.pipeline_name})` : s.name),
+      crmCtx.tags.map((t: any) => t.name),
+    );
+
+    const isEs = bot.language?.startsWith('es') ?? true;
+    const langKey = isEs ? 'es' : 'en';
+
+    /** Fire CRM tools in background without blocking voice response */
+    const fireTools = (calls: Array<{ name: string; args: any }>) => {
+      for (const { name, args } of calls) {
+        this.botActions.executeTool(tenantId, meta?.contactId ?? null, name, args)
+          .then((r) => this.logger.log(`[bot-action] ${name} → ${r}`))
+          .catch((e) => this.logger.warn(`[bot-action] ${name} failed: ${e.message}`));
+      }
+    };
+
+    /** Pick a TOOL_ACK template for the first tool called */
+    const toolAck = (firstName: string): string =>
+      TOOL_ACK[langKey]?.[firstName] ?? TOOL_ACK[langKey]?.default ?? 'Listo.';
 
     try {
       let reply: string | null = null;
 
       // ── OpenAI ──────────────────────────────────────────────────────────────
       if (provider === 'openai') {
-        const model = platformModel || 'gpt-4o-mini';
+        const model    = platformModel || 'gpt-4o-mini';
         const oaiTools = toOpenAITools(tools);
 
-        const body1 = JSON.stringify({ model, messages: history, tools: oaiTools, tool_choice: 'auto', max_tokens: 200, temperature: 0.7 });
-        const raw1 = await httpPost(
+        const body1 = JSON.stringify({ model, messages: history, tools: oaiTools, tool_choice: 'auto', max_tokens: 120, temperature: 0.7 });
+        const raw1  = await httpPost(
           'https://api.openai.com/v1/chat/completions',
           body1,
           { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, 'Content-Length': Buffer.byteLength(body1).toString() },
         );
-        const json1 = JSON.parse(raw1);
-        const msg1 = json1.choices?.[0]?.message;
+        const msg1 = JSON.parse(raw1).choices?.[0]?.message;
 
         if (msg1?.tool_calls?.length) {
-          // Execute tool calls (one loop)
-          const toolMessages: any[] = [msg1];
-          for (const tc of msg1.tool_calls) {
-            const args = JSON.parse(tc.function?.arguments ?? '{}');
-            const result = await this.botActions.executeTool(meta?.tenantId ?? bot.tenant_id, meta?.contactId ?? null, tc.function.name, args);
-            this.logger.log(`[bot-action] OpenAI tool call: ${tc.function.name}(${tc.function.arguments}) → ${result}`);
-            toolMessages.push({ role: 'tool', tool_call_id: tc.id, content: result });
-          }
-          // Second call for final text response
-          const msgs2 = [...history, ...toolMessages];
-          const body2 = JSON.stringify({ model, messages: msgs2, max_tokens: 150, temperature: 0.7 });
-          const raw2 = await httpPost(
-            'https://api.openai.com/v1/chat/completions',
-            body2,
-            { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, 'Content-Length': Buffer.byteLength(body2).toString() },
-          );
-          reply = JSON.parse(raw2).choices?.[0]?.message?.content?.trim() ?? null;
+          // Fire tools in background — do NOT await
+          fireTools(msg1.tool_calls.map((tc: any) => ({
+            name: tc.function.name,
+            args: JSON.parse(tc.function?.arguments ?? '{}'),
+          })));
+
+          // Use AI text content if provided alongside tool call, else use template
+          reply = msg1.content?.trim() || toolAck(msg1.tool_calls[0]?.function?.name ?? 'default');
         } else {
           reply = msg1?.content?.trim() ?? null;
         }
 
       // ── Anthropic ────────────────────────────────────────────────────────────
       } else if (provider === 'anthropic') {
-        const model = platformModel || 'claude-haiku-4-5-20251001';
+        const model     = platformModel || 'claude-haiku-4-5-20251001';
         const systemMsg = history.find((m) => m.role === 'system')?.content ?? '';
-        const msgs = history.filter((m) => m.role !== 'system');
+        const msgs      = history.filter((m) => m.role !== 'system');
         const anthTools = toAnthropicTools(tools);
 
-        const body1 = JSON.stringify({ model, system: systemMsg, messages: msgs, tools: anthTools, max_tokens: 200 });
-        const raw1 = await httpPost(
+        const body1 = JSON.stringify({ model, system: systemMsg, messages: msgs, tools: anthTools, max_tokens: 120 });
+        const raw1  = await httpPost(
           'https://api.anthropic.com/v1/messages',
           body1,
           { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Length': Buffer.byteLength(body1).toString() },
         );
         const json1 = JSON.parse(raw1);
-        const toolUseBlocks = (json1.content ?? []).filter((b: any) => b.type === 'tool_use');
+        const textBlock  = (json1.content ?? []).find((b: any) => b.type === 'text');
+        const toolBlocks = (json1.content ?? []).filter((b: any) => b.type === 'tool_use');
 
-        if (toolUseBlocks.length) {
-          const toolResults: any[] = [];
-          for (const block of toolUseBlocks) {
-            const result = await this.botActions.executeTool(meta?.tenantId ?? bot.tenant_id, meta?.contactId ?? null, block.name, block.input ?? {});
-            this.logger.log(`[bot-action] Anthropic tool call: ${block.name} → ${result}`);
-            toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result });
-          }
-          // Second call with tool results
-          const msgs2 = [
-            ...msgs,
-            { role: 'assistant', content: json1.content },
-            { role: 'user', content: toolResults },
-          ];
-          const body2 = JSON.stringify({ model, system: systemMsg, messages: msgs2, max_tokens: 150 });
-          const raw2 = await httpPost(
-            'https://api.anthropic.com/v1/messages',
-            body2,
-            { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Length': Buffer.byteLength(body2).toString() },
-          );
-          reply = JSON.parse(raw2).content?.[0]?.text?.trim() ?? null;
+        if (toolBlocks.length) {
+          // Fire tools in background — do NOT await
+          fireTools(toolBlocks.map((b: any) => ({ name: b.name, args: b.input ?? {} })));
+
+          // Use AI text if present alongside tool call, else use template
+          reply = textBlock?.text?.trim() || toolAck(toolBlocks[0]?.name ?? 'default');
         } else {
-          reply = json1.content?.[0]?.text?.trim() ?? null;
+          reply = textBlock?.text?.trim() ?? null;
         }
 
       // ── Gemini ───────────────────────────────────────────────────────────────
       } else if (provider === 'gemini') {
-        const model = platformModel || 'gemini-1.5-flash';
+        const model            = platformModel || 'gemini-1.5-flash';
         const systemInstruction = bot.system_prompt ? { parts: [{ text: bot.system_prompt }] } : undefined;
-        const contents = history
+        const contents         = history
           .filter((m) => m.role !== 'system')
           .map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
         const geminiTools = toGeminiTools(tools);
 
-        const body1 = JSON.stringify({ systemInstruction, contents, tools: geminiTools, generationConfig: { maxOutputTokens: 200 } });
-        const raw1 = await httpPost(
+        const body1 = JSON.stringify({ systemInstruction, contents, tools: geminiTools, generationConfig: { maxOutputTokens: 120 } });
+        const raw1  = await httpPost(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
           body1,
           { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body1).toString() },
         );
-        const json1 = JSON.parse(raw1);
+        const json1  = JSON.parse(raw1);
         const parts1 = json1.candidates?.[0]?.content?.parts ?? [];
-        const fnCall = parts1.find((p: any) => p.functionCall);
+        const fnCall  = parts1.find((p: any) => p.functionCall);
+        const textPart = parts1.find((p: any) => p.text);
 
         if (fnCall) {
-          const result = await this.botActions.executeTool(
-            meta?.tenantId ?? bot.tenant_id,
-            meta?.contactId ?? null,
-            fnCall.functionCall.name,
-            fnCall.functionCall.args ?? {},
-          );
-          this.logger.log(`[bot-action] Gemini function call: ${fnCall.functionCall.name} → ${result}`);
+          // Fire tool in background — do NOT await
+          fireTools([{ name: fnCall.functionCall.name, args: fnCall.functionCall.args ?? {} }]);
 
-          const contents2 = [
-            ...contents,
-            { role: 'model', parts: parts1 },
-            { role: 'user', parts: [{ functionResponse: { name: fnCall.functionCall.name, response: JSON.parse(result) } }] },
-          ];
-          const body2 = JSON.stringify({ systemInstruction, contents: contents2, generationConfig: { maxOutputTokens: 150 } });
-          const raw2 = await httpPost(
-            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-            body2,
-            { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body2).toString() },
-          );
-          reply = JSON.parse(raw2).candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
+          // Use AI text part if present alongside function call, else use template
+          reply = textPart?.text?.trim() || toolAck(fnCall.functionCall.name ?? 'default');
         } else {
-          reply = parts1.find((p: any) => p.text)?.text?.trim() ?? null;
+          reply = textPart?.text?.trim() ?? null;
         }
       }
 
       if (reply) {
         history.push({ role: 'assistant', content: reply });
         this.callHistories.set(callSid, history);
-        this.logger.log(`[callbot AI] callSid=${callSid} turns=${history.length} reply="${reply.slice(0, 60)}..."`);
+        this.logger.log(`[callbot AI] callSid=${callSid} turns=${history.length} reply="${reply.slice(0, 80)}"`);
       }
 
       return reply;
@@ -715,20 +884,25 @@ export class CallBotTwilioService {
     }
   }
 
+  // ── Status callback (call ended) ──────────────────────────────────────────────
+
   /**
    * Called by Twilio when a call ends (StatusCallback).
    * Saves a CallLog row and increments bot counters.
    */
   async handleStatus(botId: string, body: Record<string, string>): Promise<void> {
-    // Grab transcript + contact info before cleaning up
-    const transcript  = body.CallSid ? (this.callTranscripts.get(body.CallSid) ?? null) : null;
-    const meta        = body.CallSid ? (this.callMeta.get(body.CallSid) ?? null) : null;
-    const contactId   = meta?.contactId ?? null;
+    const transcript = body.CallSid ? (this.callTranscripts.get(body.CallSid) ?? null) : null;
+    const meta       = body.CallSid ? (this.callMeta.get(body.CallSid) ?? null) : null;
+    const contactId  = meta?.contactId ?? null;
 
     if (body.CallSid) {
       this.callHistories.delete(body.CallSid);
       this.callTranscripts.delete(body.CallSid);
       this.callMeta.delete(body.CallSid);
+      this.callLastSeen.delete(body.CallSid);
+      const files = this.ttsFiles.get(body.CallSid) ?? [];
+      files.forEach((f) => this.elevenLabs.cleanup(f));
+      this.ttsFiles.delete(body.CallSid);
     }
 
     const terminalStatuses = ['completed', 'busy', 'failed', 'no-answer', 'canceled'];
@@ -740,18 +914,61 @@ export class CallBotTwilioService {
     const recordingUrl = body.RecordingUrl ?? null;
 
     try {
+      const [bot] = await this.db.query(
+        `SELECT tenant_id, inbox_id, name FROM call_bots WHERE id = $1`,
+        [botId],
+      );
+      const tenantId = meta?.tenantId ?? bot?.tenant_id ?? null;
+      const inboxId  = bot?.inbox_id ?? null;
+
+      let conversationId: string | null = null;
+      if (inboxId && tenantId && body.CallStatus === 'completed') {
+        try {
+          const callerNumber = direction === 'inbound' ? (body.From ?? '') : (body.To ?? '');
+          const subject      = `Llamada ${direction === 'inbound' ? 'entrante' : 'saliente'} — ${callerNumber}`;
+          const noteBody     = [
+            `📞 **Llamada de voz** vía bot "${bot?.name ?? botId}"`,
+            `Duración: ${Math.floor(duration / 60)}m ${duration % 60}s`,
+            `Número: ${callerNumber}`,
+            transcript ? `\n**Transcript:**\n${transcript}` : '',
+          ].filter(Boolean).join('\n');
+
+          const [conv] = await this.db.query(
+            `INSERT INTO conversations
+               (tenant_id, inbox_id, contact_id, channel_type, status, subject, created_at, updated_at)
+             VALUES ($1, $2, $3, 'phone', 'open', $4, NOW(), NOW())
+             RETURNING id`,
+            [tenantId, inboxId, contactId, subject],
+          );
+          conversationId = conv?.id ?? null;
+
+          if (conversationId && noteBody) {
+            await this.db.query(
+              `INSERT INTO messages
+                 (tenant_id, conversation_id, body, sender_type, direction, content_type, is_private, created_at)
+               VALUES ($1, $2, $3, 'bot', 'inbound', 'text', false, NOW())`,
+              [tenantId, conversationId, noteBody],
+            );
+          }
+
+          this.logger.log(`[callbot] Created conversation ${conversationId} in inbox ${inboxId} for call ${body.CallSid}`);
+        } catch (convErr) {
+          this.logger.warn(`[callbot] Could not create conversation: ${convErr}`);
+        }
+      }
+
       await this.db.query(
         `INSERT INTO call_logs
            (tenant_id, bot_id, direction, from_number, to_number, duration, status, outcome, recording_url, transcript,
-            contact_id, started_at, ended_at, created_at)
-         SELECT
-           cb.tenant_id, cb.id, $2, $3, $4, $5, $6, $7, $8, $9,
-           $10,
+            contact_id, conversation_id, started_at, ended_at, created_at)
+         VALUES (
+           $11, $1, $2, $3, $4, $5, $6, $7, $8, $9,
+           $10, $12,
            NOW() - ($5::int * INTERVAL '1 second'),
-           NOW(),
-           NOW()
-         FROM call_bots cb WHERE cb.id = $1`,
-        [botId, direction, body.From ?? '', body.To ?? '', duration, body.CallStatus, outcome, recordingUrl, transcript, contactId],
+           NOW(), NOW()
+         )`,
+        [botId, direction, body.From ?? '', body.To ?? '', duration, body.CallStatus, outcome, recordingUrl, transcript,
+         contactId, tenantId, conversationId],
       );
 
       await this.db.query(

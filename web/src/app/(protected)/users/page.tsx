@@ -1,39 +1,64 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getUsers, createUser, updateUser, deactivateUser, type User } from '@/lib/api';
+import { getUsers, createUser, updateUser, deactivateUser, getStoredUser, type User } from '@/lib/api';
+import { useLangCtx } from '@/lib/lang-context';
+import { APP } from '@/lib/i18n/app';
 
-const ROLES = ['admin', 'manager', 'agent'] as const;
-type Role = typeof ROLES[number];
+const ALL_ROLES = ['owner', 'admin', 'agent'] as const;
+type Role = typeof ALL_ROLES[number];
 
-const ROLE_META: Record<string, { label: string; color: string; bg: string }> = {
-  admin:   { label: 'Admin',   color: '#7c3aed', bg: '#ede9fe' },
-  manager: { label: 'Manager', color: '#0369a1', bg: '#e0f2fe' },
-  agent:   { label: 'Agente',  color: '#15803d', bg: '#dcfce7' },
+const ROLE_RANK: Record<string, number> = { owner: 100, admin: 50, agent: 10 };
+const ROLE_META: Record<string, { label: string; color: string; bg: string; desc: string }> = {
+  owner: { label: 'Owner',  color: '#7c3aed', bg: '#ede9fe', desc: 'Superadministrador de la plataforma' },
+  admin: { label: 'Admin',  color: '#2563eb', bg: '#dbeafe', desc: 'Administra el workspace y sus usuarios' },
+  agent: { label: 'Agente', color: '#059669', bg: '#d1fae5', desc: 'Atiende conversaciones y gestiona contactos' },
 };
 
-function Avatar({ name, size = 36 }: { name: string; size?: number }) {
+const AVAIL_COLOR: Record<string, string> = {
+  online: '#22c55e',
+  away:   '#f59e0b',
+  busy:   '#ef4444',
+  offline:'#9ca3af',
+};
+
+function Avatar({ name, size = 36, availability }: { name: string; size?: number; availability?: string }) {
   const initials = name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
   const colors = ['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f97316', '#22c55e', '#06b6d4', '#3b82f6'];
   const color = colors[name.charCodeAt(0) % colors.length];
   return (
-    <div style={{
-      width: size, height: size, borderRadius: '50%', background: color,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      color: '#fff', fontWeight: 700, fontSize: size * 0.35, flexShrink: 0,
-    }}>
-      {initials || '?'}
+    <div style={{ position: 'relative', flexShrink: 0, width: size, height: size }}>
+      <div style={{
+        width: size, height: size, borderRadius: '50%', background: color,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: '#fff', fontWeight: 700, fontSize: size * 0.35,
+      }}>
+        {initials || '?'}
+      </div>
+      {availability && (
+        <span style={{
+          position: 'absolute', bottom: 0, right: 0,
+          width: size * 0.28, height: size * 0.28, borderRadius: '50%',
+          background: AVAIL_COLOR[availability] ?? '#9ca3af',
+          border: '2px solid var(--surface, #fff)',
+        }} />
+      )}
     </div>
   );
 }
 
 export default function UsersPage() {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filterRole, setFilterRole] = useState('');
   const [filterStatus, setFilterStatus] = useState('active');
   const [search, setSearch] = useState('');
+
+  // Current logged-in user (for role cap)
+  const [myRole, setMyRole] = useState<string>('admin');
 
   // Create
   const [showCreate, setShowCreate] = useState(false);
@@ -53,12 +78,19 @@ export default function UsersPage() {
   const [ePassword, setEPassword] = useState('');
   const [eActive, setEActive] = useState(true);
 
+  // Only show roles up to current user's own role
+  const assignableRoles = ALL_ROLES.filter((r) => (ROLE_RANK[r] ?? 0) <= (ROLE_RANK[myRole] ?? 0));
+
   function load() {
     setLoading(true);
     getUsers().then(setUsers).catch((e) => setError(e.message)).finally(() => setLoading(false));
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const me = getStoredUser();
+    if (me?.role) setMyRole(me.role);
+    load();
+  }, []);
 
   function resetCreate() { setCEmail(''); setCName(''); setCPassword(''); setCRole('agent'); setCreateError(''); }
 
@@ -119,13 +151,13 @@ export default function UsersPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Usuarios</h1>
+          <h1 className="page-title">{lang === 'en' ? 'Users' : lang === 'pt' ? 'Usuários' : lang === 'tr' ? 'Kullanıcılar' : lang === 'ar' ? 'المستخدمون' : 'Usuarios'}</h1>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-            {activeCount} activos · {inactiveCount} inactivos
+            {activeCount} {i.active.toLowerCase()} · {inactiveCount} {i.inactive.toLowerCase()}
           </div>
         </div>
         <button className="btn btn-primary" onClick={() => { resetCreate(); setShowCreate(true); }}>
-          + Nuevo usuario
+          + {lang === 'en' ? 'New user' : lang === 'pt' ? 'Novo usuário' : lang === 'tr' ? 'Yeni kullanıcı' : lang === 'ar' ? 'مستخدم جديد' : 'Nuevo usuario'}
         </button>
       </div>
 
@@ -137,19 +169,19 @@ export default function UsersPage() {
           <input
             className="form-input"
             style={{ flex: 1, minWidth: 200 }}
-            placeholder="Buscar por nombre o email…"
+            placeholder={`${i.search}…`}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
           <select className="form-input" style={{ width: 150 }} value={filterRole} onChange={(e) => setFilterRole(e.target.value)}>
-            <option value="">Todos los roles</option>
-            {ROLES.map((r) => <option key={r} value={r}>{ROLE_META[r].label}</option>)}
+            <option value="">{lang === 'en' ? 'All roles' : lang === 'pt' ? 'Todos os papéis' : lang === 'tr' ? 'Tüm roller' : lang === 'ar' ? 'كل الأدوار' : 'Todos los roles'}</option>
+            {ALL_ROLES.map((r) => <option key={r} value={r}>{ROLE_META[r].label}</option>)}
           </select>
           <div className="filter-tabs">
             {[
-              { key: 'active', label: 'Activos' },
-              { key: 'inactive', label: 'Inactivos' },
-              { key: '', label: 'Todos' },
+              { key: 'active',   label: i.active },
+              { key: 'inactive', label: i.inactive },
+              { key: '',         label: i.all },
             ].map((t) => (
               <button key={t.key} className={`filter-tab${filterStatus === t.key ? ' active' : ''}`} onClick={() => setFilterStatus(t.key)}>
                 {t.label}
@@ -159,25 +191,25 @@ export default function UsersPage() {
         </div>
 
         {/* User list */}
-        {loading ? <div className="loading">Cargando…</div> : filtered.length === 0 ? (
+        {loading ? <div className="loading">{i.loading}</div> : filtered.length === 0 ? (
           <div className="empty">
             <div className="empty-icon">👥</div>
-            <p>{search || filterRole ? 'Sin resultados.' : 'No hay usuarios todavía.'}</p>
+            <p>{search || filterRole ? i.noResults : (lang === 'en' ? 'No users yet.' : lang === 'pt' ? 'Sem usuários ainda.' : lang === 'tr' ? 'Henüz kullanıcı yok.' : lang === 'ar' ? 'لا مستخدمون بعد.' : 'No hay usuarios todavía.')}</p>
             {!search && !filterRole && (
-              <button className="btn btn-primary" onClick={() => setShowCreate(true)}>Crear primer usuario</button>
+              <button className="btn btn-primary" onClick={() => setShowCreate(true)}>{lang === 'en' ? 'Create first user' : lang === 'pt' ? 'Criar primeiro usuário' : lang === 'tr' ? 'İlk kullanıcıyı oluştur' : lang === 'ar' ? 'إنشاء أول مستخدم' : 'Crear primer usuario'}</button>
             )}
           </div>
         ) : (
           <div className="card">
-            {filtered.map((u, i) => {
+            {filtered.map((u, idx) => {
               const rm = ROLE_META[u.role] ?? ROLE_META.agent;
               return (
                 <div key={u.id} style={{
                   display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px',
-                  borderBottom: i < filtered.length - 1 ? '1px solid var(--border)' : 'none',
+                  borderBottom: idx < filtered.length - 1 ? '1px solid var(--border)' : 'none',
                   opacity: u.isActive ? 1 : 0.55,
                 }}>
-                  <Avatar name={u.fullName || u.email} />
+                  <Avatar name={u.fullName || u.email} availability={u.availability} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 600, fontSize: 14 }}>{u.fullName}</span>
@@ -197,15 +229,15 @@ export default function UsersPage() {
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                     <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openEdit(u)}>
-                      Editar
+                      {i.edit}
                     </button>
                     {u.isActive ? (
                       <button className="btn btn-danger" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => handleDeactivate(u)}>
-                        Desactivar
+                        {lang === 'en' ? 'Deactivate' : lang === 'pt' ? 'Desativar' : lang === 'tr' ? 'Devre dışı bırak' : lang === 'ar' ? 'تعطيل' : 'Desactivar'}
                       </button>
                     ) : (
                       <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => handleReactivate(u)}>
-                        Reactivar
+                        {lang === 'en' ? 'Reactivate' : lang === 'pt' ? 'Reativar' : lang === 'tr' ? 'Yeniden etkinleştir' : lang === 'ar' ? 'إعادة تفعيل' : 'Reactivar'}
                       </button>
                     )}
                   </div>
@@ -221,37 +253,37 @@ export default function UsersPage() {
         <div className="modal-overlay" onClick={() => setShowCreate(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">Nuevo usuario</h2>
+              <h2 className="modal-title">{lang === 'en' ? 'New user' : lang === 'pt' ? 'Novo usuário' : lang === 'tr' ? 'Yeni kullanıcı' : lang === 'ar' ? 'مستخدم جديد' : 'Nuevo usuario'}</h2>
               <button className="modal-close" onClick={() => setShowCreate(false)}>×</button>
             </div>
             <form onSubmit={handleCreate}>
               <div className="modal-body">
                 {createError && <div className="error-msg">{createError}</div>}
                 <div className="form-group">
-                  <label className="form-label">Nombre completo *</label>
-                  <input className="form-input" value={cName} onChange={(e) => setCName(e.target.value)} autoFocus placeholder="Ej: María García" />
+                  <label className="form-label">{i.name} *</label>
+                  <input className="form-input" value={cName} onChange={(e) => setCName(e.target.value)} autoFocus placeholder={lang === 'en' ? 'E.g. John Smith' : 'Ej: María García'} />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Email *</label>
-                  <input className="form-input" type="email" value={cEmail} onChange={(e) => setCEmail(e.target.value)} placeholder="agente@empresa.com" />
+                  <label className="form-label">{i.email} *</label>
+                  <input className="form-input" type="email" value={cEmail} onChange={(e) => setCEmail(e.target.value)} placeholder="agent@company.com" />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Contraseña *</label>
-                  <input className="form-input" type="password" value={cPassword} onChange={(e) => setCPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
+                  <label className="form-label">{lang === 'en' ? 'Password *' : lang === 'pt' ? 'Senha *' : lang === 'tr' ? 'Şifre *' : lang === 'ar' ? 'كلمة المرور *' : 'Contraseña *'}</label>
+                  <input className="form-input" type="password" value={cPassword} onChange={(e) => setCPassword(e.target.value)} placeholder={lang === 'en' ? 'Minimum 6 characters' : 'Mínimo 6 caracteres'} />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Rol</label>
+                  <label className="form-label">{i.role}</label>
                   <select className="form-input" value={cRole} onChange={(e) => setCRole(e.target.value as Role)}>
-                    {ROLES.map((r) => <option key={r} value={r}>{ROLE_META[r].label}</option>)}
+                    {assignableRoles.map((r) => <option key={r} value={r}>{ROLE_META[r].label}</option>)}
                   </select>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                    Admin: acceso total · Manager: gestión de agentes · Agente: atención al cliente
+                    {ROLE_META[cRole]?.desc}
                   </div>
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(false)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={creating}>{creating ? 'Creando…' : 'Crear usuario'}</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(false)}>{i.cancel}</button>
+                <button type="submit" className="btn btn-primary" disabled={creating}>{creating ? i.saving : (lang === 'en' ? 'Create user' : lang === 'pt' ? 'Criar usuário' : lang === 'tr' ? 'Kullanıcı oluştur' : lang === 'ar' ? 'إنشاء مستخدم' : 'Crear usuario')}</button>
               </div>
             </form>
           </div>
@@ -264,7 +296,7 @@ export default function UsersPage() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Avatar name={editUser.fullName || editUser.email} size={32} />
+                <Avatar name={editUser.fullName || editUser.email} size={32} availability={editUser.availability} />
                 <h2 className="modal-title">{editUser.fullName}</h2>
               </div>
               <button className="modal-close" onClick={() => setEditUser(null)}>×</button>
@@ -273,34 +305,35 @@ export default function UsersPage() {
               <div className="modal-body">
                 {editError && <div className="error-msg">{editError}</div>}
                 <div className="form-group">
-                  <label className="form-label">Nombre completo *</label>
+                  <label className="form-label">{i.name} *</label>
                   <input className="form-input" value={eName} onChange={(e) => setEName(e.target.value)} autoFocus />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Email</label>
+                  <label className="form-label">{i.email}</label>
                   <input className="form-input" value={editUser.email} disabled style={{ opacity: .6, cursor: 'not-allowed' }} />
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>El email no se puede cambiar</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{lang === 'en' ? 'Email cannot be changed' : lang === 'pt' ? 'O email não pode ser alterado' : lang === 'tr' ? 'E-posta değiştirilemez' : lang === 'ar' ? 'لا يمكن تغيير البريد' : 'El email no se puede cambiar'}</div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Rol</label>
+                  <label className="form-label">{i.role}</label>
                   <select className="form-input" value={eRole} onChange={(e) => setERole(e.target.value as Role)}>
-                    {ROLES.map((r) => <option key={r} value={r}>{ROLE_META[r].label}</option>)}
+                    {assignableRoles.map((r) => <option key={r} value={r}>{ROLE_META[r].label}</option>)}
                   </select>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{ROLE_META[eRole]?.desc}</div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Nueva contraseña</label>
-                  <input className="form-input" type="password" value={ePassword} onChange={(e) => setEPassword(e.target.value)} placeholder="Dejar vacío para no cambiar" />
+                  <label className="form-label">{lang === 'en' ? 'New password' : lang === 'pt' ? 'Nova senha' : lang === 'tr' ? 'Yeni şifre' : lang === 'ar' ? 'كلمة مرور جديدة' : 'Nueva contraseña'}</label>
+                  <input className="form-input" type="password" value={ePassword} onChange={(e) => setEPassword(e.target.value)} placeholder={lang === 'en' ? 'Leave empty to keep current' : 'Dejar vacío para no cambiar'} />
                 </div>
                 <div className="form-group">
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                     <input type="checkbox" checked={eActive} onChange={(e) => setEActive(e.target.checked)} style={{ width: 16, height: 16 }} />
-                    <span className="form-label" style={{ margin: 0 }}>Usuario activo</span>
+                    <span className="form-label" style={{ margin: 0 }}>{lang === 'en' ? 'Active user' : lang === 'pt' ? 'Usuário ativo' : lang === 'tr' ? 'Aktif kullanıcı' : lang === 'ar' ? 'مستخدم نشط' : 'Usuario activo'}</span>
                   </label>
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setEditUser(null)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar cambios'}</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setEditUser(null)}>{i.cancel}</button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? i.saving : (lang === 'en' ? 'Save changes' : lang === 'pt' ? 'Salvar alterações' : lang === 'tr' ? 'Değişiklikleri kaydet' : lang === 'ar' ? 'حفظ التغييرات' : 'Guardar cambios')}</button>
               </div>
             </form>
           </div>

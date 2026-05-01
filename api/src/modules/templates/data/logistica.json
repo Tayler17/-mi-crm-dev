@@ -1,0 +1,62 @@
+{
+  "slug": "logistica",
+  "name": "Logística",
+  "description": "Rastreo de envíos, gestión de flota y soporte al cliente para empresas de logística y mensajería",
+  "icon": "🚚",
+  "pipelines": [
+    {
+      "name": "Envíos",
+      "stages": ["Pedido recibido", "En bodega", "En ruta", "En punto de entrega", "Entregado", "Devuelto"]
+    },
+    {
+      "name": "Clientes potenciales",
+      "stages": ["Contacto inicial", "Cotización enviada", "Negociación", "Contrato firmado", "Perdido"]
+    }
+  ],
+  "tags": [
+    { "name": "express", "color": "#ef4444" },
+    { "name": "fragil", "color": "#f97316" },
+    { "name": "devolucion", "color": "#8b5cf6" },
+    { "name": "corporativo", "color": "#3b82f6" },
+    { "name": "internacional", "color": "#14b8a6" },
+    { "name": "incidente", "color": "#f59e0b" }
+  ],
+  "cannedResponses": [
+    {
+      "title": "Número de rastreo",
+      "shortCode": "rastreo",
+      "category": "Envíos",
+      "content": "Hola {{contact.name}}, tu número de rastreo es {{tracking}}. Puedes seguir tu paquete en tiempo real en nuestra plataforma."
+    },
+    {
+      "title": "Entrega exitosa",
+      "shortCode": "entregado",
+      "category": "Envíos",
+      "content": "✅ Tu paquete ha sido entregado exitosamente. Si tienes alguna pregunta, estamos a tu disposición."
+    },
+    {
+      "title": "Retraso en entrega",
+      "shortCode": "retraso",
+      "category": "Envíos",
+      "content": "Lamentamos informarte que tu envío presenta un retraso. Estamos trabajando para entregarlo lo antes posible. Nueva fecha estimada: {{date}}."
+    },
+    {
+      "title": "Paquete no encontrado",
+      "shortCode": "no-encontrado",
+      "category": "Soporte",
+      "content": "Hemos escalado tu caso para investigar el paradero de tu paquete. Te contactaremos en un máximo de 24 horas con una respuesta."
+    },
+    {
+      "title": "Cotización de servicio",
+      "shortCode": "cotizacion",
+      "category": "Ventas",
+      "content": "Gracias por tu interés en nuestros servicios. Prepararemos tu cotización personalizada y te la enviaremos a la brevedad."
+    }
+  ],
+  "queues": [
+    { "name": "Rastreo de envíos", "description": "Consultas sobre estado y ubicación de paquetes" },
+    { "name": "Incidencias", "description": "Paquetes perdidos, dañados o con retraso" },
+    { "name": "Ventas corporativas", "description": "Prospección y contratos con empresas" },
+    { "name": "Soporte general", "description": "Consultas y atención general al cliente" }
+  ]
+}

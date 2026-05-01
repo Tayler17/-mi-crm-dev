@@ -32,7 +32,8 @@ export class CampaignsService {
        LEFT JOIN schedules s ON s.id = c.schedule_id
        WHERE c.tenant_id = $1
        GROUP BY c.id, s.name
-       ORDER BY c.created_at DESC`,
+       ORDER BY c.created_at DESC
+       LIMIT 200`,
       [tenantId],
     );
     return rows.map((r: any) => ({
@@ -76,8 +77,10 @@ export class CampaignsService {
       content: dto.content,
       messages: dto.messages ?? [],
       inboxId: dto.inboxId,
+      botId: dto.botId,
       scheduleId: dto.scheduleId,
       confirmationEnabled: dto.confirmationEnabled ?? false,
+      queueId: dto.queueId || undefined,
       scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
       status: dto.scheduledAt ? 'scheduled' : 'draft',
       createdBy: userId,
@@ -96,8 +99,10 @@ export class CampaignsService {
     if (dto.content !== undefined) campaign.content = dto.content;
     if (dto.messages !== undefined) campaign.messages = dto.messages;
     if (dto.inboxId !== undefined) campaign.inboxId = dto.inboxId;
+    if (dto.botId !== undefined) campaign.botId = dto.botId || undefined;
     if (dto.scheduleId !== undefined) campaign.scheduleId = dto.scheduleId || undefined;
     if (dto.confirmationEnabled !== undefined) campaign.confirmationEnabled = dto.confirmationEnabled;
+    if (dto.queueId !== undefined) campaign.queueId = dto.queueId || undefined;
     if (dto.scheduledAt !== undefined) campaign.scheduledAt = new Date(dto.scheduledAt);
 
     return this.campaignRepo.save(campaign);

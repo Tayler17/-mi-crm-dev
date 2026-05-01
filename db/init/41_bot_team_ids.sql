@@ -1,0 +1,2 @@
+ALTER TABLE ai_chatbots
+  ADD COLUMN IF NOT EXISTS team_ids UUID[] NOT NULL DEFAULT '{}';

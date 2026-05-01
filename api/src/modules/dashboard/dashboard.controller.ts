@@ -48,8 +48,8 @@ export class DashboardController {
           COUNT(*)::int AS total,
           COUNT(*) FILTER (WHERE status = 'won')::int AS won,
           COUNT(*) FILTER (WHERE status = 'lost')::int AS lost,
-          COUNT(*) FILTER (WHERE status = 'active')::int AS active,
-          COALESCE(SUM(value) FILTER (WHERE status = 'active'), 0)::numeric AS pipeline_value,
+          COUNT(*) FILTER (WHERE status NOT IN ('won','lost'))::int AS active,
+          COALESCE(SUM(value) FILTER (WHERE status NOT IN ('won','lost')), 0)::numeric AS pipeline_value,
           COALESCE(SUM(value) FILTER (WHERE status = 'won'), 0)::numeric AS won_value
          FROM deals WHERE tenant_id = $1`,
         [tenantId],
@@ -91,7 +91,7 @@ export class DashboardController {
       this.db.query(
         `SELECT ps.name, COUNT(d.id)::int AS count, COALESCE(SUM(d.value), 0)::numeric AS value
          FROM pipeline_stages ps
-         LEFT JOIN deals d ON d.stage_id = ps.id AND d.tenant_id = $1 AND d.status = 'active'
+         LEFT JOIN deals d ON d.stage_id = ps.id AND d.tenant_id = $1 AND d.status NOT IN ('won','lost')
          JOIN pipelines p ON p.id = ps.pipeline_id AND p.tenant_id = $1 AND p.is_default = true
          GROUP BY ps.id, ps.name, ps.position
          ORDER BY ps.position`,
@@ -121,7 +121,7 @@ export class DashboardController {
       this.db.query(
         `SELECT
            COUNT(*)::int AS total,
-           COUNT(*) FILTER (WHERE status = 'active')::int AS active,
+           COUNT(*) FILTER (WHERE status = 'connected')::int AS active,
            COUNT(*) FILTER (WHERE status = 'error')::int AS errors
          FROM channel_connections WHERE tenant_id = $1`,
         [tenantId],

@@ -1,5 +1,9 @@
-import { Controller, Post, Param, Body, Req, Header } from '@nestjs/common';
+import { Controller, Post, Get, Param, Body, Req, Res, Header } from '@nestjs/common';
 import { CallBotTwilioService } from './call-bot-twilio.service';
+import * as fs from 'fs';
+import * as path from 'path';
+
+const TTS_DIR = '/app/uploads/tts';
 
 /**
  * Public endpoints — no JWT guard — called directly by Twilio.
@@ -65,5 +69,18 @@ export class CallBotWebhooksController {
   ): Promise<{ ok: boolean }> {
     await this.twilioSvc.handleStatus(botId, body);
     return { ok: true };
+  }
+
+  /** Serves ElevenLabs-generated MP3 files for Twilio <Play> */
+  @Get('/tts/:filename')
+  serveTts(@Param('filename') filename: string, @Res() res: any) {
+    const safe = path.basename(filename);
+    const fp = path.join(TTS_DIR, safe);
+    if (!safe.endsWith('.mp3') || !fs.existsSync(fp)) {
+      return res.status(404).send('Not found');
+    }
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'no-store');
+    fs.createReadStream(fp).pipe(res);
   }
 }

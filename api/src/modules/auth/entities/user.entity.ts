@@ -23,6 +23,21 @@ export class User {
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
+  @Column({ default: 'online' })
+  availability: string; // online | away | busy | offline
+
+  @Column({ name: 'reset_token', nullable: true, type: 'varchar' })
+  resetToken: string | null;
+
+  @Column({ name: 'reset_token_expires_at', nullable: true, type: 'timestamptz' })
+  resetTokenExpiresAt: Date | null;
+
+  @Column({ name: 'email_verification_token', nullable: true, type: 'varchar' })
+  emailVerificationToken: string | null;
+
+  @Column({ name: 'email_verified_at', nullable: true, type: 'timestamptz' })
+  emailVerifiedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

@@ -12,7 +12,7 @@ export class CreateUserDto {
   @MinLength(6)
   password: string;
 
-  @IsEnum(['admin', 'manager', 'agent'])
+  @IsEnum(['owner', 'admin', 'agent'])
   @IsOptional()
   role?: string;
 }
@@ -22,7 +22,7 @@ export class UpdateUserDto {
   @IsOptional()
   fullName?: string;
 
-  @IsEnum(['admin', 'manager', 'agent'])
+  @IsEnum(['owner', 'admin', 'agent'])
   @IsOptional()
   role?: string;
 

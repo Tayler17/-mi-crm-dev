@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Tag } from './entities/tag.entity';
 
 @Injectable()
@@ -8,10 +8,24 @@ export class TagsService {
   constructor(
     @InjectRepository(Tag)
     private readonly repo: Repository<Tag>,
+    @InjectDataSource()
+    private readonly db: DataSource,
   ) {}
 
-  findAll(tenantId: string) {
-    return this.repo.find({ where: { tenantId }, order: { name: 'ASC' } });
+  async findAll(tenantId: string) {
+    const rows = await this.db.query(
+      `SELECT t.id, t.tenant_id AS "tenantId", t.name, t.color, t.created_by AS "createdBy",
+              t.created_at AS "createdAt", t.updated_at AS "updatedAt",
+              COUNT(ct.contact_id)::int AS "contactCount"
+       FROM tags t
+       LEFT JOIN contact_tags ct ON ct.tag_id = t.id
+       WHERE t.tenant_id = $1
+       GROUP BY t.id
+       ORDER BY t.name ASC
+       LIMIT 500`,
+      [tenantId],
+    );
+    return rows;
   }
 
   async findOne(id: string, tenantId: string) {

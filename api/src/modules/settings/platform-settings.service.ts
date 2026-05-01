@@ -9,11 +9,25 @@ export const PLATFORM_KEYS = [
   'voice.provider',
   'voice.account_sid',
   'voice.auth_token',
+  'meta.app_id',
+  'meta.app_secret',
+  'elevenlabs.api_key',
+  'stripe.secret_key',
+  'stripe.webhook_secret',
+  'stripe.publishable_key',
+  'backup.enabled',
+  'backup.cron',
+  'backup.retention_days',
+  'backup.s3_bucket',
+  'backup.s3_region',
+  'backup.s3_access_key',
+  'backup.s3_secret_key',
+  'backup.s3_prefix',
 ] as const;
 
 export type PlatformKey = (typeof PLATFORM_KEYS)[number];
 
-const SENSITIVE = new Set<PlatformKey>(['ai.api_key', 'voice.auth_token']);
+const SENSITIVE = new Set<PlatformKey>(['ai.api_key', 'voice.auth_token', 'meta.app_secret', 'elevenlabs.api_key', 'stripe.secret_key', 'stripe.webhook_secret', 'backup.s3_secret_key']);
 const MASK = '••••••••';
 
 /** Maps each platform key to its env-var fallback (for local dev / initial setup). */
@@ -24,6 +38,20 @@ const ENV_FALLBACKS: Record<PlatformKey, string> = {
   'voice.provider':    'VOICE_PROVIDER',
   'voice.account_sid': 'TWILIO_ACCOUNT_SID',
   'voice.auth_token':  'TWILIO_AUTH_TOKEN',
+  'meta.app_id':          'META_APP_ID',
+  'meta.app_secret':      'META_APP_SECRET',
+  'elevenlabs.api_key':   'ELEVENLABS_API_KEY',
+  'stripe.secret_key':     'STRIPE_SECRET_KEY',
+  'stripe.webhook_secret': 'STRIPE_WEBHOOK_SECRET',
+  'stripe.publishable_key':'STRIPE_PUBLISHABLE_KEY',
+  'backup.enabled':        'BACKUP_ENABLED',
+  'backup.cron':           'BACKUP_CRON',
+  'backup.retention_days': 'BACKUP_RETENTION_DAYS',
+  'backup.s3_bucket':      'BACKUP_S3_BUCKET',
+  'backup.s3_region':      'BACKUP_S3_REGION',
+  'backup.s3_access_key':  'BACKUP_S3_ACCESS_KEY',
+  'backup.s3_secret_key':  'BACKUP_S3_SECRET_KEY',
+  'backup.s3_prefix':      'BACKUP_S3_PREFIX',
 };
 
 @Injectable()
@@ -50,6 +78,43 @@ export class PlatformSettingsService {
       apiKey:   await this.get('ai.api_key'),
       provider: (await this.get('ai.provider')) || 'openai',
       model:    await this.get('ai.model'),
+    };
+  }
+
+  /** Get Meta (Facebook/Instagram) credentials in one shot. */
+  async getMeta(): Promise<{ appId: string; appSecret: string }> {
+    await this.loadCache();
+    return {
+      appId:     await this.get('meta.app_id'),
+      appSecret: await this.get('meta.app_secret'),
+    };
+  }
+
+  /** Get backup configuration in one shot. */
+  async getBackup(): Promise<{
+    enabled: boolean; cron: string; retentionDays: number;
+    s3Bucket: string; s3Region: string; s3AccessKey: string; s3SecretKey: string; s3Prefix: string;
+  }> {
+    await this.loadCache();
+    return {
+      enabled:       (await this.get('backup.enabled')) === 'true',
+      cron:          (await this.get('backup.cron'))    || '0 2 * * *',
+      retentionDays: parseInt(await this.get('backup.retention_days')) || 7,
+      s3Bucket:      await this.get('backup.s3_bucket'),
+      s3Region:      (await this.get('backup.s3_region')) || 'us-east-1',
+      s3AccessKey:   await this.get('backup.s3_access_key'),
+      s3SecretKey:   await this.get('backup.s3_secret_key'),
+      s3Prefix:      (await this.get('backup.s3_prefix')) || 'backups/',
+    };
+  }
+
+  /** Get Stripe credentials in one shot. */
+  async getStripe(): Promise<{ secretKey: string; webhookSecret: string; publishableKey: string }> {
+    await this.loadCache();
+    return {
+      secretKey:      await this.get('stripe.secret_key'),
+      webhookSecret:  await this.get('stripe.webhook_secret'),
+      publishableKey: await this.get('stripe.publishable_key'),
     };
   }
 

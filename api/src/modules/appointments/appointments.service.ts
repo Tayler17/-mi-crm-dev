@@ -21,8 +21,19 @@ export class AppointmentsService {
     }
 
     const rows = await this.db.query(
-      `SELECT a.*, ct.full_name as contact_name, ct.phone as contact_phone, ct.email as contact_email,
-              u.full_name as user_name
+      `SELECT a.*,
+              a.scheduled_at   AS "scheduledAt",
+              a.contact_id     AS "contactId",
+              a.inbox_id       AS "inboxId",
+              a.open_ticket    AS "openTicket",
+              a.ticket_status  AS "ticketStatus",
+              a.assigned_user_id AS "assignedUserId",
+              a.created_at     AS "createdAt",
+              a.updated_at     AS "updatedAt",
+              ct.full_name  AS contact_name,
+              ct.phone      AS contact_phone,
+              ct.email      AS contact_email,
+              u.full_name   AS user_name
        FROM appointments a
        LEFT JOIN contacts ct ON ct.id = a.contact_id
        LEFT JOIN users u ON u.id = a.user_id

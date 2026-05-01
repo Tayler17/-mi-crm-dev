@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, FindManyOptions } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BaseTenantService } from '../../common/services/base-tenant.service';
 import { Deal } from './entities/deal.entity';
@@ -18,11 +18,13 @@ export class DealsService extends BaseTenantService<Deal> {
     super(dealsRepo, auditService, eventEmitter);
   }
 
-  findAll(tenantId: string) {
+  findAll(tenantId: string, options?: FindManyOptions<Deal>): Promise<Deal[]> {
     return this.dealsRepo.find({
       where: { tenantId },
       relations: ['stage', 'contact'],
       order: { createdAt: 'DESC' },
+      take: 500,
+      ...options,
     });
   }
 
@@ -44,7 +46,8 @@ export class DealsService extends BaseTenantService<Deal> {
        WHERE d.tenant_id = $1
        ${pipelineId ? `AND ps.pipeline_id = '${pipelineId}'` : ''}
        AND d.status != 'lost'
-       ORDER BY ps.position ASC NULLS LAST, d.created_at DESC`,
+       ORDER BY ps.position ASC NULLS LAST, d.created_at DESC
+       LIMIT 500`,
       [tenantId],
     );
   }

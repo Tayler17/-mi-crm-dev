@@ -1,0 +1,62 @@
+{
+  "slug": "clinica",
+  "name": "Clínica / Salud",
+  "description": "Agendado de citas, seguimiento de pacientes y comunicación médica para clínicas y consultorios",
+  "icon": "🏥",
+  "pipelines": [
+    {
+      "name": "Citas médicas",
+      "stages": ["Solicitud", "Confirmada", "En consulta", "Completada", "Seguimiento", "Cancelada"]
+    },
+    {
+      "name": "Pacientes nuevos",
+      "stages": ["Primer contacto", "Historia clínica", "Evaluación inicial", "Plan de tratamiento", "Alta"]
+    }
+  ],
+  "tags": [
+    { "name": "nueva-cita", "color": "#3b82f6" },
+    { "name": "recurrente", "color": "#10b981" },
+    { "name": "seguro", "color": "#8b5cf6" },
+    { "name": "particular", "color": "#f59e0b" },
+    { "name": "urgencia", "color": "#ef4444" },
+    { "name": "seguimiento", "color": "#14b8a6" }
+  ],
+  "cannedResponses": [
+    {
+      "title": "Confirmación de cita",
+      "shortCode": "cita-confirmada",
+      "category": "Citas",
+      "content": "Hola {{contact.name}}, tu cita ha sido confirmada para el {{date}} a las {{time}} con el Dr./Dra. {{doctor}}. Por favor, llega 10 minutos antes."
+    },
+    {
+      "title": "Recordatorio de cita",
+      "shortCode": "cita-recordatorio",
+      "category": "Citas",
+      "content": "Recordatorio: tienes una cita mañana a las {{time}}. Si necesitas cancelar o reprogramar, avísanos con anticipación."
+    },
+    {
+      "title": "Cancelación de cita",
+      "shortCode": "cita-cancelada",
+      "category": "Citas",
+      "content": "Tu cita ha sido cancelada. Para agendar una nueva, responde este mensaje o llámanos. Que te mejores pronto. 💙"
+    },
+    {
+      "title": "Resultados disponibles",
+      "shortCode": "resultados",
+      "category": "Seguimiento",
+      "content": "Hola {{contact.name}}, tus resultados de {{estudio}} ya están disponibles. Puedes recogerlos en recepción o agendar una consulta para revisarlos."
+    },
+    {
+      "title": "Instrucciones pre-consulta",
+      "shortCode": "pre-consulta",
+      "category": "Citas",
+      "content": "Para tu cita del {{date}}: por favor trae tu identificación, cartilla de vacunación (si aplica) y llega en ayuno si te fue indicado. ¡Nos vemos pronto!"
+    }
+  ],
+  "queues": [
+    { "name": "Agendado de citas", "description": "Solicitudes para programar o modificar citas" },
+    { "name": "Urgencias", "description": "Casos urgentes que requieren atención inmediata" },
+    { "name": "Seguimiento de pacientes", "description": "Resultados, recetas y consultas post-cita" },
+    { "name": "Información general", "description": "Precios, servicios y consultas generales" }
+  ]
+}

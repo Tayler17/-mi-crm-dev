@@ -4,13 +4,17 @@ import { AiChatbot } from './ai-chatbot.entity';
 import { AiChatbotsService } from './ai-chatbots.service';
 import { AiChatbotsController } from './ai-chatbots.controller';
 import { AiChatbotEngineService } from './ai-chatbot-engine.service';
+import { BotQueueListener } from './bot-queue.listener';
+import { BotQueueProcessor } from './bot-queue.processor';
 import { ConnectionsModule } from '../connections/connections.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { BotQueueModule } from './bot-queue.module';
+import { KnowledgeBaseModule } from '../knowledge-base/knowledge-base.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([AiChatbot]), ConnectionsModule, NotificationsModule],
+  imports: [TypeOrmModule.forFeature([AiChatbot]), ConnectionsModule, NotificationsModule, BotQueueModule, KnowledgeBaseModule],
   controllers: [AiChatbotsController],
-  providers: [AiChatbotsService, AiChatbotEngineService],
-  exports: [AiChatbotsService],
+  providers: [AiChatbotsService, AiChatbotEngineService, BotQueueListener, BotQueueProcessor],
+  exports: [AiChatbotsService, AiChatbotEngineService],
 })
 export class AiChatbotsModule {}

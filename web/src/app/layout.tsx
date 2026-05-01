@@ -1,9 +1,26 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
   title: 'CRM SaaS',
-  description: 'CRM Multi-tenant',
+  description: 'Plataforma todo-en-uno para comunicación, automatización y ventas.',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'CRM SaaS',
+  },
+  icons: {
+    apple: '/icons/icon-192.png',
+    icon: '/icons/icon-512.png',
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#6366f1',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

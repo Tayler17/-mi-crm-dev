@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OnEvent } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import axios from 'axios';
@@ -9,6 +8,7 @@ import { join } from 'path';
 const FormData = require('form-data');
 import { WhatsappWebService } from '../connections/whatsapp-web.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { KnowledgeBaseService } from '../knowledge-base/knowledge-base.service';
 
 interface MediaResult {
   /** Text to pass to the LLM (transcription for audio, empty for images) */
@@ -16,6 +16,8 @@ interface MediaResult {
   /** Base64-encoded image data (for vision models) */
   imageBase64?: string;
   imageMimeType?: string;
+  /** True when media couldn't be processed — skip AI and use fallback_message */
+  unprocessable?: boolean;
 }
 
 /** Return value from every callAi* method */
@@ -26,6 +28,9 @@ interface AiResult {
   setWaiting?: boolean;
   createDeal?: { title: string; value?: number; currency?: string; stageName?: string; notes?: string };
   updateDeal?: { dealId: string; stageName?: string; value?: number; notes?: string; status?: string };
+  addTag?: { tagName: string };
+  removeTag?: { tagName: string };
+  createTask?: { title: string; description?: string; dueDate?: string; priority?: string };
 }
 
 type ChatMessage = {
@@ -41,38 +46,32 @@ export class AiChatbotEngineService {
     @InjectDataSource() private readonly db: DataSource,
     private readonly waSvc: WhatsappWebService,
     private readonly notifications: NotificationsService,
+    private readonly kbSvc: KnowledgeBaseService,
   ) {}
 
-  // ── Event listener ────────────────────────────────────────────────────────────
+  // ── Core processing (called by BotQueueProcessor) ────────────────────────────
 
-  @OnEvent('conversation.message_received')
-  async onMessageReceived(payload: { tenantId: string; conversationId: string; message: any }) {
-    const { tenantId, conversationId, message } = payload;
-    if (message?.direction !== 'inbound') return;
-    if (message?.is_private) return;
-    try {
-      await this.processMessage(tenantId, conversationId, message);
-    } catch (err) {
-      this.logger.error(`AI chatbot error (conv ${conversationId}): ${err}`);
-    }
-  }
-
-  // ── Core processing ───────────────────────────────────────────────────────────
-
-  private async processMessage(tenantId: string, conversationId: string, inboundMsg: any) {
+  async processMessage(tenantId: string, conversationId: string, inboundMsg: any) {
     // 1. Load conversation + linked inbox + current queue
     const [conv] = await this.db.query(
       `SELECT c.id, c.inbox_id, c.contact_id, c.connection_id, c.queue_id,
+              c.team_id, c.is_group,
               cc.inbox_id AS conn_inbox_id
        FROM conversations c
        LEFT JOIN channel_connections cc ON cc.id = c.connection_id
        WHERE c.id = $1 AND c.tenant_id = $2`,
       [conversationId, tenantId],
     );
-    if (!conv) return;
+    if (!conv) {
+      this.logger.warn(`[engine] Conversation ${conversationId} not found for tenant ${tenantId}`);
+      return;
+    }
 
     const effectiveInboxId = conv.inbox_id ?? conv.conn_inbox_id;
-    if (!effectiveInboxId) return;
+    if (!effectiveInboxId) {
+      this.logger.warn(`[engine] No inbox for conversation ${conversationId}`);
+      return;
+    }
 
     if (!conv.inbox_id && conv.conn_inbox_id) {
       await this.db.query(`UPDATE conversations SET inbox_id = $1 WHERE id = $2`,
@@ -97,13 +96,26 @@ export class AiChatbotEngineService {
            AND (
              $2::uuid = ANY(inbox_ids)
              OR ($3::uuid IS NOT NULL AND $3::uuid = ANY(queue_ids))
+             OR ($4::uuid IS NOT NULL AND $4::uuid = ANY(team_ids))
            )
-         ORDER BY ($2::uuid = ANY(inbox_ids)) DESC
+         ORDER BY
+           ($2::uuid = ANY(inbox_ids)) DESC,
+           ($3::uuid IS NOT NULL AND $3::uuid = ANY(queue_ids)) DESC,
+           ($4::uuid IS NOT NULL AND $4::uuid = ANY(team_ids)) DESC
          LIMIT 1`,
-        [tenantId, effectiveInboxId, conv.queue_id ?? null],
+        [tenantId, effectiveInboxId, conv.queue_id ?? null, conv.team_id ?? null],
       );
     }
-    if (!bot) return;
+    if (!bot) {
+      this.logger.debug(`[engine] No active bot found for conversation ${conversationId} (inbox ${effectiveInboxId})`);
+      return;
+    }
+
+    // Skip group conversations unless the bot explicitly opts in
+    if (conv.is_group && !bot.respond_in_groups) {
+      this.logger.debug(`[engine] Skipping group conversation ${conversationId} — bot "${bot.name}" has respond_in_groups=false`);
+      return;
+    }
 
     // Ensure only this bot has an active session for this conversation
     // (end any orphaned active sessions from a previous bot to prevent dual responses)
@@ -159,7 +171,9 @@ export class AiChatbotEngineService {
     const aiKeys: Record<string, string> = tenant?.settings?.aiKeys ?? {};
     const apiKey = aiKeys[bot.provider];
     if (!apiKey) {
-      this.logger.warn(`No API key for provider "${bot.provider}" in tenant ${tenantId}.`);
+      this.logger.warn(`[engine] No API key for provider "${bot.provider}" in tenant ${tenantId} — bot "${bot.name}" cannot respond.`);
+      await this.saveBotMessage(tenantId, conversationId,
+        bot.fallback_message || 'Lo siento, no estoy disponible en este momento. Por favor contacta a un agente.');
       return;
     }
 
@@ -202,10 +216,12 @@ export class AiChatbotEngineService {
       this.logger.error(`[engine] Failed to load transfer queues: ${e.message}`);
     }
 
-    // 6c. Load pipeline stages and existing open deals for deal management tools
+    // 6c. Load pipeline stages, existing open deals, and tenant tags for tool calling
     let stageNames: string[] = [];
     let stageMap: Record<string, string> = {}; // name.lower → id
     let existingDeals: any[] = [];
+    let tagNames: string[] = [];
+    let tagMap: Record<string, string> = {}; // name.lower → id
     try {
       const stages = await this.db.query(
         `SELECT ps.id, ps.name FROM pipeline_stages ps
@@ -226,6 +242,12 @@ export class AiChatbotEngineService {
           [conv.contact_id],
         ).catch(() => []);
       }
+      const tags = await this.db.query(
+        `SELECT id, name FROM tags WHERE tenant_id=$1 ORDER BY name`,
+        [tenantId],
+      ).catch(() => []);
+      tagNames = tags.map((t: any) => t.name);
+      tags.forEach((t: any) => { tagMap[t.name.toLowerCase()] = t.id; });
     } catch {}
 
     // 7. Build message history — only include messages from AFTER this bot's session
@@ -274,12 +296,37 @@ export class AiChatbotEngineService {
     );
     this.logger.log(`[engine] preprocessMedia result text="${media.text?.slice(0,80)}" hasImage=${!!media.imageBase64}`);
 
-    // 9. Call AI — pass queueMap + stages + deals so each provider can use function/tool calling
-    const result = await this.callAi(bot, apiKey, history, media, queueMap, stageNames, stageMap, existingDeals);
-    if (!result) return;
+    // 9. If media couldn't be processed (e.g. audio transcription failed), reply with
+    // the bot's fallback_message instead of sending garbage text to the AI.
+    if (media.unprocessable) {
+      const fallback = bot.fallback_message || 'Lo siento, no pude procesar ese mensaje. ¿Puedes enviarlo como texto?';
+      await this.saveBotMessage(tenantId, conversationId, fallback);
+      return;
+    }
 
-    const { reply, transferTo, resolveConversation, setWaiting, createDeal, updateDeal } = result;
-    this.logger.log(`[engine] AI reply (first 120): "${reply?.slice(0, 120)}" transferTo="${transferTo ?? 'none'}" resolve=${!!resolveConversation} wait=${!!setWaiting} createDeal=${!!createDeal} updateDeal=${!!updateDeal}`);
+    // 9b. RAG: search knowledge base for relevant context
+    const ragContext = await this.kbSvc.searchRelevantContext(bot.id, tenantId, userText).catch(() => '');
+
+    // 9c. Call AI — pass queueMap + stages + deals + tags so each provider can use function/tool calling
+    const result = await this.callAi(bot, apiKey, history, media, queueMap, stageNames, stageMap, existingDeals, tagNames, tagMap, ragContext);
+    if (!result) {
+      this.logger.warn(`[engine] AI returned null for conv ${conversationId} (bot "${bot.name}", provider "${bot.provider}") — sending fallback`);
+      await this.saveBotMessage(tenantId, conversationId,
+        bot.fallback_message || 'Lo siento, estoy teniendo dificultades técnicas. Por favor intenta de nuevo en un momento.');
+      return;
+    }
+
+    let { reply, transferTo, resolveConversation, setWaiting, createDeal, updateDeal, addTag, removeTag, createTask } = result;
+    this.logger.log(`[engine] AI reply (first 120): "${reply?.slice(0, 120)}" transferTo="${transferTo ?? 'none'}" resolve=${!!resolveConversation} wait=${!!setWaiting} createDeal=${!!createDeal} updateDeal=${!!updateDeal} addTag=${addTag?.tagName ?? 'none'} removeTag=${removeTag?.tagName ?? 'none'} createTask=${createTask?.title ?? 'none'}`);
+
+    // If a CRM action was requested but the AI returned no message, use a generic confirmation
+    // so the bot doesn't go silent after silently running a tool.
+    const hasCrmAction = !!(createDeal || updateDeal || addTag || removeTag || createTask || resolveConversation || setWaiting);
+    if (!reply && hasCrmAction && !transferTo) {
+      reply = bot.language?.startsWith('es') !== false
+        ? '¡Listo, lo he registrado!'
+        : 'Done, all set!';
+    }
 
     // Suppress reply when transferring — dest bot's welcome_message handles the greeting
     if (reply && !transferTo) {
@@ -296,6 +343,7 @@ export class AiChatbotEngineService {
       ).catch(() => {});
       await this.db.query(`UPDATE ai_chatbot_sessions SET status='ended', ended_at=NOW() WHERE id=$1`, [session.id]).catch(() => {});
       this.logger.log(`[engine] Conversation ${conversationId} resolved by bot`);
+      await this.saveActivityMessage(tenantId, conversationId, '🤖 Bot resolvió la conversación');
     } else if (setWaiting) {
       await this.db.query(
         `UPDATE conversations SET assigned_user_id=NULL, queue_id=NULL, updated_at=NOW() WHERE id=$1`,
@@ -303,6 +351,7 @@ export class AiChatbotEngineService {
       ).catch(() => {});
       await this.db.query(`UPDATE ai_chatbot_sessions SET status='ended', ended_at=NOW() WHERE id=$1`, [session.id]).catch(() => {});
       this.logger.log(`[engine] Conversation ${conversationId} set to waiting by bot`);
+      await this.saveActivityMessage(tenantId, conversationId, '🤖 Bot pasó la conversación a espera');
     }
 
     // 10c. Handle deal creation / update
@@ -315,6 +364,8 @@ export class AiChatbotEngineService {
         [tenantId, conv.contact_id, title, value ?? 0, currency ?? 'USD', stageId, notes ?? null],
       ).catch((e: any) => this.logger.warn(`[engine] create_deal failed: ${e.message}`));
       this.logger.log(`[engine] Deal created: "${title}" stage="${stageName}"`);
+      const dealLabel = value ? `${title} · ${value} ${currency ?? 'USD'}` : title;
+      await this.saveActivityMessage(tenantId, conversationId, `🤖 Bot creó un deal: ${dealLabel}`);
     }
     if (updateDeal) {
       const { dealId, stageName, value, notes, status } = updateDeal;
@@ -334,7 +385,66 @@ export class AiChatbotEngineService {
           params,
         ).catch((e: any) => this.logger.warn(`[engine] update_deal failed: ${e.message}`));
         this.logger.log(`[engine] Deal ${dealId} updated`);
+        const parts: string[] = [];
+        if (stageName) parts.push(`etapa: ${stageName}`);
+        if (value !== undefined) parts.push(`valor: ${value}`);
+        if (status) parts.push(`estado: ${status}`);
+        await this.saveActivityMessage(tenantId, conversationId, `🤖 Bot actualizó deal${parts.length ? ` (${parts.join(', ')})` : ''}`);
       }
+    }
+
+    // 10d. Handle tag add / remove
+    if (addTag) {
+      const tagId = tagMap[addTag.tagName.toLowerCase()];
+      if (tagId) {
+        if (conv.contact_id) {
+          await this.db.query(
+            `INSERT INTO contact_tags (contact_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+            [conv.contact_id, tagId],
+          ).catch(() => {});
+        }
+        await this.db.query(
+          `INSERT INTO conversation_tags (conversation_id, tag_id, tenant_id, created_at) VALUES ($1,$2,$3,NOW()) ON CONFLICT DO NOTHING`,
+          [conversationId, tagId, tenantId],
+        ).catch(() => {});
+        this.logger.log(`[engine] Tag "${addTag.tagName}" added to contact ${conv.contact_id} and conv ${conversationId}`);
+        await this.saveActivityMessage(tenantId, conversationId, `🤖 Bot añadió etiqueta: ${addTag.tagName}`);
+      } else {
+        this.logger.warn(`[engine] add_tag: unknown tag "${addTag.tagName}"`);
+      }
+    }
+    if (removeTag) {
+      const tagId = tagMap[removeTag.tagName.toLowerCase()];
+      if (tagId) {
+        if (conv.contact_id) {
+          await this.db.query(
+            `DELETE FROM contact_tags WHERE contact_id=$1 AND tag_id=$2`,
+            [conv.contact_id, tagId],
+          ).catch(() => {});
+        }
+        await this.db.query(
+          `DELETE FROM conversation_tags WHERE conversation_id=$1 AND tag_id=$2`,
+          [conversationId, tagId],
+        ).catch(() => {});
+        this.logger.log(`[engine] Tag "${removeTag.tagName}" removed from contact ${conv.contact_id} and conv ${conversationId}`);
+        await this.saveActivityMessage(tenantId, conversationId, `🤖 Bot eliminó etiqueta: ${removeTag.tagName}`);
+      } else {
+        this.logger.warn(`[engine] remove_tag: unknown tag "${removeTag.tagName}"`);
+      }
+    }
+
+    // 10e. Handle task creation
+    if (createTask) {
+      await this.db.query(
+        `INSERT INTO tasks (tenant_id, contact_id, title, description, due_date, priority, status, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5::timestamptz,$6,'pending',NOW(),NOW())`,
+        [tenantId, conv.contact_id ?? null, createTask.title, createTask.description ?? null, createTask.dueDate ?? null, createTask.priority ?? 'medium'],
+      ).catch((e: any) => this.logger.warn(`[engine] create_task failed: ${e.message}`));
+      this.logger.log(`[engine] Task created: "${createTask.title}" due=${createTask.dueDate ?? 'none'}`);
+      const taskLabel = createTask.dueDate
+        ? `${createTask.title} · vence ${new Date(createTask.dueDate).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' })}`
+        : createTask.title;
+      await this.saveActivityMessage(tenantId, conversationId, `🤖 Bot creó tarea: ${taskLabel}`);
     }
 
     // 11. Execute transfer if the AI requested one via function call
@@ -350,6 +460,7 @@ export class AiChatbotEngineService {
           [session.id],
         );
         this.logger.log(`[engine] Transferred conv ${conversationId} to "${transferTo}" (${targetQueueId})`);
+        await this.saveActivityMessage(tenantId, conversationId, `🤖 Bot transfirió a: ${transferTo}`);
 
         const [destBot] = await this.db.query(
           `SELECT * FROM ai_chatbots WHERE tenant_id=$1 AND status='active' AND $2::uuid = ANY(queue_ids) LIMIT 1`,
@@ -431,8 +542,11 @@ export class AiChatbotEngineService {
     // ── Audio: transcribe with Whisper ────────────────────────────────────────
     if (contentType === 'audio') {
       const openAiKey = allApiKeys['openai'] ?? (provider === 'openai' ? apiKey : null);
-      this.logger.log(`[audio] openAiKey=${!!openAiKey} filePath=${filePath} exists=${filePath ? existsSync(filePath) : 'n/a'}`);
-      if (openAiKey && filePath && existsSync(filePath)) {
+      const fileExists = filePath ? existsSync(filePath) : false;
+      this.logger.log(`[audio] openAiKey=${!!openAiKey} filePath=${filePath} exists=${fileExists}`);
+      if (!openAiKey) this.logger.warn(`[audio] No OpenAI key available for transcription`);
+      if (filePath && !fileExists) this.logger.warn(`[audio] File not found: ${filePath}`);
+      if (openAiKey && filePath && fileExists) {
         try {
           const transcription = await this.transcribeAudio(openAiKey, filePath);
           this.logger.log(`[audio] transcription="${transcription}"`);
@@ -440,11 +554,11 @@ export class AiChatbotEngineService {
             return { text: `[Nota de voz]: ${transcription}` };
           }
         } catch (e: any) {
-          this.logger.warn(`Audio transcription failed: ${e.message}`);
+          this.logger.warn(`[audio] Transcription API failed: ${e.message}`);
         }
       }
       // Gemini can process audio natively
-      if (provider === 'gemini' && filePath && existsSync(filePath)) {
+      if (provider === 'gemini' && filePath && fileExists) {
         try {
           const buffer = readFileSync(filePath);
           const base64 = buffer.toString('base64');
@@ -458,7 +572,7 @@ export class AiChatbotEngineService {
           return { text: '', imageBase64: base64, imageMimeType: mimeType };
         } catch {}
       }
-      return { text: '[El usuario envió una nota de voz que no se pudo transcribir]' };
+      return { text: '', unprocessable: true };
     }
 
     // ── Image: read as base64 ─────────────────────────────────────────────────
@@ -522,17 +636,37 @@ export class AiChatbotEngineService {
     stageNames: string[] = [],
     stageMap: Record<string, string> = {},
     existingDeals: any[] = [],
+    tagNames: string[] = [],
+    tagMap: Record<string, string> = {},
+    ragContext: string = '',
   ): Promise<AiResult | null> {
     try {
       const maxTokens   = parseInt(bot.max_tokens,  10) || 300;
       const temperature = parseFloat(bot.temperature)   || 0.7;
       const transferTargets = [...new Set(Object.keys(queueMap))];
-      const systemPrompt = `IDENTIDAD: Tu nombre es "${bot.name}". Cuando alguien pregunte de qué equipo eres o quién eres, responde siempre que eres "${bot.name}".\n\n${bot.system_prompt ?? ''}`.trim();
+
+      // Build CRM-tool instructions dynamically based on what tools are available
+      const crmLines: string[] = ['HERRAMIENTAS CRM (úsalas de forma silenciosa, sin mencionarlas al usuario):'];
+      if (stageNames.length > 0) crmLines.push(`- create_deal: cuando el usuario muestre interés en comprar, contratar o cerrar un trato. Etapas disponibles: ${stageNames.join(', ')}.`);
+      if (existingDeals.length > 0) crmLines.push('- update_deal: para actualizar estado o notas de un trato existente del contacto.');
+      if (tagNames.length > 0)   crmLines.push(`- add_tag: OBLIGATORIO — en cuanto identifiques la intención principal del usuario, aplica la etiqueta más apropiada de esta lista: ${tagNames.join(', ')}. Úsala en la misma respuesta en que queda clara la intención, no esperes al final de la conversación. Si el tema cambia, usa remove_tag para la anterior y add_tag para la nueva.`);
+      crmLines.push('- create_task: cuando el usuario pida callback, cotización, recordatorio o cualquier acción de seguimiento.');
+      if (transferTargets.length > 0) crmLines.push(`- transfer_conversation: solo cuando el usuario pida explícitamente hablar con otro departamento o cuando claramente necesitas un servicio que no puedes ofrecer. Destinos: ${transferTargets.join(', ')}.`);
+      crmLines.push('- resolve_conversation: cuando el caso del usuario haya quedado completamente resuelto.');
+      crmLines.push('Siempre incluye un mensaje de confirmación breve y amigable para el usuario al usar cualquier herramienta.');
+      const crmInstructions = crmLines.join('\n');
+
+      const systemPrompt = [
+        `IDENTIDAD: Tu nombre es "${bot.name}". Cuando alguien pregunte de qué equipo eres o quién eres, responde siempre que eres "${bot.name}".`,
+        bot.system_prompt ?? '',
+        crmInstructions,
+        ragContext,
+      ].filter(Boolean).join('\n\n').trim();
 
       switch (bot.provider) {
-        case 'openai':    return await this.callOpenAi(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals);
-        case 'anthropic': return await this.callAnthropic(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals);
-        case 'gemini':    return await this.callGemini(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals);
+        case 'openai':    return await this.callOpenAi(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames);
+        case 'anthropic': return await this.callAnthropic(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames);
+        case 'gemini':    return await this.callGemini(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames);
         default:
           this.logger.warn(`Unknown AI provider: ${bot.provider}`);
           return null;
@@ -564,7 +698,7 @@ export class AiChatbotEngineService {
   private async callOpenAi(
     apiKey: string, model: string, systemPrompt: string | null,
     history: any[], media: MediaResult, maxTokens: number, temperature: number,
-    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [],
+    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [],
   ): Promise<AiResult> {
     const messages: any[] = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
@@ -590,6 +724,11 @@ export class AiChatbotEngineService {
         tools.push({ type: 'function', function: { name: 'update_deal', description: `Update an existing deal. Open deals: ${existingDeals.map((d: any) => `"${d.title}"(id:${d.id},stage:${d.stage_name ?? 'none'})`).join(', ')}`, parameters: { type: 'object', properties: { deal_id: { type: 'string', enum: dealIds, description: 'Deal ID to update' }, stage_name: { type: 'string', enum: stageNames, description: 'New stage' }, value: { type: 'number', description: 'New value' }, notes: { type: 'string', description: 'Updated notes' }, status: { type: 'string', enum: ['open', 'won', 'lost'], description: 'Deal status' }, message: { type: 'string', description: 'Message to customer' } }, required: ['deal_id', 'message'] } } });
       }
     }
+    if (tagNames.length > 0) {
+      tools.push({ type: 'function', function: { name: 'add_tag', description: 'Add a tag/label to this contact and conversation. Use when the conversation reveals information that should classify this contact (e.g. "Interesado", "VIP", "Reclamación").', parameters: { type: 'object', properties: { tag_name: { type: 'string', enum: tagNames, description: 'Tag to add' }, message: { type: 'string', description: 'Optional short message to the customer (leave empty string if no message needed)' } }, required: ['tag_name', 'message'] } } });
+      tools.push({ type: 'function', function: { name: 'remove_tag', description: 'Remove a tag/label from this contact and conversation.', parameters: { type: 'object', properties: { tag_name: { type: 'string', enum: tagNames, description: 'Tag to remove' }, message: { type: 'string', description: 'Optional short message to the customer (leave empty string if no message needed)' } }, required: ['tag_name', 'message'] } } });
+    }
+    tools.push({ type: 'function', function: { name: 'create_task', description: 'Create a follow-up task linked to this contact. Use when the customer requests a callback, a quote, or any pending action that must be tracked.', parameters: { type: 'object', properties: { title: { type: 'string', description: 'Short task title (e.g. "Llamar a María el lunes", "Enviar cotización")' }, description: { type: 'string', description: 'Additional details (optional)' }, due_date: { type: 'string', description: 'ISO 8601 date string for the deadline (optional, e.g. "2026-05-01")' }, priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Task priority (default: medium)' }, message: { type: 'string', description: 'Confirmation message to the customer' } }, required: ['title', 'message'] } } });
     body.tools = tools;
     body.tool_choice = 'auto';
 
@@ -605,6 +744,9 @@ export class AiChatbotEngineService {
           case 'set_waiting':           return { reply: args.message ?? '', setWaiting: true };
           case 'create_deal':           return { reply: args.message ?? '', createDeal: { title: args.title, value: args.value, currency: args.currency, stageName: args.stage_name, notes: args.notes } };
           case 'update_deal':           return { reply: args.message ?? '', updateDeal: { dealId: args.deal_id, stageName: args.stage_name, value: args.value, notes: args.notes, status: args.status } };
+          case 'add_tag':               return { reply: args.message ?? '', addTag: { tagName: args.tag_name } };
+          case 'remove_tag':            return { reply: args.message ?? '', removeTag: { tagName: args.tag_name } };
+          case 'create_task':           return { reply: args.message ?? '', createTask: { title: args.title, description: args.description, dueDate: args.due_date, priority: args.priority } };
         }
       } catch { /* fall through */ }
     }
@@ -614,7 +756,7 @@ export class AiChatbotEngineService {
   private async callAnthropic(
     apiKey: string, model: string, systemPrompt: string | null,
     history: any[], media: MediaResult, maxTokens: number, temperature: number,
-    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [],
+    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [],
   ): Promise<AiResult> {
     const chatMsgs: any[] = [...this.historyToMsgs(history)];
     if (media.imageBase64 && media.imageMimeType) {
@@ -635,6 +777,11 @@ export class AiChatbotEngineService {
         tools.push({ name: 'update_deal', description: 'Update an existing deal.', input_schema: { type: 'object', properties: { deal_id: { type: 'string', enum: existingDeals.map((d: any) => d.id) }, stage_name: { type: 'string', enum: stageNames }, value: { type: 'number' }, notes: { type: 'string' }, status: { type: 'string', enum: ['open','won','lost'] }, message: { type: 'string' } }, required: ['deal_id', 'message'] } });
       }
     }
+    if (tagNames.length > 0) {
+      tools.push({ name: 'add_tag', description: 'Add a tag/label to this contact and conversation. Use when the conversation reveals information that should classify this contact (e.g. "Interesado", "VIP", "Reclamación").', input_schema: { type: 'object', properties: { tag_name: { type: 'string', enum: tagNames }, message: { type: 'string', description: 'Optional message to the customer (empty string if not needed)' } }, required: ['tag_name', 'message'] } });
+      tools.push({ name: 'remove_tag', description: 'Remove a tag/label from this contact and conversation.', input_schema: { type: 'object', properties: { tag_name: { type: 'string', enum: tagNames }, message: { type: 'string', description: 'Optional message to the customer (empty string if not needed)' } }, required: ['tag_name', 'message'] } });
+    }
+    tools.push({ name: 'create_task', description: 'Create a follow-up task linked to this contact. Use when the customer requests a callback, a quote, or any pending action that must be tracked.', input_schema: { type: 'object', properties: { title: { type: 'string' }, description: { type: 'string' }, due_date: { type: 'string', description: 'ISO 8601 date (optional)' }, priority: { type: 'string', enum: ['low', 'medium', 'high'] }, message: { type: 'string' } }, required: ['title', 'message'] } });
     body.tools = tools;
 
     const res = await axios.post('https://api.anthropic.com/v1/messages', body, { headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }, timeout: 30000 });
@@ -647,6 +794,9 @@ export class AiChatbotEngineService {
           case 'set_waiting':           return { reply: i.message ?? '', setWaiting: true };
           case 'create_deal':           return { reply: i.message ?? '', createDeal: { title: i.title, value: i.value, currency: i.currency, stageName: i.stage_name, notes: i.notes } };
           case 'update_deal':           return { reply: i.message ?? '', updateDeal: { dealId: i.deal_id, stageName: i.stage_name, value: i.value, notes: i.notes, status: i.status } };
+          case 'add_tag':               return { reply: i.message ?? '', addTag: { tagName: i.tag_name } };
+          case 'remove_tag':            return { reply: i.message ?? '', removeTag: { tagName: i.tag_name } };
+          case 'create_task':           return { reply: i.message ?? '', createTask: { title: i.title, description: i.description, dueDate: i.due_date, priority: i.priority } };
         }
       }
     }
@@ -656,7 +806,7 @@ export class AiChatbotEngineService {
   private async callGemini(
     apiKey: string, model: string, systemPrompt: string | null,
     history: any[], media: MediaResult, maxTokens: number, temperature: number,
-    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [],
+    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [],
   ): Promise<AiResult> {
     const histMsgs = this.historyToMsgs(history);
     const contents = histMsgs.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
@@ -678,6 +828,11 @@ export class AiChatbotEngineService {
       fnDeclarations.push({ name: 'create_deal', description: 'Create a new deal/booking.', parameters: { type: 'OBJECT', properties: { title: { type: 'STRING' }, value: { type: 'NUMBER' }, currency: { type: 'STRING' }, stage_name: { type: 'STRING', enum: stageNames }, notes: { type: 'STRING' }, message: { type: 'STRING' } }, required: ['title', 'stage_name', 'message'] } });
       if (existingDeals.length > 0) fnDeclarations.push({ name: 'update_deal', description: 'Update existing deal.', parameters: { type: 'OBJECT', properties: { deal_id: { type: 'STRING', enum: existingDeals.map((d: any) => d.id) }, stage_name: { type: 'STRING', enum: stageNames }, value: { type: 'NUMBER' }, notes: { type: 'STRING' }, status: { type: 'STRING', enum: ['open','won','lost'] }, message: { type: 'STRING' } }, required: ['deal_id', 'message'] } });
     }
+    if (tagNames.length > 0) {
+      fnDeclarations.push({ name: 'add_tag', description: 'Add a tag/label to this contact and conversation. Use when the conversation reveals information that should classify this contact (e.g. "Interesado", "VIP", "Reclamación").', parameters: { type: 'OBJECT', properties: { tag_name: { type: 'STRING', enum: tagNames }, message: { type: 'STRING', description: 'Optional message to the customer (empty string if not needed)' } }, required: ['tag_name', 'message'] } });
+      fnDeclarations.push({ name: 'remove_tag', description: 'Remove a tag/label from this contact and conversation.', parameters: { type: 'OBJECT', properties: { tag_name: { type: 'STRING', enum: tagNames }, message: { type: 'STRING', description: 'Optional message to the customer (empty string if not needed)' } }, required: ['tag_name', 'message'] } });
+    }
+    fnDeclarations.push({ name: 'create_task', description: 'Create a follow-up task linked to this contact. Use when the customer requests a callback, a quote, or any pending action that must be tracked.', parameters: { type: 'OBJECT', properties: { title: { type: 'STRING' }, description: { type: 'STRING' }, due_date: { type: 'STRING', description: 'ISO 8601 date (optional)' }, priority: { type: 'STRING', enum: ['low', 'medium', 'high'] }, message: { type: 'STRING' } }, required: ['title', 'message'] } });
     body.tools = [{ functionDeclarations: fnDeclarations }];
 
     const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, body, { headers: { 'Content-Type': 'application/json' }, timeout: 30000 });
@@ -690,6 +845,9 @@ export class AiChatbotEngineService {
         case 'set_waiting':           return { reply: args?.message ?? '', setWaiting: true };
         case 'create_deal':           return { reply: args?.message ?? '', createDeal: { title: args.title, value: args.value, currency: args.currency, stageName: args.stage_name, notes: args.notes } };
         case 'update_deal':           return { reply: args?.message ?? '', updateDeal: { dealId: args.deal_id, stageName: args.stage_name, value: args.value, notes: args.notes, status: args.status } };
+        case 'add_tag':               return { reply: args?.message ?? '', addTag: { tagName: args.tag_name } };
+        case 'remove_tag':            return { reply: args?.message ?? '', removeTag: { tagName: args.tag_name } };
+        case 'create_task':           return { reply: args?.message ?? '', createTask: { title: args.title, description: args.description, dueDate: args.due_date, priority: args.priority } };
       }
     }
     return { reply: part?.text?.trim() ?? '' };
@@ -714,7 +872,64 @@ export class AiChatbotEngineService {
     }
   }
 
+  // ── Webchat (synchronous, no queue) ──────────────────────────────────────────
+
+  /**
+   * Called by WebchatService to get an AI reply for a webchat message.
+   * Does NOT save anything — the caller handles message persistence.
+   */
+  async generateWebchatReply(
+    botId: string,
+    tenantId: string,
+    conversationId: string,
+    userMessage: string,
+  ): Promise<string | null> {
+    const [bot] = await this.db.query(
+      `SELECT * FROM ai_chatbots WHERE id=$1 AND tenant_id=$2 AND status='active'`,
+      [botId, tenantId],
+    );
+    if (!bot) return null;
+
+    const [tenant] = await this.db.query(`SELECT settings FROM tenants WHERE id=$1`, [tenantId]);
+    const apiKey = tenant?.settings?.aiKeys?.[bot.provider];
+    if (!apiKey) return bot.fallback_message ?? null;
+
+    const history = await this.db.query(
+      `SELECT body, direction, sender_type, content_type
+       FROM messages
+       WHERE conversation_id=$1 AND is_private=false
+       ORDER BY created_at DESC LIMIT 20`,
+      [conversationId],
+    );
+    history.reverse();
+
+    const ragContext = await this.kbSvc
+      .searchRelevantContext(botId, tenantId, userMessage)
+      .catch(() => '');
+
+    const result = await this.callAi(
+      bot, apiKey, history, { text: userMessage }, {}, [], {}, [], [], {}, ragContext,
+    ).catch(() => null);
+
+    return result?.reply ?? bot.fallback_message ?? null;
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────────
+
+  private async saveActivityMessage(tenantId: string, conversationId: string, body: string) {
+    const [msg] = await this.db.query(
+      `INSERT INTO messages
+         (tenant_id, conversation_id, body, content_type, direction, sender_type, is_private, created_at, updated_at)
+       VALUES ($1,$2,$3,'activity','outbound','system',false,NOW(),NOW()) RETURNING *`,
+      [tenantId, conversationId, body],
+    ).catch(() => [null]);
+    if (msg) {
+      this.notifications.emit({
+        tenantId, type: 'message_created',
+        payload: { conversationId, message: msg },
+      });
+    }
+  }
 
   private async saveBotMessage(tenantId: string, conversationId: string, body: string) {
     const [msg] = await this.db.query(
@@ -729,11 +944,11 @@ export class AiChatbotEngineService {
       tenantId, type: 'message_created',
       payload: { conversationId, message: msg },
     });
-    await this.deliverOutbound(conversationId, tenantId, body).catch((e) =>
+    await this.deliverOutbound(conversationId, tenantId, body, msg.id).catch((e) =>
       this.logger.error(`[bot deliverOutbound] ${e.message}`));
   }
 
-  private async deliverOutbound(conversationId: string, tenantId: string, text: string) {
+  private async deliverOutbound(conversationId: string, tenantId: string, text: string, messageId?: string) {
     if (!text) return;
     const [conv] = await this.db.query(
       `SELECT c.channel_type, c.connection_id, c.external_id,
@@ -744,12 +959,16 @@ export class AiChatbotEngineService {
       [conversationId, tenantId],
     );
     if (!conv) return;
-    const channelType = conv.channel_type ?? conv.conn_channel_type;
+    // Prefer the actual connection's channel type — conversation.channel_type may be stale/default
+    const channelType = conv.conn_channel_type ?? conv.channel_type;
     switch (channelType) {
       case 'whatsapp_web': {
         if (!conv.external_id || !conv.connection_id) return;
-        const sent = await this.waSvc.sendMessage(conv.connection_id, conv.external_id, text);
-        if (!sent) this.logger.warn(`[bot] WA session not connected for ${conversationId}`);
+        const waId = await this.waSvc.sendMessage(conv.connection_id, conv.external_id, text);
+        if (!waId) this.logger.warn(`[bot] WA session not connected for ${conversationId}`);
+        else if (messageId && typeof waId === 'string') {
+          await this.db.query(`UPDATE messages SET external_id=$1 WHERE id=$2`, [waId, messageId]).catch(() => {});
+        }
         break;
       }
       case 'telegram': {
@@ -771,6 +990,21 @@ export class AiChatbotEngineService {
           { method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.accessToken}` },
             body: JSON.stringify({ messaging_product: 'whatsapp', to: conv.external_id, type: 'text', text: { body: text } }),
+            signal: AbortSignal.timeout(8000) },
+        ).catch(() => {});
+        break;
+      }
+      case 'facebook':
+      case 'instagram': {
+        const creds = conv.credentials ?? {};
+        const recipientId = conv.external_id;
+        const token = creds.accessToken;
+        if (!recipientId || !token) return;
+        await (globalThis as any).fetch(
+          `https://graph.facebook.com/v19.0/me/messages?access_token=${token}`,
+          { method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ recipient: { id: recipientId }, message: { text } }),
             signal: AbortSignal.timeout(8000) },
         ).catch(() => {});
         break;

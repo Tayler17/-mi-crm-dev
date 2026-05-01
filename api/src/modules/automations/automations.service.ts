@@ -24,7 +24,8 @@ export class AutomationsService {
        LEFT JOIN automation_executions e ON e.rule_id = r.id
        WHERE r.tenant_id = $1
        GROUP BY r.id, u.full_name
-       ORDER BY r.created_at DESC`,
+       ORDER BY r.created_at DESC
+       LIMIT 200`,
       [tenantId],
     );
     return rows;

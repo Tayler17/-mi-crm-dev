@@ -43,6 +43,10 @@ export class CallBotsService {
       fallbackMessage: dto.fallbackMessage,
       handoffKeyword: dto.handoffKeyword ?? 'agente',
       maxCallDuration: dto.maxCallDuration ?? 300,
+      inboxId: dto.inboxId,
+      ttsProvider: dto.ttsProvider ?? 'twilio_basic',
+      ttsVoiceId: dto.ttsVoiceId,
+      transferToNumber: dto.transferToNumber,
       status: 'draft',
       createdBy: userId,
     });

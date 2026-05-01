@@ -55,7 +55,8 @@ export class TeamsService {
        FROM team_members tm
        JOIN users u ON u.id = tm.user_id
        WHERE tm.team_id = $1 AND u.tenant_id = $2
-       ORDER BY u.full_name`,
+       ORDER BY u.full_name
+       LIMIT 500`,
       [teamId, tenantId],
     );
   }
@@ -85,7 +86,8 @@ export class TeamsService {
        FROM users u
        WHERE u.tenant_id = $1
          AND u.id NOT IN (SELECT user_id FROM team_members WHERE team_id = $2)
-       ORDER BY u.full_name`,
+       ORDER BY u.full_name
+       LIMIT 500`,
       [tenantId, teamId],
     );
   }

@@ -2,16 +2,11 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
-  getMyChats,
-  createOrFindDm,
-  getChatMessages,
-  sendChatMessage,
-  markChatRead,
-  getAgents,
-  InternalChat,
-  ChatMessage,
-  Agent,
+  getMyChats, createOrFindDm, getChatMessages, sendChatMessage, markChatRead,
+  getAgents, InternalChat, ChatMessage, Agent,
 } from '@/lib/api';
+import { useLangCtx } from '@/lib/lang-context';
+import { APP } from '@/lib/i18n/app';
 
 function getStoredUserId(): string {
   if (typeof window === 'undefined') return '';
@@ -21,19 +16,19 @@ function getStoredUserId(): string {
   } catch { return ''; }
 }
 
-function timeAgo(dateStr: string) {
+function timeAgo(dateStr: string, locale: string, justNow: string) {
   const d = new Date(dateStr);
   const diff = Date.now() - d.getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'ahora';
+  if (mins < 1) return justNow;
   if (mins < 60) return `${mins}m`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h`;
-  return d.toLocaleDateString('es', { day: '2-digit', month: 'short' });
+  return d.toLocaleDateString(locale, { day: '2-digit', month: 'short' });
 }
 
-function formatTime(dateStr: string) {
-  return new Date(dateStr).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+function formatTime(dateStr: string, locale: string) {
+  return new Date(dateStr).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
 }
 
 function initials(name?: string, email?: string) {
@@ -59,10 +54,13 @@ function Avatar({ name, email, size = 32 }: { name?: string; email?: string; siz
 
 function getChatPeer(chat: InternalChat, myId: string): { id: string; name: string; email: string } {
   const peer = chat.memberDetails?.find((m) => m.id !== myId);
-  return { id: peer?.id ?? '', name: peer?.full_name ?? peer?.email ?? 'Usuario', email: peer?.email ?? '' };
+  return { id: peer?.id ?? '', name: peer?.full_name ?? peer?.email ?? '?', email: peer?.email ?? '' };
 }
 
 export default function ChatPage() {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+
   const myId = getStoredUserId();
   const [chats, setChats] = useState<InternalChat[]>([]);
   const [activeChat, setActiveChat] = useState<InternalChat | null>(null);
@@ -74,14 +72,12 @@ export default function ChatPage() {
   const [agentSearch, setAgentSearch] = useState('');
   const [loadingChats, setLoadingChats] = useState(true);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<'list' | 'chat'>('list');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadChats = useCallback(async () => {
-    try {
-      const data = await getMyChats();
-      setChats(data);
-    } catch {}
+    try { const data = await getMyChats(); setChats(data); } catch {}
   }, []);
 
   const loadMessages = useCallback(async (chatId: string, silent = false) => {
@@ -96,13 +92,11 @@ export default function ChatPage() {
     }
   }, []);
 
-  // Initial load
   useEffect(() => {
     loadChats().finally(() => setLoadingChats(false));
     getAgents().then(setAgents).catch(() => {});
   }, [loadChats]);
 
-  // Poll for new messages when a chat is open
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     if (!activeChat) return;
@@ -113,13 +107,13 @@ export default function ChatPage() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [activeChat, loadMessages, loadChats]);
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   async function openChat(chat: InternalChat) {
     setActiveChat(chat);
+    setMobilePanel('chat');
     await loadMessages(chat.id);
   }
 
@@ -138,9 +132,7 @@ export default function ChatPage() {
             : c,
         ),
       );
-    } catch {} finally {
-      setSending(false);
-    }
+    } catch {} finally { setSending(false); }
   }
 
   async function startDm(agent: Agent) {
@@ -163,28 +155,24 @@ export default function ChatPage() {
   const peer = activeChat ? getChatPeer(activeChat, myId) : null;
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', position: 'fixed', top: 0, left: 'var(--sidebar-w, 220px)', right: 0, bottom: 0 }}>
+    <div className="chat-layout" data-panel={mobilePanel} style={{ display: 'flex', height: '100vh', overflow: 'hidden', position: 'fixed', top: 0, left: 'var(--sidebar-w, 220px)', right: 0, bottom: 0 }}>
 
       {/* Left: chat list */}
-      <div style={{ width: 280, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: 'var(--bg)', flexShrink: 0 }}>
+      <div className="chat-list-panel" style={{ width: 280, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: 'var(--bg)', flexShrink: 0 }}>
         <div style={{ padding: '16px 12px 10px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontWeight: 700, fontSize: 16 }}>Chat Interno</span>
-          <button
-            className="btn btn-primary"
-            style={{ padding: '4px 10px', fontSize: 12 }}
-            onClick={() => setShowNewDm(true)}
-          >
-            + Nuevo
+          <span style={{ fontWeight: 700, fontSize: 16 }}>{i.chatInternalTitle}</span>
+          <button className="btn btn-primary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setShowNewDm(true)}>
+            {i.newChatBtn}
           </button>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {loadingChats ? (
-            <div style={{ padding: 24, color: 'var(--text-muted)', textAlign: 'center', fontSize: 13 }}>Cargando…</div>
+            <div style={{ padding: 24, color: 'var(--text-muted)', textAlign: 'center', fontSize: 13 }}>{i.loading}</div>
           ) : chats.length === 0 ? (
             <div style={{ padding: 24, color: 'var(--text-muted)', textAlign: 'center', fontSize: 13 }}>
               <div style={{ fontSize: 32, marginBottom: 8 }}>💬</div>
-              No hay conversaciones.<br />Inicia un chat nuevo.
+              {i.noChats}
             </div>
           ) : (
             chats.map((chat) => {
@@ -195,8 +183,7 @@ export default function ChatPage() {
                   key={chat.id}
                   onClick={() => openChat(chat)}
                   style={{
-                    padding: '10px 12px',
-                    cursor: 'pointer',
+                    padding: '10px 12px', cursor: 'pointer',
                     background: isActive ? 'var(--primary-light, #ede9fe)' : 'transparent',
                     borderLeft: isActive ? '3px solid var(--primary)' : '3px solid transparent',
                     display: 'flex', gap: 10, alignItems: 'center',
@@ -210,7 +197,7 @@ export default function ChatPage() {
                       </span>
                       {chat.lastMessage && (
                         <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0, marginLeft: 4 }}>
-                          {timeAgo(chat.lastMessage.createdAt)}
+                          {timeAgo(chat.lastMessage.createdAt, i.locale, i.justNow)}
                         </span>
                       )}
                     </div>
@@ -218,13 +205,13 @@ export default function ChatPage() {
                       <span style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                         {chat.lastMessage ? (
                           <>
-                            {chat.lastMessage.senderId === myId ? 'Tú: ' : ''}
+                            {chat.lastMessage.senderId === myId ? i.youPrefix : ''}
                             {chat.lastMessage.body.length > 30
                               ? chat.lastMessage.body.substring(0, 30) + '…'
                               : chat.lastMessage.body}
                           </>
                         ) : (
-                          <em>Sin mensajes</em>
+                          <em>{i.noMessages}</em>
                         )}
                       </span>
                       {chat.unreadCount > 0 && (
@@ -247,17 +234,22 @@ export default function ChatPage() {
       </div>
 
       {/* Right: chat window */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--card-bg)' }}>
+      <div className="chat-chat-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--card-bg)' }}>
         {!activeChat ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', gap: 12 }}>
             <div style={{ fontSize: 48 }}>💬</div>
-            <div style={{ fontSize: 16 }}>Selecciona una conversación</div>
-            <button className="btn btn-primary" onClick={() => setShowNewDm(true)}>+ Nuevo Chat</button>
+            <div style={{ fontSize: 16 }}>{i.selectConversation}</div>
+            <button className="btn btn-primary" onClick={() => setShowNewDm(true)}>{i.newChatBtn}</button>
           </div>
         ) : (
           <>
-            {/* Chat header */}
             <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, background: 'var(--bg)' }}>
+              <button
+                className="mobile-back-btn"
+                onClick={() => setMobilePanel('list')}
+                style={{ display: 'none', background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: 'var(--text)', padding: '0 8px 0 0', flexShrink: 0 }}
+                aria-label={i.back}
+              >←</button>
               <Avatar name={peer!.name} email={peer!.email} size={36} />
               <div>
                 <div style={{ fontWeight: 600, fontSize: 15 }}>{peer!.name}</div>
@@ -265,14 +257,11 @@ export default function ChatPage() {
               </div>
             </div>
 
-            {/* Messages */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
               {loadingMsgs ? (
-                <div style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: 40 }}>Cargando mensajes…</div>
+                <div style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: 40 }}>{i.loadingMessages}</div>
               ) : messages.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: 40 }}>
-                  No hay mensajes aún. ¡Saluda!
-                </div>
+                <div style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: 40 }}>{i.noMessagesYet}</div>
               ) : (
                 messages.map((msg) => {
                   const isMe = msg.senderId === myId;
@@ -294,7 +283,7 @@ export default function ChatPage() {
                           {msg.body}
                         </div>
                         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, textAlign: isMe ? 'right' : 'left' }}>
-                          {formatTime(msg.createdAt)}
+                          {formatTime(msg.createdAt, i.locale)}
                         </div>
                       </div>
                       {isMe && <Avatar name={peer!.name} email={peer!.email} size={28} />}
@@ -305,15 +294,12 @@ export default function ChatPage() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Composer */}
             <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', background: 'var(--bg)', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-                }}
-                placeholder="Escribe un mensaje… (Enter para enviar)"
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                placeholder={i.chatInputPlaceholder}
                 rows={1}
                 style={{
                   flex: 1, resize: 'none', padding: '10px 14px',
@@ -341,13 +327,13 @@ export default function ChatPage() {
         <div className="modal-overlay" onClick={() => { setShowNewDm(false); setAgentSearch(''); }}>
           <div className="modal" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 style={{ margin: 0, fontSize: 16 }}>Nuevo mensaje directo</h2>
+              <h2 style={{ margin: 0, fontSize: 16 }}>{i.newDirectMessage}</h2>
               <button className="btn btn-ghost" onClick={() => { setShowNewDm(false); setAgentSearch(''); }}>✕</button>
             </div>
             <div style={{ padding: '12px 0' }}>
               <input
                 className="form-input"
-                placeholder="Buscar agente…"
+                placeholder={i.searchAgentHint}
                 value={agentSearch}
                 onChange={(e) => setAgentSearch(e.target.value)}
                 autoFocus
@@ -355,7 +341,7 @@ export default function ChatPage() {
               <div style={{ maxHeight: 280, overflowY: 'auto', marginTop: 8 }}>
                 {filteredAgents.length === 0 ? (
                   <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '12px 0', textAlign: 'center' }}>
-                    No se encontraron agentes
+                    {i.noAgentsFound}
                   </div>
                 ) : (
                   filteredAgents.map((agent) => (

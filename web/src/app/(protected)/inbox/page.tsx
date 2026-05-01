@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { APP } from '@/lib/i18n/app';
+import { useLangCtx } from '@/lib/lang-context';
+import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import {
   getConversations, getConversation, createConversation, updateConversation,
   getMessages, getNotes, sendMessage, sendNote,
@@ -11,32 +14,112 @@ import {
   getAiPrompts, runAiPrompt, openNotificationsStream, uploadMessageFile,
   getConversationTags, addConversationTag, removeConversationTag,
   getConvBotSession, updateConvBotSession,
+  getContactTimeline, requestCsat,
   API_URL,
   type Conversation, type Message, type Contact, type Inbox,
   type CannedResponse, type Tag, type Agent, type Team, type Queue,
-  type ScheduledMessage, type AiPrompt, type BotSession,
+  type ScheduledMessage, type AiPrompt, type BotSession, type ContactTimeline,
 } from '@/lib/api';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function timeAgo(dateStr: string) {
-  if (!dateStr) return '';
-  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
-  if (diff < 60) return 'ahora';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  return new Date(dateStr).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+function exportConversationPdf(conv: Conversation, contact: { fullName?: string; email?: string } | null, msgs: Message[], i: typeof APP['es']) {
+  const contactName = contact?.fullName || contact?.email || i.noContact;
+  const fmtTime = (dt: string) => new Date(dt).toLocaleString(i.locale, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const rows = msgs
+    .filter((m) => !m.isPrivate && m.contentType !== 'activity')
+    .map((m) => {
+      const isOut = m.direction === 'outbound';
+      const sender = isOut ? i.inbxAgent : contactName;
+      const body = m.body ?? '';
+      const transcriptIdx = body.indexOf('**Transcript:**');
+      let bodyHtml: string;
+      if (transcriptIdx !== -1) {
+        const headerRaw = body.slice(0, transcriptIdx).trim().replace(/\*\*/g, '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+        const transcriptRaw = body.slice(transcriptIdx + '**Transcript:**'.length).trim();
+        const turns = transcriptRaw.split('\n').flatMap((line) => {
+          const u = line.match(/^\[Usuario\]:\s*(.+)/);
+          const b = line.match(/^\[Bot\]:\s*(.+)/);
+          if (u) return [`<div style="display:flex;flex-direction:column;align-items:flex-start;margin-bottom:5px"><div style="font-size:10px;color:#6b7280;margin-bottom:2px;padding-left:4px">Cliente</div><div style="max-width:80%;padding:6px 10px;border-radius:4px 12px 12px 12px;background:#f1f5f9;color:#111;font-size:12px;line-height:1.4">${u[1].replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div></div>`];
+          if (b) return [`<div style="display:flex;flex-direction:column;align-items:flex-end;margin-bottom:5px"><div style="font-size:10px;color:#6b7280;margin-bottom:2px;padding-right:4px">Bot</div><div style="max-width:80%;padding:6px 10px;border-radius:12px 4px 12px 12px;background:#2563eb;color:#fff;font-size:12px;line-height:1.4">${b[1].replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div></div>`];
+          return [];
+        }).join('');
+        bodyHtml = `<div style="font-size:11px;color:#6b7280;margin-bottom:8px;line-height:1.5">${headerRaw}</div><div style="display:flex;flex-direction:column">${turns}</div>`;
+      } else {
+        bodyHtml = `<div style="max-width:75%;padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.5;background:${isOut ? '#2563eb' : '#f1f5f9'};color:${isOut ? '#fff' : '#111'}">${body.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</div>`;
+      }
+      return `
+        <div style="margin-bottom:14px;display:flex;flex-direction:column;align-items:${transcriptIdx !== -1 ? 'stretch' : isOut ? 'flex-end' : 'flex-start'}">
+          <div style="font-size:11px;color:#6b7280;margin-bottom:3px">${sender} · ${m.createdAt ? fmtTime(m.createdAt) : ''}</div>
+          ${bodyHtml}
+        </div>`;
+    })
+    .join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>${i.inbxConvWith} — ${contactName}</title>
+    <style>
+      body{font-family:system-ui,sans-serif;margin:0;padding:24px;color:#111}
+      .header{border-bottom:2px solid #e5e7eb;padding-bottom:16px;margin-bottom:24px}
+      h2{margin:0 0 4px;font-size:18px}
+      .meta{font-size:12px;color:#6b7280}
+      @media print{body{padding:0}}
+    </style>
+  </head><body>
+    <div class="header">
+      <h2>${i.inbxConvWith} ${contactName}</h2>
+      <div class="meta">
+        ${i.channelLabel}: ${conv.channelType ?? '—'} ·
+        ${i.status}: ${conv.status} ·
+        ${i.inbxSubjectLbl}: ${conv.subject || i.noSubject} ·
+        ${i.inbxPdfExported} ${fmtTime(new Date().toISOString())}
+      </div>
+    </div>
+    ${rows || `<p style="color:#9ca3af;text-align:center">${i.inbxNoMsgs}</p>`}
+  </body></html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) return;
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(() => { win.print(); }, 400);
 }
 
-const STATUS_META: Record<string, { label: string; cls: string }> = {
-  open:     { label: 'Serving',  cls: 'status-open' },
-  pending:  { label: 'Waiting',  cls: 'status-pending' },
-  resolved: { label: 'Resuelta', cls: 'status-resolved' },
-  snoozed:  { label: 'Snoozed',  cls: 'status-snoozed' },
+function playNotificationSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.35);
+  } catch { /* AudioContext not available */ }
+}
+
+
+function timeAgo(dateStr: string, nowLabel: string, locale: string) {
+  if (!dateStr) return '';
+  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+  if (diff < 60) return nowLabel;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  return new Date(dateStr).toLocaleDateString(locale, { day: '2-digit', month: '2-digit' });
+}
+
+const STATUS_CSS: Record<string, string> = {
+  open:     'status-open',
+  pending:  'status-pending',
+  resolved: 'status-resolved',
+  snoozed:  'status-snoozed',
 };
 
 const CHANNEL_ICONS: Record<string, string> = {
-  email: '📧', chat: '💬', whatsapp: '📱', instagram: '📷', telegram: '✈️',
+  email: '📧', chat: '💬', whatsapp: '📱', whatsapp_web: '📱', instagram: '📷', telegram: '✈️', phone: '📞',
 };
 
 // ── Filter bar component ──────────────────────────────────────────────────────
@@ -62,39 +145,41 @@ interface FilterBarProps {
 
 function FilterBar({ show, tags, inboxes, agents, queues, filterTag, filterInbox, filterStatus, filterAgent, filterQueue, onTag, onInbox, onStatus, onAgent, onQueue, onClear }: FilterBarProps) {
   if (!show) return null;
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const active = filterTag || filterInbox || filterStatus || filterAgent || filterQueue;
   return (
     <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', background: '#f8fafc', display: 'flex', flexDirection: 'column', gap: 6 }}>
       <select className="form-input" style={{ fontSize: 12 }} value={filterTag} onChange={(e) => onTag(e.target.value)}>
-        <option value="">🏷 Filtrar por Tag</option>
+        <option value="">{i.inbxFilterTag}</option>
         {tags.map((t) => (
           <option key={t.id} value={t.id} style={{ color: t.color ?? undefined }}>{t.name}</option>
         ))}
       </select>
       <select className="form-input" style={{ fontSize: 12 }} value={filterInbox} onChange={(e) => onInbox(e.target.value)}>
-        <option value="">📥 Filtrar por Inbox</option>
-        {inboxes.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+        <option value="">{i.inbxFilterInbox}</option>
+        {inboxes.map((inb) => <option key={inb.id} value={inb.id}>{inb.name}</option>)}
       </select>
       <select className="form-input" style={{ fontSize: 12 }} value={filterStatus} onChange={(e) => onStatus(e.target.value)}>
-        <option value="">⚡ Estado</option>
-        <option value="open">Serving (open)</option>
-        <option value="pending">Waiting (pending)</option>
-        <option value="resolved">Resuelta</option>
-        <option value="snoozed">Snoozed</option>
+        <option value="">⚡ {i.status}</option>
+        <option value="open">{i.inbxServing}</option>
+        <option value="pending">{i.inbxWaiting}</option>
+        <option value="resolved">{i.inbxResolvedLabel}</option>
+        <option value="snoozed">{i.inbxSnoozed}</option>
       </select>
       <select className="form-input" style={{ fontSize: 12 }} value={filterAgent} onChange={(e) => onAgent(e.target.value)}>
-        <option value="">👤 Filtrar por Agente</option>
+        <option value="">{i.inbxFilterAgent}</option>
         {agents.map((a) => <option key={a.id} value={a.id}>{a.fullName}</option>)}
       </select>
       {queues.length > 0 && (
         <select className="form-input" style={{ fontSize: 12 }} value={filterQueue} onChange={(e) => onQueue(e.target.value)}>
-          <option value="">📬 Filtrar por Cola</option>
+          <option value="">{i.inbxFilterQueue}</option>
           {queues.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
         </select>
       )}
       {active && (
         <button onClick={onClear} style={{ background: 'none', border: '1px dashed var(--border)', borderRadius: 6, padding: '4px 8px', fontSize: 11, cursor: 'pointer', color: 'var(--text-muted)', textAlign: 'center' }}>
-          × Limpiar filtros
+          {i.inbxClearFilters}
         </button>
       )}
     </div>
@@ -114,6 +199,8 @@ function AiPromptsDrawer({
   onInsert: (text: string) => void;
   onClose: () => void;
 }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [prompts, setPrompts] = useState<AiPrompt[]>([]);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<AiPrompt | null>(null);
@@ -145,7 +232,7 @@ function AiPromptsDrawer({
     try {
       const res = await runAiPrompt(selected.id, variables);
       setResult(res.filled_prompt);
-    } catch { setResult('Error al ejecutar el prompt'); }
+    } catch { setResult(i.inbxAiTitle + ' — error'); }
     finally { setRunning(false); }
   }
 
@@ -172,8 +259,8 @@ function AiPromptsDrawer({
         {/* Header */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>✨ Prompts de IA</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Selecciona un prompt para el mensaje</div>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>✨ {i.inbxAiTitle}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{i.inbxAiHint}</div>
           </div>
           <button className="btn btn-ghost" onClick={onClose} style={{ padding: '4px 8px' }}>✕</button>
         </div>
@@ -182,7 +269,7 @@ function AiPromptsDrawer({
           /* ── Prompt detail view ── */
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '3px 8px' }} onClick={() => { setSelected(null); setResult(''); }}>← Volver</button>
+              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '3px 8px' }} onClick={() => { setSelected(null); setResult(''); }}>← {i.back}</button>
               <span style={{ fontWeight: 600, fontSize: 14 }}>{selected.name}</span>
             </div>
 
@@ -190,7 +277,7 @@ function AiPromptsDrawer({
               {/* Variables */}
               {selected.variables.length > 0 && (
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Variables</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>{i.inbxVariables}</div>
                   {selected.variables.map((v) => (
                     <div key={v.name} className="form-group" style={{ margin: '0 0 10px' }}>
                       <label className="form-label" style={{ fontSize: 12 }}>
@@ -209,13 +296,13 @@ function AiPromptsDrawer({
               )}
 
               <button className="btn btn-primary" disabled={running} onClick={handleRun} style={{ width: '100%' }}>
-                {running ? '⏳ Generando…' : '✨ Generar con IA'}
+                {running ? `⏳ ${i.inbxGenerating}` : `✨ ${i.inbxGenerate}`}
               </button>
 
               {/* Result */}
               {result && (
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Resultado</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>{i.inbxResult}</div>
                   <div style={{
                     padding: '12px 14px', background: 'var(--bg-secondary)', borderRadius: 8,
                     fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
@@ -225,10 +312,10 @@ function AiPromptsDrawer({
                   </div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                     <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => { onInsert(result); onClose(); }}>
-                      ↩ Insertar en mensaje
+                      ↩ {i.inbxInsert}
                     </button>
                     <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={() => navigator.clipboard?.writeText(result)}>
-                      Copiar
+                      {i.copy}
                     </button>
                   </div>
                 </div>
@@ -239,15 +326,15 @@ function AiPromptsDrawer({
           /* ── Prompt list view ── */
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
-              <input className="form-input" style={{ fontSize: 12 }} placeholder="Buscar prompts…" value={search} onChange={(e) => setSearch(e.target.value)} autoFocus />
+              <input className="form-input" style={{ fontSize: 12 }} placeholder={i.inbxSearchPrompts} value={search} onChange={(e) => setSearch(e.target.value)} autoFocus />
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
               {loading ? (
-                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Cargando…</div>
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{i.loading}</div>
               ) : filtered.length === 0 ? (
                 <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-                  {search ? 'Sin resultados' : 'No hay prompts creados aún'}
+                  {search ? i.noResults : i.inbxNoPrompts}
                 </div>
               ) : Object.entries(byCategory).map(([cat, items]) => (
                 <div key={cat}>
@@ -273,7 +360,7 @@ function AiPromptsDrawer({
                             {p.variables.length} var{p.variables.length > 1 ? 's' : ''}
                           </span>
                         )}
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{p.usage_count} usos</span>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{p.usage_count} {i.inbxUses}</span>
                       </div>
                     </div>
                   ))}
@@ -290,6 +377,8 @@ function AiPromptsDrawer({
 // ── Peek Preview ─────────────────────────────────────────────────────────────
 
 function PeekPreview({ conversationId, onOpen }: { conversationId: string; onOpen: () => void }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [msgs, setMsgs] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -310,20 +399,22 @@ function PeekPreview({ conversationId, onOpen }: { conversationId: string; onOpe
       }}
     >
       {loading ? (
-        <span style={{ color: 'var(--text-muted)' }}>Cargando…</span>
+        <span style={{ color: 'var(--text-muted)' }}>{i.loading}</span>
       ) : msgs.length === 0 ? (
-        <span style={{ color: 'var(--text-muted)' }}>Sin mensajes aún</span>
+        <span style={{ color: 'var(--text-muted)' }}>{i.inbxNoMsgsYet}</span>
       ) : (
         msgs.map((m) => (
           <div key={m.id} style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-            <span style={{ color: m.direction === 'inbound' ? '#3b82f6' : '#22c55e', fontWeight: 700, flexShrink: 0 }}>
-              {m.direction === 'inbound' ? '←' : '→'}
-            </span>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, color: 'var(--text)' }}>
-              {m.contentType !== 'text' ? `[${m.contentType}]` : m.body}
+            {m.contentType !== 'activity' && (
+              <span style={{ color: m.direction === 'inbound' ? '#3b82f6' : '#22c55e', fontWeight: 700, flexShrink: 0 }}>
+                {m.direction === 'inbound' ? '←' : '→'}
+              </span>
+            )}
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, color: m.contentType === 'activity' ? 'var(--text-muted)' : 'var(--text)', fontStyle: m.contentType === 'activity' ? 'italic' : 'normal' }}>
+              {m.contentType === 'activity' ? m.body : m.contentType !== 'text' ? `[${m.contentType}]` : m.body}
             </span>
             <span style={{ color: 'var(--text-muted)', flexShrink: 0, fontSize: 10 }}>
-              {new Date(m.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+              {new Date(m.createdAt).toLocaleTimeString(i.locale, { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
         ))
@@ -332,7 +423,7 @@ function PeekPreview({ conversationId, onOpen }: { conversationId: string; onOpe
         className="btn btn-primary"
         style={{ fontSize: 11, padding: '3px 8px', marginTop: 4 }}
         onClick={onOpen}
-      >Abrir conversación →</button>
+      >{i.inbxOpenConv}</button>
     </div>
   );
 }
@@ -340,6 +431,12 @@ function PeekPreview({ conversationId, onOpen }: { conversationId: string; onOpe
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function InboxPage() {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+  const statusLabels: Record<string, string> = {
+    open: i.inbxServing, pending: i.inbxWaiting, resolved: i.inbxResolvedLabel, snoozed: i.inbxSnoozed,
+  };
+
   // list
   const [tab, setTab] = useState<string>('open');
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -347,6 +444,11 @@ export default function InboxPage() {
   const [listError, setListError] = useState('');
   const [search, setSearch] = useState('');
   const [onlyMine, setOnlyMine] = useState(false);
+
+  // bulk select
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkWorking, setBulkWorking] = useState(false);
 
   // filters
   const [showFilters, setShowFilters] = useState(false);
@@ -384,6 +486,13 @@ export default function InboxPage() {
   const [showCanned, setShowCanned] = useState(false);
   const [cannedSearch, setCannedSearch] = useState('');
 
+  // @mention autocomplete
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null = not open
+  const [mentionCursor, setMentionCursor] = useState(0);
+
+  // mention toast
+  const [mentionToast, setMentionToast] = useState('');
+
   // AI prompts drawer
   const [showAiPrompts, setShowAiPrompts] = useState(false);
 
@@ -392,6 +501,20 @@ export default function InboxPage() {
 
   // Bot session
   const [botSession, setBotSession] = useState<BotSession | null>(null);
+
+  // CSAT
+  const [csatSent, setCsatSent] = useState<Record<string, boolean>>({});
+
+  // Contact timeline
+  const [timeline, setTimeline] = useState<ContactTimeline | null>(null);
+  const [timelineOpen, setTimelineOpen] = useState(false);
+
+  // Tick every 60s so SLA wait-time badges re-render
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   // new conversation modal
   const [showNew, setShowNew] = useState(false);
@@ -402,10 +525,20 @@ export default function InboxPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
 
+  // unread tracking: { conversationId → count }
+  const [unreadMap, setUnreadMap] = useState<Record<string, number>>({});
+
   const threadRef = useRef<HTMLDivElement>(null);
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [peekId, setPeekId] = useState<string | null>(null);
+
+  // ── Page title unread count ───────────────────────────────────────────────────
+  useEffect(() => {
+    const total = Object.values(unreadMap).reduce((s, n) => s + n, 0);
+    document.title = total > 0 ? `(${total}) Inbox — CRM` : 'Inbox — CRM';
+    return () => { document.title = 'CRM'; };
+  }, [unreadMap]);
 
   // ── Load list ────────────────────────────────────────────────────────────────
   const loadList = useCallback(() => {
@@ -446,6 +579,14 @@ export default function InboxPage() {
       .finally(() => setLoadingChat(false));
   }, [activeId]);
 
+  // ── Contact timeline — load when contact changes ──────────────────────────────
+  useEffect(() => {
+    setTimeline(null); setTimelineOpen(false);
+    const contactId = conversations.find((c) => c.id === activeId)?.contactId;
+    if (!contactId) return;
+    getContactTimeline(contactId).then(setTimeline).catch(() => {});
+  }, [activeId, conversations]);
+
   // ── Scroll to bottom ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
@@ -467,6 +608,8 @@ export default function InboxPage() {
     const es = openNotificationsStream((data) => {
       if (data.type === 'message_created') {
         const convId: string = data.conversationId;
+        const isInbound = data.message?.direction === 'inbound';
+
         // If the active conversation received a new message, append it
         if (convId === activeId && data.message) {
           setMessages((prev) => {
@@ -474,6 +617,14 @@ export default function InboxPage() {
             return exists ? prev : [...prev, data.message];
           });
         }
+
+        // If it's an inbound message in a NON-active conversation → sound + per-conv unread count
+        // (browser Notification is already handled by the global SSE in layout.tsx)
+        if (isInbound && convId !== activeId) {
+          setUnreadMap((prev) => ({ ...prev, [convId]: (prev[convId] ?? 0) + 1 }));
+          playNotificationSound();
+        }
+
         // Move conversation to top of list and refresh last_message_at
         setConversations((prev) => {
           const idx = prev.findIndex((c) => c.id === convId);
@@ -483,9 +634,37 @@ export default function InboxPage() {
             return prev;
           }
           const updated = { ...prev[idx], last_message_at: new Date().toISOString() };
-          const rest = prev.filter((_, i) => i !== idx);
+          const rest = prev.filter((_, arrIdx) => arrIdx !== idx);
           return [updated, ...rest];
         });
+      }
+
+      if (data.type === 'message_status_updated') {
+        const { messageId, status } = data as { messageId: string; status: string };
+        setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, status } : m));
+      }
+
+      // Real-time note from another agent
+      if (data.type === 'note_created') {
+        const convId: string = data.conversationId;
+        if (convId === activeId && data.note) {
+          setNotes((prev) => {
+            const exists = prev.some((n: Message) => n.id === data.note.id);
+            return exists ? prev : [...prev, data.note];
+          });
+        }
+      }
+
+      // Mention notification
+      if (data.type === 'mention_created') {
+        const userId = (() => { try { return JSON.parse(localStorage.getItem('user') ?? '{}').id ?? ''; } catch { return ''; } })();
+        if (data.mentionedUserId === userId) {
+          setMentionToast(`💬 ${data.mentionedBy} te mencionó: "${(data.body as string)?.slice(0, 60)}"`);
+          setTimeout(() => setMentionToast(''), 5000);
+          if (data.conversationId !== activeId) {
+            setUnreadMap((prev) => ({ ...prev, [data.conversationId]: (prev[data.conversationId] ?? 0) + 1 }));
+          }
+        }
       }
     });
     return () => es.close();
@@ -511,15 +690,35 @@ export default function InboxPage() {
   const activeFiltersCount = [filterTag, filterInbox, filterStatus, filterAgent, filterQueue].filter(Boolean).length;
 
   // ── Actions ──────────────────────────────────────────────────────────────────
+  const [mobilePanel, setMobilePanel] = useState<'list' | 'chat'>('list');
+
   function selectConv(id: string) {
     setActiveId(id); setBody(''); setShowCanned(false); setComposerTab('message');
     setScheduleMode(false); setScheduledAt('');
+    setMobilePanel('chat');
+    // Clear unread badge for this conversation
+    if (unreadMap[id]) setUnreadMap((prev) => { const next = { ...prev }; delete next[id]; return next; });
+  }
+
+  async function resolveQuick(e: React.MouseEvent, convId: string) {
+    e.stopPropagation();
+    try {
+      await updateConversation(convId, { status: 'resolved' });
+      if (activeId === convId) {
+        setConv((p) => p ? { ...p, status: 'resolved' } : p);
+      }
+      if (tab !== 'all') {
+        setConversations((prev) => prev.filter((c) => c.id !== convId));
+      } else {
+        setConversations((prev) => prev.map((c) => c.id === convId ? { ...c, status: 'resolved' } : c));
+      }
+    } catch { /* silent */ }
   }
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
     if (!activeId || !body.trim()) return;
-    if (scheduleMode && !scheduledAt) { alert('Selecciona fecha y hora para programar el mensaje'); return; }
+    if (scheduleMode && !scheduledAt) { alert(i.inbxAlertSched); return; }
     setSending(true);
     try {
       if (scheduleMode) {
@@ -535,7 +734,7 @@ export default function InboxPage() {
         loadList();
       } else {
         await sendNote(activeId, body.trim());
-        setBody('');
+        setBody(''); setMentionQuery(null);
         const [m, n] = await Promise.all([getMessages(activeId), getNotes(activeId)]);
         setMessages(m); setNotes(n);
       }
@@ -552,12 +751,12 @@ export default function InboxPage() {
       const [m, n] = await Promise.all([getMessages(activeId), getNotes(activeId)]);
       setMessages(m); setNotes(n);
       loadList();
-    } catch (err: unknown) { alert(err instanceof Error ? err.message : 'Error al subir archivo'); }
+    } catch (err: unknown) { alert(err instanceof Error ? err.message : i.inbxErrUpload); }
     finally { setSending(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
   }
 
   async function handleCancelScheduled(schedId: string) {
-    if (!activeId || !confirm('¿Cancelar este mensaje programado?')) return;
+    if (!activeId || !confirm(i.inbxConfirmCancelSched)) return;
     await cancelScheduledMessage(activeId, schedId);
     setScheduledMsgs((prev) => prev.filter((s) => s.id !== schedId));
   }
@@ -590,12 +789,87 @@ export default function InboxPage() {
   }
 
   function insertCanned(cr: CannedResponse) {
-    setBody(cr.content); setShowCanned(false); setCannedSearch('');
+    const contact = listConv?.contact;
+    const agentName = (() => { try { return JSON.parse(localStorage.getItem('user') ?? '{}').fullName ?? ''; } catch { return ''; } })();
+    const today = new Date().toLocaleDateString(i.locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const resolved = cr.content
+      .replace(/\{\{nombre_contacto\}\}/gi, contact?.fullName || contact?.email || '')
+      .replace(/\{\{nombre\}\}/gi, contact?.fullName || contact?.email || '')
+      .replace(/\{\{email_contacto\}\}/gi, contact?.email || '')
+      .replace(/\{\{telefono_contacto\}\}/gi, contact?.phone || '')
+      .replace(/\{\{agente\}\}/gi, agentName)
+      .replace(/\{\{fecha\}\}/gi, today)
+      .replace(/\{\{asunto\}\}/gi, conv?.subject || '')
+      .replace(/\{\{canal\}\}/gi, conv?.channelType || '');
+    setBody(resolved); setShowCanned(false); setCannedSearch('');
     textareaRef.current?.focus();
   }
 
   function clearFilters() {
     setFilterTag(''); setFilterInbox(''); setFilterStatus(''); setFilterAgent(''); setFilterQueue('');
+  }
+
+  function toggleSelectMode() {
+    setSelectMode((s) => !s);
+    setSelectedIds(new Set());
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function selectAll() {
+    setSelectedIds(new Set(filtered.map((c) => c.id)));
+  }
+
+  async function bulkAction(action: 'resolved' | 'pending' | 'open') {
+    if (selectedIds.size === 0) return;
+    setBulkWorking(true);
+    try {
+      await Promise.all([...selectedIds].map((id) => updateConversation(id, { status: action })));
+      setConversations((prev) => prev.map((c) =>
+        selectedIds.has(c.id) ? { ...c, status: action } : c
+      ));
+      if (tab !== 'all' && tab !== action) {
+        setConversations((prev) => prev.filter((c) => !selectedIds.has(c.id)));
+      }
+      setSelectedIds(new Set());
+    } finally { setBulkWorking(false); }
+  }
+
+  async function bulkAssignQueue(queueId: string) {
+    if (selectedIds.size === 0 || !queueId) return;
+    setBulkWorking(true);
+    try {
+      await Promise.all([...selectedIds].map((id) => assignConversation({ conversationId: id, queueId })));
+      setSelectedIds(new Set());
+      loadList();
+    } finally { setBulkWorking(false); }
+  }
+
+  async function bulkAssignAgent(agentId: string) {
+    if (selectedIds.size === 0 || !agentId) return;
+    setBulkWorking(true);
+    try {
+      await Promise.all([...selectedIds].map((id) => assignConversation({ conversationId: id, userId: agentId })));
+      setConversations((prev) => prev.map((c) =>
+        selectedIds.has(c.id) ? { ...c, assignedTo: agentId } : c
+      ));
+      setSelectedIds(new Set());
+    } finally { setBulkWorking(false); }
+  }
+
+  async function bulkAddTag(tagId: string) {
+    if (selectedIds.size === 0 || !tagId) return;
+    setBulkWorking(true);
+    try {
+      await Promise.all([...selectedIds].map((id) => addConversationTag(id, tagId)));
+      setSelectedIds(new Set());
+    } finally { setBulkWorking(false); }
   }
 
   const chatItems = composerTab === 'message' ? messages : notes;
@@ -604,8 +878,97 @@ export default function InboxPage() {
     !cannedSearch || cr.title.toLowerCase().includes(cannedSearch.toLowerCase()) || cr.content.toLowerCase().includes(cannedSearch.toLowerCase())
   );
 
+  // @mention autocomplete — filter agents by typed query
+  const mentionSuggestions = mentionQuery !== null
+    ? agents.filter((a) => a.fullName.toLowerCase().replace(/\s+/g, '').startsWith(mentionQuery.toLowerCase()))
+    : [];
+
+  function handleBodyChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const val = e.target.value;
+    setBody(val);
+    if (composerTab !== 'note') { setMentionQuery(null); return; }
+    // Detect @word at cursor
+    const cursor = e.target.selectionStart ?? val.length;
+    const before = val.slice(0, cursor);
+    const m = before.match(/@([\w.]*)$/);
+    if (m) {
+      setMentionQuery(m[1]);
+      setMentionCursor(0);
+    } else {
+      setMentionQuery(null);
+    }
+  }
+
+  function insertMention(agent: Agent) {
+    const cursor = textareaRef.current?.selectionStart ?? body.length;
+    const before = body.slice(0, cursor);
+    const after  = body.slice(cursor);
+    const prefix = before.replace(/@([\w.]*)$/, '');
+    const handle = '@' + agent.fullName.replace(/\s+/g, '');
+    setBody(prefix + handle + ' ' + after);
+    setMentionQuery(null);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }
+
+  function renderBody(text: string) {
+    if (!text) return null;
+
+    // Call transcript format: body contains **Transcript:** with [Usuario]/[Bot] lines
+    const transcriptIdx = text.indexOf('**Transcript:**');
+    if (transcriptIdx !== -1) {
+      const headerRaw = text.slice(0, transcriptIdx).trim().replace(/\*\*/g, '');
+      const transcriptRaw = text.slice(transcriptIdx + '**Transcript:**'.length).trim();
+
+      const turns: Array<{ role: 'user' | 'bot'; text: string }> = [];
+      for (const line of transcriptRaw.split('\n')) {
+        const u = line.match(/^\[Usuario\]:\s*(.+)/);
+        const b = line.match(/^\[Bot\]:\s*(.+)/);
+        if (u) turns.push({ role: 'user', text: u[1].trim() });
+        else if (b) turns.push({ role: 'bot', text: b[1].trim() });
+      }
+
+      if (turns.length > 0) {
+        return (
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10, lineHeight: 1.6 }}>
+              {headerRaw.split('\n').map((line, li) => <div key={li}>{line}</div>)}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {turns.map((t, idx) => (
+                <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: t.role === 'bot' ? 'flex-end' : 'flex-start' }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2, paddingLeft: t.role === 'user' ? 4 : 0, paddingRight: t.role === 'bot' ? 4 : 0 }}>
+                    {t.role === 'bot' ? 'Bot' : 'Cliente'}
+                  </div>
+                  <div style={{
+                    maxWidth: '82%',
+                    padding: '6px 10px',
+                    borderRadius: t.role === 'bot' ? '12px 4px 12px 12px' : '4px 12px 12px 12px',
+                    background: t.role === 'bot' ? 'var(--primary)' : 'var(--bg-alt, #f3f4f6)',
+                    color: t.role === 'bot' ? '#fff' : 'var(--text)',
+                    fontSize: 13,
+                    lineHeight: 1.4,
+                  }}>
+                    {t.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      }
+    }
+
+    // Default: handle @mentions
+    const parts = text.split(/(@[\w.]+)/g);
+    return parts.map((p, pIdx) =>
+      /^@[\w.]+$/.test(p)
+        ? <span key={pIdx} style={{ color: 'var(--primary)', fontWeight: 600 }}>{p}</span>
+        : p
+    );
+  }
+
   return (
-    <div className="inbox-layout">
+    <div className="inbox-layout" data-panel={mobilePanel}>
 
       {/* ── LEFT: List ──────────────────────────────────────────────────── */}
       <div className="inbox-sidebar">
@@ -614,17 +977,102 @@ export default function InboxPage() {
         <div className="inbox-sidebar-header">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
             <span style={{ fontWeight: 700, fontSize: 15 }}>Inbox</span>
-            <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => setShowNew(true)}>
-              + Nueva
-            </button>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                title={selectMode ? i.inbxCancelSel : i.inbxSelectConvs}
+                onClick={toggleSelectMode}
+                style={{
+                  padding: '4px 8px', borderRadius: 6, border: '1px solid',
+                  borderColor: selectMode ? 'var(--primary)' : 'var(--border)',
+                  background: selectMode ? '#eff6ff' : 'none',
+                  color: selectMode ? 'var(--primary)' : 'var(--text-muted)',
+                  cursor: 'pointer', fontSize: 13,
+                }}
+              >☑</button>
+              <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => setShowNew(true)}>
+                {i.inbxNew}
+              </button>
+            </div>
           </div>
+
+          {/* Bulk actions bar */}
+          {selectMode && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+              <button
+                className="btn btn-secondary"
+                style={{ fontSize: 11, padding: '3px 8px' }}
+                onClick={selectedIds.size === filtered.length ? () => setSelectedIds(new Set()) : selectAll}
+              >
+                {selectedIds.size === filtered.length ? i.inbxDeselectAll : `✓ ${filtered.length} ${i.inbxSelCount}`}
+              </button>
+              {selectedIds.size > 0 && (
+                <>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', alignSelf: 'center' }}>{selectedIds.size} {i.inbxSelCount}</span>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: 11, padding: '3px 8px', color: '#22c55e' }}
+                    disabled={bulkWorking}
+                    onClick={() => bulkAction('resolved')}
+                  >{i.inbxResolveBtn}</button>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: 11, padding: '3px 8px', color: '#f59e0b' }}
+                    disabled={bulkWorking}
+                    onClick={() => bulkAction('pending')}
+                  >{i.inbxWaitBtn}</button>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: 11, padding: '3px 8px', color: '#3b82f6' }}
+                    disabled={bulkWorking}
+                    onClick={() => bulkAction('open')}
+                  >{i.inbxOpenBtn}</button>
+                  {agents.length > 0 && (
+                    <select
+                      className="form-input"
+                      style={{ fontSize: 11, padding: '3px 6px' }}
+                      defaultValue=""
+                      onChange={(e) => { if (e.target.value) bulkAssignAgent(e.target.value); e.target.value = ''; }}
+                      disabled={bulkWorking}
+                    >
+                      <option value="">👤 {i.inbxAgentDots}</option>
+                      {agents.map((a) => <option key={a.id} value={a.id}>{a.fullName}</option>)}
+                    </select>
+                  )}
+                  {queues.length > 0 && (
+                    <select
+                      className="form-input"
+                      style={{ fontSize: 11, padding: '3px 6px' }}
+                      defaultValue=""
+                      onChange={(e) => { if (e.target.value) bulkAssignQueue(e.target.value); e.target.value = ''; }}
+                      disabled={bulkWorking}
+                    >
+                      <option value="">📬 {i.inbxQueueDots}</option>
+                      {queues.filter((q) => q.isActive).map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
+                    </select>
+                  )}
+                  {tags.length > 0 && (
+                    <select
+                      className="form-input"
+                      style={{ fontSize: 11, padding: '3px 6px' }}
+                      defaultValue=""
+                      onChange={(e) => { if (e.target.value) bulkAddTag(e.target.value); e.target.value = ''; }}
+                      disabled={bulkWorking}
+                    >
+                      <option value="">🏷 {i.inbxTagDots}</option>
+                      {tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           {/* Status tabs */}
           <div style={{ display: 'flex', gap: 3 }}>
             {[
-              { key: 'open', label: 'Serving' },
-              { key: 'pending', label: 'Waiting' },
-              { key: 'resolved', label: 'Resueltas' },
-              { key: 'all', label: 'Todas' },
+              { key: 'open', label: i.inbxServing },
+              { key: 'pending', label: i.inbxWaiting },
+              { key: 'resolved', label: i.inbxResolvedPl },
+              { key: 'all', label: i.all },
             ].map((t) => (
               <button
                 key={t.key}
@@ -647,13 +1095,13 @@ export default function InboxPage() {
             <input
               className="form-input"
               style={{ flex: 1, fontSize: 12 }}
-              placeholder="Buscar…"
+              placeholder={i.inbxSearchHint}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
             {/* Mine toggle */}
             <button
-              title="Solo mis conversaciones"
+              title={i.inbxMineOnly}
               onClick={() => setOnlyMine(!onlyMine)}
               style={{
                 padding: '0 8px', borderRadius: 6, border: '1px solid',
@@ -665,7 +1113,7 @@ export default function InboxPage() {
             >👤</button>
             {/* Filter toggle */}
             <button
-              title="Filtros avanzados"
+              title={i.inbxAdvFilters}
               onClick={() => setShowFilters(!showFilters)}
               style={{
                 padding: '0 8px', borderRadius: 6, border: '1px solid',
@@ -708,34 +1156,50 @@ export default function InboxPage() {
         {/* Active filters summary */}
         {activeFiltersCount > 0 && !showFilters && (
           <div style={{ padding: '6px 12px', background: '#eff6ff', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--primary)', fontWeight: 600 }}>{activeFiltersCount} filtro{activeFiltersCount > 1 ? 's' : ''} activo{activeFiltersCount > 1 ? 's' : ''}</span>
-            <button onClick={clearFilters} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: 11 }}>× Limpiar</button>
+            <span style={{ fontSize: 11, color: 'var(--primary)', fontWeight: 600 }}>{activeFiltersCount} {activeFiltersCount > 1 ? i.inbxActiveFilters : i.inbxActiveFilter}</span>
+            <button onClick={clearFilters} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: 11 }}>× {i.inbxClear}</button>
           </div>
         )}
 
         {/* Conversation list */}
         <div className="inbox-conv-list">
           {loadingList ? (
-            <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Cargando…</div>
+            <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{i.loading}</div>
           ) : listError ? (
             <div style={{ padding: 16, color: 'var(--danger)', fontSize: 12 }}>{listError}</div>
           ) : filtered.length === 0 ? (
             <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
               <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
-              {search || activeFiltersCount > 0 || onlyMine ? 'Sin resultados para los filtros aplicados.' : 'No hay conversaciones.'}
+              {search || activeFiltersCount > 0 || onlyMine ? i.noResults : i.inbxSelectConv}
             </div>
           ) : filtered.map((c) => {
-            const sm = STATUS_META[c.status] ?? STATUS_META.open;
+            const smCls = STATUS_CSS[c.status] ?? 'status-open';
+            const smLabel = statusLabels[c.status] ?? c.status;
             return (
               <div
                 key={c.id}
-                className={`inbox-conv-item${activeId === c.id ? ' active' : ''}`}
-                onClick={() => selectConv(c.id)}
+                className={`inbox-conv-item${activeId === c.id ? ' active' : ''}${selectMode && selectedIds.has(c.id) ? ' selected' : ''}`}
+                onClick={() => selectMode ? toggleSelect(c.id) : selectConv(c.id)}
+                style={selectMode ? { cursor: 'default' } : undefined}
               >
+                {selectMode && (
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(c.id)}
+                    onChange={() => toggleSelect(c.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ marginBottom: 4, accentColor: 'var(--primary)' }}
+                  />
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }}>
-                  <div className="inbox-conv-item-name" style={{ flex: 1 }}>
+                  <div className="inbox-conv-item-name" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                     {CHANNEL_ICONS[c.channelType] ?? '💬'}{' '}
-                    {c.contact?.id ? (
+                    {c.isGroup ? (
+                      <>
+                        <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: '#d1fae5', color: '#065f46', fontWeight: 700, lineHeight: 1.4 }}>👥</span>
+                        <span>{c.subject || c.contact?.fullName || i.noContact}</span>
+                      </>
+                    ) : c.contact?.id ? (
                       <Link
                         href={`/contacts/${c.contact.id}`}
                         onClick={(e) => e.stopPropagation()}
@@ -745,11 +1209,46 @@ export default function InboxPage() {
                       >
                         {c.contact.fullName || c.contact.email}
                       </Link>
-                    ) : (c.contact?.fullName || c.contact?.email || '(Sin contacto)')}
+                    ) : (c.contact?.fullName || c.contact?.email || i.noContact)}
                   </div>
-                  <span className="inbox-conv-item-time">{timeAgo(c.lastMessageAt || c.updatedAt)}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    {/* Unread badge */}
+                    {(unreadMap[c.id] ?? 0) > 0 && (
+                      <span style={{
+                        background: '#ef4444', color: '#fff', borderRadius: '50%',
+                        minWidth: 18, height: 18, fontSize: 10, fontWeight: 700,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        padding: '0 3px', lineHeight: 1,
+                      }}>
+                        {unreadMap[c.id] > 9 ? '9+' : unreadMap[c.id]}
+                      </span>
+                    )}
+                    <span className="inbox-conv-item-time">{timeAgo(c.lastMessageAt || c.updatedAt, i.inbxNow, i.locale)}</span>
+                    {c.status !== 'resolved' && (
+                      <button
+                        title={i.inbxMarkResolved}
+                        onClick={(e) => resolveQuick(e, c.id)}
+                        style={{
+                          background: 'none', border: '1px solid transparent', borderRadius: 4,
+                          cursor: 'pointer', color: 'var(--text-muted)', fontSize: 13,
+                          padding: '0px 3px', lineHeight: 1, flexShrink: 0,
+                          transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = '#22c55e';
+                          e.currentTarget.style.color = '#22c55e';
+                          e.currentTarget.style.background = '#f0fdf4';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = 'transparent';
+                          e.currentTarget.style.color = 'var(--text-muted)';
+                          e.currentTarget.style.background = 'none';
+                        }}
+                      >✓</button>
+                    )}
+                  </div>
                 </div>
-                <div className="inbox-conv-item-subject">{c.subject || '(Sin asunto)'}</div>
+                <div className="inbox-conv-item-subject">{c.subject || i.noSubject}</div>
                 {/* Conversation tags + queue badge */}
                 {((c.tags && c.tags.length > 0) || c.queueId) && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 3 }}>
@@ -778,12 +1277,30 @@ export default function InboxPage() {
                   </div>
                 )}
                 <div className="inbox-conv-item-meta">
-                  <span className={`inbox-status-badge ${sm.cls}`}>{sm.label}</span>
+                  <span className={`inbox-status-badge ${smCls}`}>{smLabel}</span>
+                  {(c.status === 'open' || c.status === 'pending') && (() => {
+                    const waitMs = Date.now() - new Date(c.lastMessageAt || c.updatedAt).getTime();
+                    const waitMin = waitMs / 60000;
+                    if (waitMin < 60) return null;
+                    const isRed = waitMin >= 240;
+                    const label = waitMin >= 1440 ? `${Math.floor(waitMin / 1440)}d` : waitMin >= 60 ? `${Math.floor(waitMin / 60)}h` : `${Math.floor(waitMin)}m`;
+                    return (
+                      <span title={`${i.inbxNoActivity} ${label}`} style={{
+                        fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 99,
+                        background: isRed ? '#fee2e2' : '#fef3c7',
+                        color: isRed ? '#b91c1c' : '#92400e',
+                        border: `1px solid ${isRed ? '#fca5a5' : '#fde68a'}`,
+                        display: 'inline-flex', alignItems: 'center', gap: 2,
+                      }}>
+                        ⏱ {label}
+                      </span>
+                    );
+                  })()}
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                     {c.inbox?.name && <span style={{ fontSize: 10, color: 'var(--text-muted)', maxWidth: 70, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.inbox.name}</span>}
                     {/* Peek button — preview without opening */}
                     <button
-                      title="Vista previa"
+                      title={i.inbxPreview}
                       onClick={(e) => { e.stopPropagation(); setPeekId(peekId === c.id ? null : c.id); }}
                       style={{
                         background: peekId === c.id ? 'var(--primary)' : 'none',
@@ -815,33 +1332,65 @@ export default function InboxPage() {
 
           {/* Chat header */}
           <div className="inbox-chat-header">
+            <button
+              onClick={() => setMobilePanel('list')}
+              style={{ display: 'none', background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: 'var(--text)', padding: '0 8px 0 0', flexShrink: 0 }}
+              className="mobile-back-btn"
+              aria-label="Volver"
+            >←</button>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {listConv?.contact?.id ? (
+              <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {conv.isGroup && (
+                  <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: '#d1fae5', color: '#065f46', fontWeight: 700, flexShrink: 0 }}>👥 Grupo</span>
+                )}
+                {conv.isGroup ? (
+                  conv.subject || listConv?.contact?.fullName || i.noContact
+                ) : listConv?.contact?.id ? (
                   <Link href={`/contacts/${listConv.contact.id}`} style={{ color: 'inherit', textDecoration: 'none' }}
                     onMouseOver={(e) => (e.currentTarget.style.textDecoration = 'underline')}
                     onMouseOut={(e) => (e.currentTarget.style.textDecoration = 'none')}>
                     {listConv.contact.fullName || listConv.contact.email}
                   </Link>
-                ) : (listConv?.contact?.fullName || listConv?.contact?.email || '(Sin contacto)')}
+                ) : (listConv?.contact?.fullName || listConv?.contact?.email || i.noContact)}
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {CHANNEL_ICONS[conv.channelType] ?? ''} {conv.subject || '(Sin asunto)'}
+                {CHANNEL_ICONS[conv.channelType] ?? ''} {conv.subject || i.noSubject}
                 {listConv?.inbox?.name && <span style={{ marginLeft: 6, opacity: .7 }}>· {listConv.inbox.name}</span>}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-              <span className={`inbox-status-badge ${STATUS_META[conv.status]?.cls ?? 'status-open'}`}>
-                {STATUS_META[conv.status]?.label ?? conv.status}
+              <button
+                className="btn btn-secondary"
+                style={{ fontSize: 11, padding: '4px 10px' }}
+                title={i.inbxExportPdf}
+                onClick={() => exportConversationPdf(conv, listConv?.contact ?? null, messages, i)}
+              >⬇ PDF</button>
+              <span className={`inbox-status-badge ${STATUS_CSS[conv.status] ?? 'status-open'}`}>
+                {statusLabels[conv.status] ?? conv.status}
               </span>
               {conv.status !== 'resolved' && (
-                <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setStatus('resolved')}>✓ Resolver</button>
+                <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setStatus('resolved')}>{i.inbxResolveBtn}</button>
               )}
               {conv.status === 'resolved' && (
-                <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setStatus('open')}>↩ Reabrir</button>
+                <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setStatus('open')}>{i.inbxReopen}</button>
+              )}
+              {conv.status === 'resolved' && !csatSent[activeId!] && (
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: 11, padding: '4px 10px', color: '#f59e0b', borderColor: '#f59e0b' }}
+                  onClick={async () => {
+                    try {
+                      await requestCsat(activeId!);
+                      setCsatSent((p) => ({ ...p, [activeId!]: true }));
+                    } catch { alert(i.inbxErrSurvey); }
+                  }}
+                >{i.inbxSurvey}</button>
+              )}
+              {conv.status === 'resolved' && csatSent[activeId!] && (
+                <span style={{ fontSize: 11, color: '#22c55e', padding: '4px 6px' }}>{i.inbxSurveySent}</span>
               )}
               {conv.status === 'open' && (
-                <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setStatus('pending')}>⏸ Espera</button>
+                <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setStatus('pending')}>{i.inbxPutWait}</button>
               )}
             </div>
           </div>
@@ -849,21 +1398,32 @@ export default function InboxPage() {
           {/* Thread */}
           <div className="inbox-chat-body" ref={threadRef}>
             {loadingChat ? (
-              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Cargando…</div>
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{i.loading}</div>
             ) : chatItems.length === 0 && scheduledMsgs.length === 0 ? (
               <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, marginTop: 40 }}>
-                {composerTab === 'message' ? 'Sin mensajes aún.' : 'Sin notas aún.'}
+                {composerTab === 'message' ? i.inbxNoMsgsYet : i.inbxNoNotesYet}
               </div>
             ) : (
               <>
                 {chatItems.map((m) => {
+                  if (m.contentType === 'activity') {
+                    return (
+                      <div key={m.id} className="msg-activity">
+                        <span className="msg-activity-label">{m.body}</span>
+                        <span className="msg-activity-time">
+                          {new Date(m.createdAt).toLocaleString(i.locale, { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                        </span>
+                      </div>
+                    );
+                  }
                   const isFile = m.contentType === 'image' || m.contentType === 'audio' || m.contentType === 'file';
                   let fileUrl = ''; let fileName = '';
                   if (isFile && m.body?.includes('|')) { [fileUrl, fileName] = m.body.split('|'); }
                   else if (isFile) { fileUrl = m.body; fileName = m.body.split('/').pop() ?? 'archivo'; }
+                  const isTranscript = !isFile && m.body?.includes('**Transcript:**');
                   return (
-                    <div key={m.id} className={`msg ${m.isPrivate ? 'msg-note' : m.direction === 'outbound' ? 'msg-out' : 'msg-in'}`}>
-                      <div className="msg-bubble">
+                    <div key={m.id} className={`msg ${m.isPrivate ? 'msg-note' : m.direction === 'outbound' ? 'msg-out' : 'msg-in'}`} style={isTranscript ? { maxWidth: '95%', alignSelf: 'stretch' } : undefined}>
+                      <div className="msg-bubble" style={isTranscript ? { background: 'transparent', border: '1px solid var(--border)', padding: '12px 14px' } : undefined}>
                         {m.contentType === 'image' && fileUrl ? (
                           <a href={`${API_URL}${fileUrl}`} target="_blank" rel="noopener">
                             <img src={`${API_URL}${fileUrl}`} alt={fileName} style={{ maxWidth: 220, maxHeight: 200, borderRadius: 6, display: 'block' }} />
@@ -876,10 +1436,17 @@ export default function InboxPage() {
                           <a href={`${API_URL}${fileUrl}`} target="_blank" rel="noopener" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'inherit', textDecoration: 'none' }}>
                             📎 <span style={{ textDecoration: 'underline', wordBreak: 'break-all' }}>{fileName}</span>
                           </a>
-                        ) : m.body}
+                        ) : renderBody(m.body)}
                       </div>
-                      <div className="msg-time">
-                        {new Date(m.createdAt).toLocaleString('es-ES', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                      <div className="msg-time" style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: m.direction === 'outbound' ? 'flex-end' : 'flex-start' }}>
+                        {new Date(m.createdAt).toLocaleString(i.locale, { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                        {m.direction === 'outbound' && conv?.channelType?.startsWith('whatsapp') && (
+                          <span title={m.status} style={{ fontSize: 12, lineHeight: 1 }}>
+                            {m.status === 'read'      ? <span style={{ color: '#3b82f6' }}>✓✓</span>
+                           : m.status === 'delivered' ? <span style={{ color: 'var(--text-muted)' }}>✓✓</span>
+                           :                            <span style={{ color: 'var(--text-muted)', opacity: 0.6 }}>✓</span>}
+                          </span>
+                        )}
                       </div>
                     </div>
                   );
@@ -887,7 +1454,7 @@ export default function InboxPage() {
                 {composerTab === 'message' && scheduledMsgs.length > 0 && (
                   <div style={{ marginTop: 16, borderTop: '1px dashed var(--border)', paddingTop: 12 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-                      🕐 Mensajes programados ({scheduledMsgs.length})
+                      🕐 {i.inbxScheduled} ({scheduledMsgs.length})
                     </div>
                     {scheduledMsgs.map((s) => (
                       <div key={s.id} style={{
@@ -898,14 +1465,14 @@ export default function InboxPage() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 13, marginBottom: 4, wordBreak: 'break-word' }}>{s.body}</div>
                           <div style={{ fontSize: 11, color: '#92400e', display: 'flex', gap: 8 }}>
-                            <span>🕐 {new Date(s.scheduled_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                            <span>🕐 {new Date(s.scheduled_at).toLocaleString(i.locale, { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                             {s.author_name && <span>· {s.author_name}</span>}
                           </div>
                         </div>
                         <button
                           onClick={() => handleCancelScheduled(s.id)}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 14, padding: '2px 4px', flexShrink: 0 }}
-                          title="Cancelar mensaje programado"
+                          title={i.inbxCancelSchedBtn}
                         >✕</button>
                       </div>
                     ))}
@@ -919,14 +1486,14 @@ export default function InboxPage() {
           <div className="inbox-chat-composer">
             <div className="composer-tabs">
               <button className={`composer-tab${composerTab === 'message' ? ' active' : ''}`} onClick={() => setComposerTab('message')}>
-                Mensaje
+                {i.inbxMsgTab}
               </button>
               <button
                 className="composer-tab"
                 style={composerTab === 'note' ? { background: '#fef9c3', borderColor: '#fde047', color: '#713f12' } : {}}
                 onClick={() => setComposerTab('note')}
               >
-                📝 Nota interna
+                📝 {i.inbxNoteTab}
               </button>
             </div>
             <form onSubmit={handleSend} style={{ position: 'relative' }}>
@@ -944,7 +1511,7 @@ export default function InboxPage() {
                     />
                   </div>
                   {filteredCanned.length === 0 ? (
-                    <div style={{ padding: 12, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>Sin resultados</div>
+                    <div style={{ padding: 12, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>{i.noResults}</div>
                   ) : filteredCanned.map((cr) => (
                     <div key={cr.id} className="quick-resp-item" onClick={() => insertCanned(cr)}>
                       <div className="quick-resp-item-title">
@@ -952,6 +1519,52 @@ export default function InboxPage() {
                         {cr.title}
                       </div>
                       <div className="quick-resp-item-preview">{cr.content}</div>
+                    </div>
+                  ))}
+                  <div style={{
+                    padding: '6px 10px', borderTop: '1px solid var(--border)',
+                    background: 'var(--bg-secondary)', display: 'flex', flexWrap: 'wrap', gap: '4px 8px',
+                  }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', width: '100%', marginBottom: 2 }}>{i.inbxVarsAvail}</span>
+                    {['{{nombre_contacto}}','{{email_contacto}}','{{telefono_contacto}}','{{agente}}','{{fecha}}','{{asunto}}','{{canal}}'].map(v => (
+                      <code key={v} style={{
+                        fontSize: 10, background: 'var(--bg)', border: '1px solid var(--border)',
+                        borderRadius: 3, padding: '1px 4px', color: 'var(--primary)', cursor: 'pointer',
+                      }} title={i.inbxClickCopy} onClick={() => navigator.clipboard?.writeText(v).catch(() => {})}>{v}</code>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* @mention autocomplete dropdown */}
+              {mentionQuery !== null && mentionSuggestions.length > 0 && (
+                <div style={{
+                  position: 'absolute', bottom: '100%', left: 0, right: 0, zIndex: 50,
+                  background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+                  boxShadow: '0 4px 16px rgba(0,0,0,.15)', overflow: 'hidden', marginBottom: 4,
+                }}>
+                  {mentionSuggestions.slice(0, 6).map((a, aIdx) => (
+                    <div
+                      key={a.id}
+                      onMouseDown={(e) => { e.preventDefault(); insertMention(a); }}
+                      style={{
+                        padding: '8px 12px', cursor: 'pointer', fontSize: 13,
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        background: aIdx === mentionCursor ? 'var(--primary)' : 'transparent',
+                        color: aIdx === mentionCursor ? '#fff' : 'var(--text)',
+                      }}
+                      onMouseEnter={() => setMentionCursor(aIdx)}
+                    >
+                      <span style={{
+                        width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
+                        background: aIdx === mentionCursor ? 'rgba(255,255,255,0.25)' : 'var(--primary)',
+                        color: aIdx === mentionCursor ? '#fff' : '#fff',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 11, fontWeight: 700,
+                      }}>
+                        {a.fullName.charAt(0).toUpperCase()}
+                      </span>
+                      <span style={{ fontWeight: 500 }}>{a.fullName}</span>
+                      <span style={{ fontSize: 11, opacity: 0.6, marginLeft: 'auto' }}>@{a.fullName.replace(/\s+/g, '')}</span>
                     </div>
                   ))}
                 </div>
@@ -962,7 +1575,7 @@ export default function InboxPage() {
                 {composerTab === 'message' && (
                   <button
                     type="button"
-                    title="Adjuntar archivo"
+                    title={i.inbxAttach}
                     onClick={() => fileInputRef.current?.click()}
                     disabled={sending}
                     style={{
@@ -987,7 +1600,7 @@ export default function InboxPage() {
                 {composerTab === 'message' && (
                   <button
                     type="button"
-                    title="Prompts de IA"
+                    title={i.inbxAiTitle}
                     onClick={() => setShowAiPrompts(true)}
                     style={{
                       padding: '6px 10px', borderRadius: 6, border: '1px solid',
@@ -1007,11 +1620,17 @@ export default function InboxPage() {
                     borderColor: scheduleMode ? '#f59e0b' : composerTab === 'note' ? '#fde047' : undefined,
                   }}
                   placeholder={composerTab === 'message'
-                    ? (scheduleMode ? 'Escribe el mensaje a programar…' : 'Escribe un mensaje… (Enter envía, Shift+Enter nueva línea)')
-                    : 'Nota interna — solo visible para el equipo…'}
+                    ? (scheduleMode ? i.inbxScheduleMsg : i.inbxMsgHint)
+                    : i.inbxNoteHint}
                   value={body}
-                  onChange={(e) => setBody(e.target.value)}
+                  onChange={handleBodyChange}
                   onKeyDown={(e) => {
+                    if (mentionQuery !== null && mentionSuggestions.length > 0) {
+                      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionCursor((c) => Math.min(c + 1, mentionSuggestions.length - 1)); return; }
+                      if (e.key === 'ArrowUp')   { e.preventDefault(); setMentionCursor((c) => Math.max(c - 1, 0)); return; }
+                      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertMention(mentionSuggestions[mentionCursor]); return; }
+                      if (e.key === 'Escape') { setMentionQuery(null); return; }
+                    }
                     if (e.key === 'Enter' && !e.shiftKey && !scheduleMode) { e.preventDefault(); handleSend(e as any); }
                     if (e.key === 'Escape') setShowCanned(false);
                   }}
@@ -1021,7 +1640,7 @@ export default function InboxPage() {
                   {composerTab === 'message' && (
                     <button
                       type="button"
-                      title={scheduleMode ? 'Cancelar programación' : 'Programar para después'}
+                      title={scheduleMode ? i.inbxCancelSchedule : i.inbxScheduleFor}
                       onClick={() => { setScheduleMode(!scheduleMode); if (scheduleMode) setScheduledAt(''); }}
                       style={{
                         padding: '5px 8px', borderRadius: 6, border: '1px solid', cursor: 'pointer', fontSize: 13,
@@ -1036,13 +1655,13 @@ export default function InboxPage() {
                     className="btn btn-primary"
                     disabled={sending || !body.trim() || (scheduleMode && !scheduledAt)}
                     style={{ fontSize: 12, padding: '6px 12px' }}
-                  >{sending ? '…' : scheduleMode ? 'Programar' : 'Enviar'}</button>
+                  >{sending ? '…' : scheduleMode ? i.inbxScheduleBtn : i.send}</button>
                 </div>
               </div>
               {/* Schedule datetime picker */}
               {scheduleMode && composerTab === 'message' && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, padding: '8px 10px', background: '#fef3c7', borderRadius: 6, border: '1px solid #fde68a' }}>
-                  <span style={{ fontSize: 12, color: '#92400e', fontWeight: 600, whiteSpace: 'nowrap' }}>🕐 Enviar el:</span>
+                  <span style={{ fontSize: 12, color: '#92400e', fontWeight: 600, whiteSpace: 'nowrap' }}>🕐 {i.inbxSendAt}</span>
                   <input
                     type="datetime-local"
                     value={scheduledAt}
@@ -1060,8 +1679,8 @@ export default function InboxPage() {
       ) : (
         <div className="inbox-empty">
           <div style={{ fontSize: 40, marginBottom: 12 }}>✉</div>
-          <div style={{ fontSize: 14, fontWeight: 500 }}>Selecciona una conversación</div>
-          <div style={{ fontSize: 12, marginTop: 6, color: 'var(--text-muted)' }}>o crea una nueva para empezar</div>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>{i.inbxSelectConv}</div>
+          <div style={{ fontSize: 12, marginTop: 6, color: 'var(--text-muted)' }}>{i.inbxCreateToStart}</div>
         </div>
       )}
 
@@ -1071,11 +1690,11 @@ export default function InboxPage() {
 
           {/* Contact */}
           <div className="inbox-detail-section">
-            <div className="inbox-detail-section-title">Contacto</div>
+            <div className="inbox-detail-section-title">{i.inbxContactSect}</div>
             {listConv.contact ? (
               <>
                 <div className="inbox-detail-row">
-                  <span className="inbox-detail-label">Nombre</span>
+                  <span className="inbox-detail-label">{i.name}</span>
                   <Link href={`/contacts/${listConv.contact.id}`}
                     style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600, fontSize: 13 }}
                     onMouseOver={(e) => (e.currentTarget.style.textDecoration = 'underline')}
@@ -1085,33 +1704,132 @@ export default function InboxPage() {
                 </div>
                 {listConv.contact.email && (
                   <div className="inbox-detail-row">
-                    <span className="inbox-detail-label">Email</span>
+                    <span className="inbox-detail-label">{i.email}</span>
                     <span className="inbox-detail-value" style={{ fontSize: 12 }}>{listConv.contact.email}</span>
                   </div>
                 )}
-                {listConv.contact.phone && (
+                {listConv.contact.phone && !listConv.contact.phone.startsWith('lid:') && (
                   <div className="inbox-detail-row">
-                    <span className="inbox-detail-label">Teléfono</span>
+                    <span className="inbox-detail-label">{i.phone}</span>
                     <span className="inbox-detail-value" style={{ fontSize: 12 }}>{listConv.contact.phone}</span>
                   </div>
                 )}
               </>
             ) : (
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Sin contacto asignado</span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{i.inbxNoContactAsgn}</span>
             )}
           </div>
 
+          {/* Contact Timeline */}
+          {listConv?.contact && timeline && (
+            <div className="inbox-detail-section">
+              <button
+                onClick={() => setTimelineOpen((o) => !o)}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                <span className="inbox-detail-section-title" style={{ marginBottom: 0 }}>{i.inbxContactHistory}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{timelineOpen ? '▲' : '▼'}</span>
+              </button>
+              {timelineOpen && (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+                  {/* Conversations */}
+                  {timeline.conversations.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 4 }}>{i.inbxConvSect}</div>
+                      {timeline.conversations.map((c) => (
+                        <div key={c.id}
+                          onClick={() => selectConv(c.id)}
+                          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 6px', borderRadius: 6, cursor: 'pointer', marginBottom: 2 }}
+                          onMouseOver={(e) => (e.currentTarget.style.background = 'var(--surface)')}
+                          onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
+                        >
+                          <span style={{ fontSize: 12 }}>{CHANNEL_ICONS[c.channel_type] ?? '💬'}</span>
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ display: 'block', fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {c.subject || i.noSubject}
+                            </span>
+                            {c.last_message && (
+                              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {c.last_message}
+                              </span>
+                            )}
+                          </span>
+                          <span className={`inbox-status-badge ${STATUS_CSS[c.status] ?? 'status-open'}`} style={{ fontSize: 10, padding: '1px 6px', flexShrink: 0 }}>
+                            {statusLabels[c.status] ?? c.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Deals */}
+                  {timeline.deals.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 4 }}>Deals</div>
+                      {timeline.deals.map((d) => (
+                        <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 6px', borderRadius: 6, marginBottom: 2 }}>
+                          <span style={{ fontSize: 12 }}>💼</span>
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ display: 'block', fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}</span>
+                            <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)' }}>
+                              {d.value > 0 ? `${d.value} ${d.currency}` : ''}{d.stage_name ? ` · ${d.stage_name}` : ''}
+                            </span>
+                          </span>
+                          <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 10, flexShrink: 0, background: d.status === 'won' ? '#dcfce7' : d.status === 'lost' ? '#fee2e2' : 'var(--surface)', color: d.status === 'won' ? '#166534' : d.status === 'lost' ? '#991b1b' : 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                            {d.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Tasks */}
+                  {timeline.tasks.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 4 }}>{i.tasks}</div>
+                      {timeline.tasks.map((t) => (
+                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 6px', borderRadius: 6, marginBottom: 2 }}>
+                          <span style={{ fontSize: 12 }}>{t.status === 'completed' ? '✅' : t.status === 'in_progress' ? '🔄' : '📋'}</span>
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ display: 'block', fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: t.status === 'completed' ? 'line-through' : 'none', opacity: t.status === 'completed' ? 0.6 : 1 }}>{t.title}</span>
+                            {t.due_date && (
+                              <span style={{ display: 'block', fontSize: 11, color: new Date(t.due_date) < new Date() && t.status !== 'completed' ? '#ef4444' : 'var(--text-muted)' }}>
+                                {i.inbxDueOn} {new Date(t.due_date).toLocaleDateString(i.locale, { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {timeline.conversations.length === 0 && timeline.deals.length === 0 && timeline.tasks.length === 0 && (
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{i.inbxNoPrevHistory}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Custom fields for conversation */}
+          {activeId && (
+            <div className="inbox-detail-section">
+              <CustomFieldsPanel entityType="conversation" entityId={activeId} />
+            </div>
+          )}
+
           {/* Conversation */}
           <div className="inbox-detail-section">
-            <div className="inbox-detail-section-title">Conversación</div>
+            <div className="inbox-detail-section-title">{i.inbxConvSect}</div>
             <div className="inbox-detail-row">
-              <span className="inbox-detail-label">Estado</span>
-              <span className={`inbox-status-badge ${STATUS_META[conv.status]?.cls ?? 'status-open'}`} style={{ marginTop: 2 }}>
-                {STATUS_META[conv.status]?.label ?? conv.status}
+              <span className="inbox-detail-label">{i.status}</span>
+              <span className={`inbox-status-badge ${STATUS_CSS[conv.status] ?? 'status-open'}`} style={{ marginTop: 2 }}>
+                {statusLabels[conv.status] ?? conv.status}
               </span>
             </div>
             <div className="inbox-detail-row">
-              <span className="inbox-detail-label">Canal</span>
+              <span className="inbox-detail-label">{i.channelLabel}</span>
               <span className="inbox-detail-value">{CHANNEL_ICONS[conv.channelType] ?? ''} {conv.channelType}</span>
             </div>
             {listConv.inbox && (
@@ -1122,13 +1840,13 @@ export default function InboxPage() {
             )}
             {listConv.assignedAgent && (
               <div className="inbox-detail-row">
-                <span className="inbox-detail-label">Agente</span>
+                <span className="inbox-detail-label">{i.inbxAgent}</span>
                 <span className="inbox-detail-value">{listConv.assignedAgent.fullName}</span>
               </div>
             )}
             {conv.teamId && (
               <div className="inbox-detail-row">
-                <span className="inbox-detail-label">Equipo</span>
+                <span className="inbox-detail-label">{i.inbxTeam}</span>
                 <span className="inbox-detail-value" style={{ color: teams.find(t => t.id === conv.teamId)?.color ?? 'inherit', fontWeight: 600 }}>
                   {teams.find(t => t.id === conv.teamId)?.name ?? conv.teamId}
                 </span>
@@ -1136,44 +1854,44 @@ export default function InboxPage() {
             )}
             {conv.queueId && (
               <div className="inbox-detail-row">
-                <span className="inbox-detail-label">Cola</span>
+                <span className="inbox-detail-label">{i.queueLabel}</span>
                 <span className="inbox-detail-value">{queues.find(q => q.id === conv.queueId)?.name ?? conv.queueId}</span>
               </div>
             )}
             <div className="inbox-detail-row">
-              <span className="inbox-detail-label">Mensajes</span>
-              <span className="inbox-detail-value">{messages.length} msgs · {notes.length} notas</span>
+              <span className="inbox-detail-label">{i.inbxMsgsLbl}</span>
+              <span className="inbox-detail-value">{messages.length} {i.inbxMsgsUnit} · {notes.length} {i.inbxNoteTab}</span>
             </div>
             <div className="inbox-detail-row">
-              <span className="inbox-detail-label">Creada</span>
+              <span className="inbox-detail-label">{i.createdAt}</span>
               <span className="inbox-detail-value" style={{ fontSize: 12 }}>
-                {new Date(conv.createdAt).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                {new Date(conv.createdAt).toLocaleString(i.locale, { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
               </span>
             </div>
           </div>
 
           {/* Actions */}
           <div className="inbox-detail-section">
-            <div className="inbox-detail-section-title">Acciones</div>
+            <div className="inbox-detail-section-title">{i.actions}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {conv.status !== 'resolved' && (
                 <button className="btn btn-secondary" style={{ fontSize: 12, justifyContent: 'center' }} onClick={() => setStatus('resolved')}>
-                  ✓ Marcar resuelta
+                  {i.inbxMarkResolved}
                 </button>
               )}
               {conv.status !== 'open' && (
                 <button className="btn btn-secondary" style={{ fontSize: 12, justifyContent: 'center' }} onClick={() => setStatus('open')}>
-                  ↩ Reabrir
+                  {i.inbxReopen}
                 </button>
               )}
               {conv.status === 'open' && (
                 <button className="btn btn-secondary" style={{ fontSize: 12, justifyContent: 'center' }} onClick={() => setStatus('pending')}>
-                  ⏸ Poner en espera
+                  {i.inbxPutWait}
                 </button>
               )}
               {conv.status === 'open' && (
                 <button className="btn btn-secondary" style={{ fontSize: 12, justifyContent: 'center' }} onClick={() => setStatus('snoozed')}>
-                  😴 Snooze
+                  {i.inbxSnooze}
                 </button>
               )}
             </div>
@@ -1181,11 +1899,11 @@ export default function InboxPage() {
 
           {/* Assignment: Team + Queue + Agent */}
           <div className="inbox-detail-section">
-            <div className="inbox-detail-section-title">Asignación</div>
+            <div className="inbox-detail-section-title">{i.inbxAssignSect}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {/* Team */}
               <div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>Equipo</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>{i.inbxTeam}</div>
                 <select
                   className="form-input"
                   style={{ fontSize: 12 }}
@@ -1196,16 +1914,16 @@ export default function InboxPage() {
                       await assignConversation({ conversationId: activeId, teamId, queueId: conv.queueId, userId: conv.assignedUserId });
                       setConv((p) => p ? { ...p, teamId: teamId ?? '' } : p);
                       setConversations((prev) => prev.map((c) => c.id === activeId ? { ...c, teamId: teamId ?? '' } : c));
-                    } catch { alert('Error al asignar equipo'); }
+                    } catch { alert(i.inbxErrTeam); }
                   }}
                 >
-                  <option value="">— Sin equipo —</option>
+                  <option value="">{i.inbxNoTeam}</option>
                   {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
               </div>
               {/* Queue */}
               <div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>Cola</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>{i.queueLabel}</div>
                 <select
                   className="form-input"
                   style={{ fontSize: 12 }}
@@ -1216,17 +1934,17 @@ export default function InboxPage() {
                       await assignConversation({ conversationId: activeId, teamId: conv.teamId, queueId, userId: conv.assignedUserId });
                       setConv((p) => p ? { ...p, queueId: queueId ?? '' } : p);
                       setConversations((prev) => prev.map((c) => c.id === activeId ? { ...c, queueId: queueId ?? '' } : c));
-                    } catch { alert('Error al asignar cola'); }
+                    } catch { alert(i.inbxErrQueue); }
                   }}
                 >
-                  <option value="">— Sin cola —</option>
+                  <option value="">{i.inbxNoQueue}</option>
                   {queues.filter(q => q.isActive).map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
                 </select>
               </div>
               {/* Agent */}
               {agents.length > 0 && (
                 <div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>Agente</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>{i.inbxAgent}</div>
                   <select
                     className="form-input"
                     style={{ fontSize: 12 }}
@@ -1237,10 +1955,10 @@ export default function InboxPage() {
                         await updateConversation(activeId, { assignedTo: val || undefined } as any);
                         setConv((p) => p ? { ...p, assignedTo: val } : p);
                         setConversations((prev) => prev.map((c) => c.id === activeId ? { ...c, assignedTo: val } : c));
-                      } catch { alert('Error al asignar agente'); }
+                      } catch { alert(i.inbxErrAgent); }
                     }}
                   >
-                    <option value="">— Sin asignar —</option>
+                    <option value="">— {i.unassigned} —</option>
                     {agents.map((a) => <option key={a.id} value={a.id}>{a.fullName}</option>)}
                   </select>
                 </div>
@@ -1251,7 +1969,7 @@ export default function InboxPage() {
           {/* Bot session */}
           {botSession && (
             <div className="inbox-detail-section">
-              <div className="inbox-detail-section-title">Bot IA</div>
+              <div className="inbox-detail-section-title">{i.inbxBotSect}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{
@@ -1261,7 +1979,7 @@ export default function InboxPage() {
                     color: botSession.status === 'active' ? '#15803d' : '#92400e',
                     border: `1px solid ${botSession.status === 'active' ? '#86efac' : '#fde047'}`,
                   }}>
-                    {botSession.status === 'active' ? '🤖 Bot activo' : '👤 Agente humano'}
+                    {botSession.status === 'active' ? i.inbxBotActive : i.inbxHumanAgent}
                   </span>
                   <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {botSession.bot_name}
@@ -1276,7 +1994,7 @@ export default function InboxPage() {
                       setBotSession(updated);
                     }}
                   >
-                    👤 Tomar control
+                    {i.inbxTakeOver}
                   </button>
                 ) : (
                   <button
@@ -1287,12 +2005,12 @@ export default function InboxPage() {
                       setBotSession(updated);
                     }}
                   >
-                    🤖 Devolver al bot
+                    {i.inbxRestoreBot}
                   </button>
                 )}
                 {botSession.handed_off_at && (
                   <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                    Traspasado: {new Date(botSession.handed_off_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    {i.inbxHandedOff}: {new Date(botSession.handed_off_at).toLocaleString(i.locale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                   </div>
                 )}
               </div>
@@ -1301,7 +2019,7 @@ export default function InboxPage() {
 
           {/* Tags */}
           <div className="inbox-detail-section">
-            <div className="inbox-detail-section-title">Etiquetas</div>
+            <div className="inbox-detail-section-title">{i.inbxTagsSect}</div>
             {/* Applied tags */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: convTags.length > 0 ? 8 : 0 }}>
               {convTags.map((tag) => (
@@ -1314,7 +2032,7 @@ export default function InboxPage() {
                 }}>
                   {tag.name}
                   <button
-                    title="Quitar etiqueta"
+                    title={i.inbxRemoveTag}
                     onClick={async () => {
                       await removeConversationTag(activeId, tag.id).catch(() => {});
                       setConvTags((p) => p.filter((t) => t.id !== tag.id));
@@ -1338,14 +2056,14 @@ export default function InboxPage() {
                   if (added) setConvTags((p) => [...p, added]);
                 }}
               >
-                <option value="">+ Añadir etiqueta…</option>
+                <option value="">+ {i.inbxAddTag}</option>
                 {tags.filter((t) => !convTags.some((ct) => ct.id === t.id)).map((t) => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>
             )}
             {tags.length === 0 && (
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sin etiquetas creadas</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{i.inbxNoTags}</span>
             )}
           </div>
         </div>
@@ -1356,18 +2074,18 @@ export default function InboxPage() {
         <div className="modal-overlay" onClick={() => setShowNew(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">Nueva conversación</h2>
+              <h2 className="modal-title">{i.inbxNewConvTitle}</h2>
               <button className="modal-close" onClick={() => setShowNew(false)}>×</button>
             </div>
             <form onSubmit={handleCreate}>
               <div className="modal-body">
                 {createError && <div className="error-msg">{createError}</div>}
                 <div className="form-group">
-                  <label className="form-label">Asunto</label>
-                  <input className="form-input" value={newSubject} onChange={(e) => setNewSubject(e.target.value)} placeholder="Ej: Consulta sobre producto…" autoFocus />
+                  <label className="form-label">{i.inbxSubjectLbl}</label>
+                  <input className="form-input" value={newSubject} onChange={(e) => setNewSubject(e.target.value)} placeholder={i.inbxSubjectPh} autoFocus />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Canal</label>
+                  <label className="form-label">{i.channelLabel}</label>
                   <select className="form-input" value={newChannel} onChange={(e) => setNewChannel(e.target.value)}>
                     <option value="email">📧 Email</option>
                     <option value="chat">💬 Chat</option>
@@ -1378,26 +2096,26 @@ export default function InboxPage() {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Contacto</label>
+                  <label className="form-label">{i.contactLabel}</label>
                   <select className="form-input" value={newContactId} onChange={(e) => setNewContactId(e.target.value)}>
-                    <option value="">— Sin contacto —</option>
+                    <option value="">— {i.noContact} —</option>
                     {contacts.map((c) => <option key={c.id} value={c.id}>{c.fullName}</option>)}
                   </select>
                 </div>
                 <div className="form-group">
                   <label className="form-label">Inbox</label>
                   <select className="form-input" value={newInboxId} onChange={(e) => setNewInboxId(e.target.value)}>
-                    <option value="">— Sin inbox —</option>
+                    <option value="">— {i.inbxNoInboxOpt} —</option>
                     {inboxes
-                      .filter((i) => i.isEnabled !== false)
-                      .filter((i, idx, arr) => idx === arr.findIndex((x) => x.name === i.name && x.channelType === i.channelType))
-                      .map((i) => <option key={i.id} value={i.id}>{i.name} ({i.channelType})</option>)}
+                      .filter((inb) => inb.isEnabled !== false)
+                      .filter((inb, idx, arr) => idx === arr.findIndex((x) => x.name === inb.name && x.channelType === inb.channelType))
+                      .map((inb) => <option key={inb.id} value={inb.id}>{inb.name} ({inb.channelType})</option>)}
                   </select>
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowNew(false)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={creating}>{creating ? 'Creando…' : 'Crear'}</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowNew(false)}>{i.cancel}</button>
+                <button type="submit" className="btn btn-primary" disabled={creating}>{creating ? i.creating : i.create}</button>
               </div>
             </form>
           </div>
@@ -1412,6 +2130,20 @@ export default function InboxPage() {
           onInsert={(text) => { setBody(text); textareaRef.current?.focus(); }}
           onClose={() => setShowAiPrompts(false)}
         />
+      )}
+
+      {/* Mention toast */}
+      {mentionToast && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          background: '#1e293b', color: '#fff', padding: '12px 20px',
+          borderRadius: 10, fontSize: 13, lineHeight: 1.5,
+          boxShadow: '0 4px 20px rgba(0,0,0,.3)', zIndex: 9998,
+          maxWidth: 'calc(100vw - 32px)', textAlign: 'center',
+          animation: 'fadeInUp .2s ease',
+        }}>
+          {mentionToast}
+        </div>
       )}
     </div>
   );

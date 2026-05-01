@@ -2,10 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { getPipelines, createPipeline, updatePipeline, deletePipeline, getPipelineStages, createStage, deleteStage, type Pipeline, type PipelineStage } from '@/lib/api';
+import { useLangCtx } from '@/lib/lang-context';
+import { APP } from '@/lib/i18n/app';
 
 interface PipelineWithStages extends Pipeline { stages: PipelineStage[]; }
 
 export default function PipelinesPage() {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+
   const [pipelines, setPipelines] = useState<PipelineWithStages[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -30,58 +35,58 @@ export default function PipelinesPage() {
       const list = await getPipelines();
       const withStages = await Promise.all(list.map(async (p) => ({ ...p, stages: await getPipelineStages(p.id).catch(() => []) })));
       setPipelines(withStages);
-    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Error'); } finally { setLoading(false); }
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : i.error); } finally { setLoading(false); }
   }
 
   useEffect(() => { load(); }, []);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!pName.trim()) { setCreateError('El nombre es obligatorio'); return; }
+    if (!pName.trim()) { setCreateError(i.nameRequired); return; }
     setCreating(true); setCreateError('');
     try { await createPipeline({ name: pName.trim(), isDefault: pDefault }); setShowCreate(false); setPName(''); setPDefault(false); load(); }
-    catch (e: unknown) { setCreateError(e instanceof Error ? e.message : 'Error'); } finally { setCreating(false); }
+    catch (e: unknown) { setCreateError(e instanceof Error ? e.message : i.error); } finally { setCreating(false); }
   }
 
   async function handleEdit(e: React.FormEvent) {
     e.preventDefault();
-    if (!editPipeline || !eName.trim()) { setEditError('El nombre es obligatorio'); return; }
+    if (!editPipeline || !eName.trim()) { setEditError(i.nameRequired); return; }
     setSaving(true); setEditError('');
     try { await updatePipeline(editPipeline.id, { name: eName.trim(), isDefault: eDefault }); setEditPipeline(null); load(); }
-    catch (e: unknown) { setEditError(e instanceof Error ? e.message : 'Error'); } finally { setSaving(false); }
+    catch (e: unknown) { setEditError(e instanceof Error ? e.message : i.error); } finally { setSaving(false); }
   }
 
   async function handleDelete(p: Pipeline) {
-    if (!confirm(`¿Eliminar pipeline "${p.name}"?`)) return;
-    try { await deletePipeline(p.id); load(); } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Error'); }
+    if (!confirm(`${i.delete} "${p.name}"?`)) return;
+    try { await deletePipeline(p.id); load(); } catch (e: unknown) { alert(e instanceof Error ? e.message : i.error); }
   }
 
   async function handleAddStage(e: React.FormEvent) {
     e.preventDefault();
-    if (!stageTarget || !stageName.trim()) { setStageError('El nombre es obligatorio'); return; }
+    if (!stageTarget || !stageName.trim()) { setStageError(i.nameRequired); return; }
     setStageAdding(true); setStageError('');
     try { await createStage(stageTarget.id, { name: stageName.trim() }); setStageTarget(null); load(); }
-    catch (e: unknown) { setStageError(e instanceof Error ? e.message : 'Error'); } finally { setStageAdding(false); }
+    catch (e: unknown) { setStageError(e instanceof Error ? e.message : i.error); } finally { setStageAdding(false); }
   }
 
   async function handleDeleteStage(p: PipelineWithStages, s: PipelineStage) {
-    if (!confirm(`¿Eliminar etapa "${s.name}"?`)) return;
-    try { await deleteStage(p.id, s.id); load(); } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Error'); }
+    if (!confirm(`${i.delete} "${s.name}"?`)) return;
+    try { await deleteStage(p.id, s.id); load(); } catch (e: unknown) { alert(e instanceof Error ? e.message : i.error); }
   }
 
   return (
     <>
       <div className="page-header">
-        <h1 className="page-title">Pipelines</h1>
+        <h1 className="page-title">{i.pipelines}</h1>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>{pipelines.length} pipelines</span>
-          <button className="btn btn-primary" onClick={() => { setShowCreate(true); setPName(''); setPDefault(false); setCreateError(''); }}>+ Nuevo pipeline</button>
+          <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>{pipelines.length} {i.pipelines.toLowerCase()}</span>
+          <button className="btn btn-primary" onClick={() => { setShowCreate(true); setPName(''); setPDefault(false); setCreateError(''); }}>+ {i.newPipeline}</button>
         </div>
       </div>
       <div className="page-body">
         {error && <div className="error-msg">{error}</div>}
-        {loading ? <div className="loading">Cargando…</div> : pipelines.length === 0 ? (
-          <div className="empty"><div className="empty-icon">⬡</div><p>No hay pipelines todavía.</p><button className="btn btn-primary" onClick={() => setShowCreate(true)}>Crear primer pipeline</button></div>
+        {loading ? <div className="loading">{i.loading}</div> : pipelines.length === 0 ? (
+          <div className="empty"><div className="empty-icon">⬡</div><p>{i.noPipelinesYet}</p><button className="btn btn-primary" onClick={() => setShowCreate(true)}>{i.createFirstPipeline}</button></div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {pipelines.map((p) => (
@@ -92,9 +97,9 @@ export default function PipelinesPage() {
                     {p.isDefault && <span className="badge badge-open" style={{ fontSize: 10 }}>Default</span>}
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => { setStageTarget(p); setStageName(''); setStageError(''); }}>+ Etapa</button>
-                    <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => { setEditPipeline(p); setEName(p.name); setEDefault(p.isDefault); setEditError(''); }}>Editar</button>
-                    <button className="btn btn-danger" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => handleDelete(p)}>Eliminar</button>
+                    <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => { setStageTarget(p); setStageName(''); setStageError(''); }}>{i.addStage}</button>
+                    <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => { setEditPipeline(p); setEName(p.name); setEDefault(p.isDefault); setEditError(''); }}>{i.edit}</button>
+                    <button className="btn btn-danger" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => handleDelete(p)}>{i.delete}</button>
                   </div>
                 </div>
                 {p.stages.length > 0 && (
@@ -116,14 +121,14 @@ export default function PipelinesPage() {
       {showCreate && (
         <div className="modal-overlay" onClick={() => setShowCreate(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header"><h2 className="modal-title">Nuevo pipeline</h2><button className="modal-close" onClick={() => setShowCreate(false)}>×</button></div>
+            <div className="modal-header"><h2 className="modal-title">{i.newPipeline}</h2><button className="modal-close" onClick={() => setShowCreate(false)}>×</button></div>
             <form onSubmit={handleCreate}>
               <div className="modal-body">
                 {createError && <div className="error-msg">{createError}</div>}
-                <div className="form-group"><label className="form-label">Nombre *</label><input className="form-input" value={pName} onChange={(e) => setPName(e.target.value)} autoFocus /></div>
-                <div className="form-group"><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}><input type="checkbox" checked={pDefault} onChange={(e) => setPDefault(e.target.checked)} /><span className="form-label" style={{ marginBottom: 0 }}>Pipeline por defecto</span></label></div>
+                <div className="form-group"><label className="form-label">{i.name} *</label><input className="form-input" value={pName} onChange={(e) => setPName(e.target.value)} autoFocus /></div>
+                <div className="form-group"><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}><input type="checkbox" checked={pDefault} onChange={(e) => setPDefault(e.target.checked)} /><span className="form-label" style={{ marginBottom: 0 }}>{i.pipelineDefault}</span></label></div>
               </div>
-              <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowCreate(false)}>Cancelar</button><button type="submit" className="btn btn-primary" disabled={creating}>{creating ? 'Creando…' : 'Crear pipeline'}</button></div>
+              <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowCreate(false)}>{i.cancel}</button><button type="submit" className="btn btn-primary" disabled={creating}>{creating ? i.creating : i.createPipelineBtn}</button></div>
             </form>
           </div>
         </div>
@@ -132,14 +137,14 @@ export default function PipelinesPage() {
       {editPipeline && (
         <div className="modal-overlay" onClick={() => setEditPipeline(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header"><h2 className="modal-title">Editar pipeline</h2><button className="modal-close" onClick={() => setEditPipeline(null)}>×</button></div>
+            <div className="modal-header"><h2 className="modal-title">{i.editPipeline}</h2><button className="modal-close" onClick={() => setEditPipeline(null)}>×</button></div>
             <form onSubmit={handleEdit}>
               <div className="modal-body">
                 {editError && <div className="error-msg">{editError}</div>}
-                <div className="form-group"><label className="form-label">Nombre *</label><input className="form-input" value={eName} onChange={(e) => setEName(e.target.value)} autoFocus /></div>
-                <div className="form-group"><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}><input type="checkbox" checked={eDefault} onChange={(e) => setEDefault(e.target.checked)} /><span className="form-label" style={{ marginBottom: 0 }}>Pipeline por defecto</span></label></div>
+                <div className="form-group"><label className="form-label">{i.name} *</label><input className="form-input" value={eName} onChange={(e) => setEName(e.target.value)} autoFocus /></div>
+                <div className="form-group"><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}><input type="checkbox" checked={eDefault} onChange={(e) => setEDefault(e.target.checked)} /><span className="form-label" style={{ marginBottom: 0 }}>{i.pipelineDefault}</span></label></div>
               </div>
-              <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setEditPipeline(null)}>Cancelar</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</button></div>
+              <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setEditPipeline(null)}>{i.cancel}</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? i.saving : i.save}</button></div>
             </form>
           </div>
         </div>
@@ -148,13 +153,13 @@ export default function PipelinesPage() {
       {stageTarget && (
         <div className="modal-overlay" onClick={() => setStageTarget(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header"><h2 className="modal-title">Nueva etapa — {stageTarget.name}</h2><button className="modal-close" onClick={() => setStageTarget(null)}>×</button></div>
+            <div className="modal-header"><h2 className="modal-title">{i.newStageFor} {stageTarget.name}</h2><button className="modal-close" onClick={() => setStageTarget(null)}>×</button></div>
             <form onSubmit={handleAddStage}>
               <div className="modal-body">
                 {stageError && <div className="error-msg">{stageError}</div>}
-                <div className="form-group"><label className="form-label">Nombre *</label><input className="form-input" value={stageName} onChange={(e) => setStageName(e.target.value)} autoFocus /></div>
+                <div className="form-group"><label className="form-label">{i.name} *</label><input className="form-input" value={stageName} onChange={(e) => setStageName(e.target.value)} autoFocus /></div>
               </div>
-              <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setStageTarget(null)}>Cancelar</button><button type="submit" className="btn btn-primary" disabled={stageAdding}>{stageAdding ? 'Creando…' : 'Crear etapa'}</button></div>
+              <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setStageTarget(null)}>{i.cancel}</button><button type="submit" className="btn btn-primary" disabled={stageAdding}>{stageAdding ? i.creating : i.createStageBtn}</button></div>
             </form>
           </div>
         </div>

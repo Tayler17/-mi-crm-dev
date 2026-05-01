@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -7,9 +7,13 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join, extname } from 'path';
 
 @Injectable()
-export class WhatsappWebService {
+export class WhatsappWebService implements OnModuleInit {
   private readonly logger = new Logger(WhatsappWebService.name);
-  private readonly sessions  = new Map<string, { status: string; qr: string | null; sock?: any }>();
+  private readonly sessions    = new Map<string, { status: string; qr: string | null; sock?: any }>();
+  /** Consecutive transient-disconnect counter per connection — resets on successful connect */
+  private readonly reconnectCount = new Map<string, number>();
+  /** Connections being intentionally disconnected — skip auto-reconnect in the close handler */
+  private readonly intentionalDisconnects = new Set<string>();
   /** Maps LID digits → real phone digits for each connection, populated by contacts.upsert */
   private readonly lidToPhone = new Map<string, Map<string, string>>();
 
@@ -18,6 +22,29 @@ export class WhatsappWebService {
     private readonly events: EventEmitter2,
     private readonly notifications: NotificationsService,
   ) {}
+
+  async onModuleInit() {
+    if (process.env.WHATSAPP_WEB_ENABLED !== 'true') return;
+    try {
+      // Only auto-resume sessions that have saved creds — if creds were cleared, the session is dead
+      const rows = await this.db.query(
+        `SELECT cc.id, cc.tenant_id FROM channel_connections cc
+         INNER JOIN wa_session_creds wsc ON wsc.connection_id = cc.id
+         WHERE cc.channel_type = 'whatsapp_web' AND cc.status = 'connected'`,
+      );
+      for (const row of rows) {
+        this.logger.log(`Auto-resuming WhatsApp Web session: ${row.id}`);
+        const delay = 3000 * rows.indexOf(row); // stagger to avoid overwhelming WA servers
+        setTimeout(() => {
+          this.startBaileysSession(row.id, row.tenant_id).catch((e: any) => {
+            this.logger.warn(`Failed to auto-resume session ${row.id}: ${e.message}`);
+          });
+        }, delay);
+      }
+    } catch (e: any) {
+      this.logger.warn(`Failed to load WhatsApp Web sessions on startup: ${e.message}`);
+    }
+  }
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -34,22 +61,34 @@ export class WhatsappWebService {
     return this.getPlaceholderQr(connectionId);
   }
 
-  disconnectSession(connectionId: string) {
+  async disconnectSession(connectionId: string) {
+    this.intentionalDisconnects.add(connectionId);
     const s = this.sessions.get(connectionId);
     if (s?.sock) { try { s.sock.end(undefined); } catch {} }
     this.sessions.delete(connectionId);
+    this.reconnectCount.delete(connectionId);
+    await Promise.all([
+      this.db.query(`UPDATE channel_connections SET status='disconnected', updated_at=NOW() WHERE id=$1`, [connectionId]).catch(() => {}),
+      this.db.query(`DELETE FROM wa_session_creds WHERE connection_id=$1`, [connectionId]).catch(() => {}),
+      this.db.query(`DELETE FROM wa_session_keys  WHERE connection_id=$1`, [connectionId]).catch(() => {}),
+    ]);
+  }
+
+  /** Resolve a LID (digits-only) to a real phone number for a given connection */
+  resolveLid(connectionId: string, lidDigits: string): string | null {
+    return this.lidToPhone.get(connectionId)?.get(lidDigits) ?? null;
   }
 
   /** Send an outbound text message through an active WhatsApp Web session */
-  async sendMessage(connectionId: string, remoteJid: string, text: string): Promise<boolean> {
+  async sendMessage(connectionId: string, remoteJid: string, text: string): Promise<string | false> {
     const session = this.sessions.get(connectionId);
     if (!session?.sock || session.status !== 'connected') {
       this.logger.warn(`sendMessage: no active session for ${connectionId}`);
       return false;
     }
     try {
-      await session.sock.sendMessage(remoteJid, { text });
-      return true;
+      const result = await session.sock.sendMessage(remoteJid, { text });
+      return result?.key?.id ?? true as any;
     } catch (e: any) {
       this.logger.error(`sendMessage failed for ${connectionId}: ${e.message}`);
       return false;
@@ -57,7 +96,7 @@ export class WhatsappWebService {
   }
 
   /** Send a media file through an active WhatsApp Web session */
-  async sendFile(connectionId: string, remoteJid: string, fileUrl: string, contentType: string): Promise<boolean> {
+  async sendFile(connectionId: string, remoteJid: string, fileUrl: string, contentType: string): Promise<string | false> {
     const session = this.sessions.get(connectionId);
     if (!session?.sock || session.status !== 'connected') {
       this.logger.warn(`sendFile: no active session for ${connectionId}`);
@@ -82,16 +121,17 @@ export class WhatsappWebService {
       };
       const mimetype = mimeMap[ext] ?? 'application/octet-stream';
 
+      let result: any;
       if (contentType === 'image') {
-        await session.sock.sendMessage(remoteJid, { image: buffer, mimetype, caption: '' });
+        result = await session.sock.sendMessage(remoteJid, { image: buffer, mimetype, caption: '' });
       } else if (contentType === 'audio') {
-        await session.sock.sendMessage(remoteJid, { audio: buffer, mimetype, ptt: ext === 'ogg' });
+        result = await session.sock.sendMessage(remoteJid, { audio: buffer, mimetype, ptt: ext === 'ogg' });
       } else if (contentType === 'video') {
-        await session.sock.sendMessage(remoteJid, { video: buffer, mimetype });
+        result = await session.sock.sendMessage(remoteJid, { video: buffer, mimetype });
       } else {
-        await session.sock.sendMessage(remoteJid, { document: buffer, mimetype, fileName: filename });
+        result = await session.sock.sendMessage(remoteJid, { document: buffer, mimetype, fileName: filename });
       }
-      return true;
+      return result?.key?.id ?? true as any;
     } catch (e: any) {
       this.logger.error(`sendFile failed for ${connectionId}: ${e.message}`);
       return false;
@@ -145,21 +185,41 @@ export class WhatsappWebService {
       if (existingAuthState) {
         authState = existingAuthState;
       } else {
-        const creds = initAuthCreds();
-        const keyCache: Record<string, any> = {};
+        // Load persisted creds from DB (survives container restarts)
+        const [savedCreds] = await this.db.query(
+          `SELECT creds FROM wa_session_creds WHERE connection_id = $1`,
+          [connectionId],
+        ).catch(() => [null]);
+        const creds = savedCreds?.creds ?? initAuthCreds();
+
         authState = {
           creds,
           keys: makeCacheableSignalKeyStore({
             get: async (type: string, ids: string[]) => {
+              const rows = await this.db.query(
+                `SELECT key_id, key_data FROM wa_session_keys WHERE connection_id=$1 AND key_type=$2 AND key_id = ANY($3)`,
+                [connectionId, type, ids],
+              ).catch(() => []);
               const r: Record<string, any> = {};
-              for (const id of ids) r[id] = keyCache[`${type}:${id}`] ?? null;
+              for (const row of rows) r[row.key_id] = row.key_data;
               return r;
             },
             set: async (data: Record<string, Record<string, any>>) => {
-              for (const [t, e] of Object.entries(data ?? {})) {
-                for (const [id, v] of Object.entries(e ?? {})) {
-                  if (v != null) keyCache[`${t}:${id}`] = v;
-                  else delete keyCache[`${t}:${id}`];
+              for (const [type, entries] of Object.entries(data ?? {})) {
+                for (const [id, value] of Object.entries(entries ?? {})) {
+                  if (value != null) {
+                    await this.db.query(
+                      `INSERT INTO wa_session_keys (connection_id, key_type, key_id, key_data, updated_at)
+                       VALUES ($1,$2,$3,$4,NOW())
+                       ON CONFLICT (connection_id, key_type, key_id) DO UPDATE SET key_data=$4, updated_at=NOW()`,
+                      [connectionId, type, id, value],
+                    ).catch(() => {});
+                  } else {
+                    await this.db.query(
+                      `DELETE FROM wa_session_keys WHERE connection_id=$1 AND key_type=$2 AND key_id=$3`,
+                      [connectionId, type, id],
+                    ).catch(() => {});
+                  }
                 }
               }
             },
@@ -199,6 +259,7 @@ export class WhatsappWebService {
 
         if (connection === 'open') {
           this.sessions.set(connectionId, { status: 'connected', qr: null, sock });
+          this.reconnectCount.set(connectionId, 0); // reset on successful connect
           this.logger.log(`WhatsApp Web connected: ${connectionId}`);
           await this.db.query(
             `UPDATE channel_connections SET status='connected', last_tested_at=NOW(), updated_at=NOW() WHERE id=$1`,
@@ -208,34 +269,64 @@ export class WhatsappWebService {
 
         if (connection === 'close') {
           this.logger.warn(`WhatsApp close code=${code} conn=${connectionId}`);
+          // intentional disconnect — already cleaned up in disconnectSession, nothing to do
+          if (this.intentionalDisconnects.has(connectionId)) {
+            this.intentionalDisconnects.delete(connectionId);
+            return;
+          }
           // codes that mean the session is permanently gone — need re-scan
           const permanent = code === 401 || code === 403 || code === 500 || code === 440;
           if (!permanent) {
-            // transient disconnect (408 connectionLost, 428 connectionClosed, 515 restartRequired, etc.)
-            // — auto-reconnect
-            this.logger.log(`Auto-reconnecting (code=${code}) conn=${connectionId}`);
+            // transient disconnect — enforce a max-retry limit to avoid infinite loops
+            const retries = (this.reconnectCount.get(connectionId) ?? 0) + 1;
+            this.reconnectCount.set(connectionId, retries);
+            const MAX_RETRIES = 10;
+            if (retries > MAX_RETRIES) {
+              this.logger.warn(`Max retries (${MAX_RETRIES}) reached for conn=${connectionId} — clearing session and requiring re-scan`);
+              this.sessions.delete(connectionId);
+              this.reconnectCount.delete(connectionId);
+              try { sock.end(undefined); } catch {}
+              await Promise.all([
+                this.db.query(`UPDATE channel_connections SET status='disconnected', updated_at=NOW() WHERE id=$1`, [connectionId]).catch(() => {}),
+                this.db.query(`DELETE FROM wa_session_creds WHERE connection_id=$1`, [connectionId]).catch(() => {}),
+                this.db.query(`DELETE FROM wa_session_keys  WHERE connection_id=$1`, [connectionId]).catch(() => {}),
+              ]);
+              return;
+            }
+            // auto-reconnect with exponential backoff (5s, 10s, 20s, 40s … capped at 60s)
+            this.logger.log(`Auto-reconnecting (${retries}/${MAX_RETRIES}, code=${code}) conn=${connectionId}`);
             this.sessions.set(connectionId, { status: 'connecting', qr: null });
             try { sock.end(undefined); } catch {}
-            const delay = code === DisconnectReason.restartRequired ? 1000 : 5000;
+            const backoff = code === DisconnectReason.restartRequired
+              ? 1000
+              : Math.min(5000 * Math.pow(2, retries - 1), 60000);
             setTimeout(() => {
               this.startBaileysSession(connectionId, tenantId, authState).catch(() => {
                 this.sessions.delete(connectionId);
               });
-            }, delay);
+            }, backoff);
             return;
           }
-          // permanent disconnect — mark disconnected and require QR re-scan
+          // permanent disconnect — mark disconnected, clear saved keys, require QR re-scan
           this.logger.warn(`Permanent disconnect (code=${code}) conn=${connectionId} — requires re-scan`);
           this.sessions.delete(connectionId);
-          await this.db.query(
-            `UPDATE channel_connections SET status='disconnected', updated_at=NOW() WHERE id=$1`,
-            [connectionId],
-          ).catch(() => {});
+          await Promise.all([
+            this.db.query(`UPDATE channel_connections SET status='disconnected', updated_at=NOW() WHERE id=$1`, [connectionId]).catch(() => {}),
+            this.db.query(`DELETE FROM wa_session_creds WHERE connection_id=$1`, [connectionId]).catch(() => {}),
+            this.db.query(`DELETE FROM wa_session_keys  WHERE connection_id=$1`, [connectionId]).catch(() => {}),
+          ]);
         }
       });
 
-      sock.ev.on('creds.update', (u: any) => {
-        try { Object.assign(authState.creds, u); } catch {}
+      sock.ev.on('creds.update', async (u: any) => {
+        try {
+          Object.assign(authState.creds, u);
+          await this.db.query(
+            `INSERT INTO wa_session_creds (connection_id, creds, updated_at) VALUES ($1,$2,NOW())
+             ON CONFLICT (connection_id) DO UPDATE SET creds=$2, updated_at=NOW()`,
+            [connectionId, authState.creds],
+          ).catch(() => {});
+        } catch {}
       });
 
       // ── Contact map: LID → real phone ─────────────────────────────────────
@@ -247,27 +338,74 @@ export class WhatsappWebService {
       }
       const lidMap = this.lidToPhone.get(connectionId)!;
 
+      const saveLidMapping = (lid: string, phone: string) => {
+        if (!lid || !phone) return;
+        lidMap.set(lid, phone);
+        // Persist to DB so it survives API restarts
+        this.db.query(
+          `INSERT INTO wa_lid_map (connection_id, lid_digits, phone, updated_at)
+           VALUES ($1,$2,$3,NOW())
+           ON CONFLICT (connection_id, lid_digits) DO UPDATE SET phone=$3, updated_at=NOW()`,
+          [connectionId, lid, phone],
+        ).catch(() => {});
+        // Backfill any contacts already stored with this LID
+        this.db.query(
+          `UPDATE contacts SET phone=$1, updated_at=NOW()
+           WHERE tenant_id=$2 AND (phone='lid:'||$3 OR phone=$3)`,
+          [phone, tenantId, lid],
+        ).catch(() => {});
+      };
+
       const processContacts = (contacts: any[]) => {
+        // Log first few contacts to understand the data format
+        if (contacts?.length) {
+          const sample = contacts.slice(0, 3).map((c: any) => JSON.stringify(c));
+          this.logger.log(`[contacts] sample (${contacts.length} total): ${sample.join(' | ')}`);
+        }
         for (const c of contacts ?? []) {
           try {
-            // Pattern A: contact has both .id (@s.whatsapp.net) and .lid (@lid)
+            // Pattern A: id is phone JID, lid field is the LID
+            // { id: '447XXXXXXX@s.whatsapp.net', lid: '150414133579835@lid' }
             if (c.id?.endsWith('@s.whatsapp.net') && c.lid) {
               const phone = c.id.replace('@s.whatsapp.net', '');
-              const lid   = String(c.lid).replace('@lid', '');
-              if (phone && lid) lidMap.set(lid, phone);
+              const lid   = String(c.lid).replace(/@lid$/, '');
+              saveLidMapping(lid, phone);
             }
-            // Pattern B: id is @lid and there's a notify/phone field
+            // Pattern B: id is LID, jid field is the real phone JID
+            // { id: '150414133579835@lid', jid: '447XXXXXXX@s.whatsapp.net' }
+            if (c.id?.endsWith('@lid') && c.jid) {
+              const lid   = c.id.replace(/@lid$/, '');
+              const phone = String(c.jid).replace('@s.whatsapp.net', '');
+              saveLidMapping(lid, phone);
+            }
+            // Pattern C: id is LID, phone field explicitly set (older Baileys format)
             if (c.id?.endsWith('@lid') && c.phone) {
-              const lid   = c.id.replace('@lid', '');
+              const lid   = c.id.replace(/@lid$/, '');
               const phone = String(c.phone).replace(/\D/g, '');
-              if (phone && lid) lidMap.set(lid, phone);
+              saveLidMapping(lid, phone);
             }
           } catch {}
         }
       };
 
-      sock.ev.on('contacts.upsert',  processContacts);
-      sock.ev.on('contacts.update',  processContacts);
+      sock.ev.on('contacts.set', ({ contacts: cs, isLatest }: any) => {
+        this.logger.log(`[contacts.set] ${cs?.length ?? 0} contacts, isLatest=${isLatest}`);
+        processContacts(cs);
+      });
+      sock.ev.on('contacts.upsert', (cs: any[]) => {
+        this.logger.log(`[contacts.upsert] ${cs?.length ?? 0} contacts`);
+        processContacts(cs);
+      });
+      sock.ev.on('contacts.update', processContacts);
+      // messaging-history.set fires on initial sync with full contact list including LID↔phone mappings
+      sock.ev.on('messaging-history.set', (hist: any) => {
+        const histContacts: any[] = hist?.contacts ?? [];
+        this.logger.log(`[messaging-history.set] ${histContacts.length} contacts`);
+        if (histContacts.length > 0) {
+          this.logger.log(`[messaging-history.set] sample: ${JSON.stringify(histContacts[0])}`);
+        }
+        processContacts(histContacts);
+      });
 
       // ── Incoming messages ─────────────────────────────────────────────────
 
@@ -282,6 +420,36 @@ export class WhatsappWebService {
             }, lidMap, sock);
           } catch (e: any) {
             this.logger.error(`Failed to process WA message: ${e.message}`);
+          }
+        }
+      });
+
+      // Message delivery / read receipt updates
+      sock.ev.on('messages.update', async (updates: any[]) => {
+        for (const update of updates) {
+          const waId = update.key?.id;
+          const statusNum: number | undefined = update.update?.status;
+          if (!waId || statusNum == null) continue;
+          // Baileys status: 1=server_ack(sent), 2=delivery_ack(delivered), 3=read, 4=played
+          const statusMap: Record<number, string> = { 1: 'sent', 2: 'delivered', 3: 'read', 4: 'read' };
+          const newStatus = statusMap[statusNum];
+          if (!newStatus) continue;
+          try {
+            const [msg] = await this.db.query(
+              `UPDATE messages SET status=$1, updated_at=NOW()
+               WHERE external_id=$2 AND direction='outbound'
+               RETURNING id, conversation_id, tenant_id`,
+              [newStatus, waId],
+            );
+            if (msg) {
+              this.notifications.emit({
+                tenantId: msg.tenant_id,
+                type: 'message_status_updated',
+                payload: { conversationId: msg.conversation_id, messageId: msg.id, status: newStatus },
+              });
+            }
+          } catch (e: any) {
+            this.logger.warn(`messages.update DB error: ${e.message}`);
           }
         }
       });
@@ -309,9 +477,10 @@ export class WhatsappWebService {
     if (msg.key?.fromMe) return;
 
     const remoteJid: string = msg.key?.remoteJid ?? '';
-    if (isJidGroup(remoteJid))           return;
     if (isJidBroadcast(remoteJid))       return;
     if (isJidStatusBroadcast(remoteJid)) return;
+
+    const isGroup = isJidGroup(remoteJid);
 
     const msgContent = msg.message;
     if (!msgContent) return;
@@ -372,6 +541,17 @@ export class WhatsappWebService {
     }
     if (!body) return;
 
+    const msgId = msg.key?.id ?? `${Date.now()}`;
+
+    // ── Route to group or DM handler ─────────────────────────────────────────
+    if (isGroup) {
+      await this.handleGroupMessage(
+        connectionId, tenantId, msg, remoteJid, body, dbContentType, msgId,
+        helpers, lidMap, sock,
+      );
+      return;
+    }
+
     // Normalise the JID and resolve real phone number
     const normalizedJid = jidNormalizedUser(remoteJid);
     const isLid = normalizedJid.endsWith('@lid');
@@ -381,25 +561,31 @@ export class WhatsappWebService {
     let resolvedJid = normalizedJid; // JID used for routing replies
 
     if (isLid) {
-      // Try to resolve the real phone number from the LID→phone map
-      // (populated by contacts.upsert events from Baileys)
-      const realPhone = lidMap?.get(rawDigits);
+      // 1st: check in-memory map (populated by contacts.upsert)
+      let realPhone = lidMap?.get(rawDigits);
+
+      // 2nd: if not in memory, check persistent DB map (survives restarts)
+      if (!realPhone) {
+        const [dbRow] = await this.db.query(
+          `SELECT phone FROM wa_lid_map WHERE connection_id=$1 AND lid_digits=$2 LIMIT 1`,
+          [connectionId, rawDigits],
+        ).catch(() => [null]);
+        if (dbRow?.phone) {
+          realPhone = dbRow.phone;
+          lidMap?.set(rawDigits, realPhone); // warm up memory map
+        }
+      }
+
       if (realPhone) {
-        // We know the real number — use it as both phone and routing JID
         cleanPhone  = realPhone;
         resolvedJid = `${realPhone}@s.whatsapp.net`;
-        this.logger.debug(`LID ${rawDigits} resolved to phone ${realPhone}`);
       } else {
-        // Not yet in map — store as 'lid:DIGITS' so the UI doesn't show
-        // random digits as if they were a phone number.
-        // We keep the original LID JID for routing replies.
         cleanPhone = `lid:${rawDigits}`;
       }
     } else {
       cleanPhone  = rawDigits;
       resolvedJid = normalizedJid;
     }
-    const msgId   = msg.key?.id ?? `${Date.now()}`;
     const pushName = msg.pushName ?? cleanPhone;
 
     const [conn] = await this.db.query(
@@ -531,6 +717,176 @@ export class WhatsappWebService {
     this.events.emit('conversation.message_received', {
       ...convPayload,
       message: { body, direction: 'inbound', is_private: false, content_type: dbContentType },
+    });
+  }
+
+  // ── Group message handler ───────────────────────────────────────────────────
+
+  private async handleGroupMessage(
+    connectionId: string,
+    tenantId: string,
+    msg: any,
+    groupJid: string,
+    body: string,
+    dbContentType: string,
+    msgId: string,
+    helpers: any,
+    lidMap?: Map<string, string>,
+    sock?: any,
+  ) {
+    const { jidNormalizedUser } = helpers;
+
+    // Resolve sender (the participant inside the group)
+    const senderRaw: string = msg.key?.participant ?? '';
+    const senderNorm = senderRaw ? jidNormalizedUser(senderRaw) : '';
+    const senderIsLid = senderNorm.endsWith('@lid');
+    const senderDigits = senderNorm
+      .replace(/@s\.whatsapp\.net$/, '')
+      .replace(/@lid$/, '');
+
+    let senderPhone: string;
+    if (senderIsLid) {
+      let real = lidMap?.get(senderDigits);
+      if (!real) {
+        const [dbRow] = await this.db.query(
+          `SELECT phone FROM wa_lid_map WHERE connection_id=$1 AND lid_digits=$2 LIMIT 1`,
+          [connectionId, senderDigits],
+        ).catch(() => [null]);
+        if (dbRow?.phone) { real = dbRow.phone; lidMap?.set(senderDigits, real); }
+      }
+      senderPhone = real ?? `lid:${senderDigits}`;
+    } else {
+      senderPhone = senderDigits || 'unknown';
+    }
+    const senderName = msg.pushName ?? senderPhone;
+
+    // Fetch group name (best-effort — may fail if not cached)
+    let groupName = groupJid;
+    if (sock) {
+      try {
+        const meta = await sock.groupMetadata(groupJid);
+        if (meta?.subject) groupName = meta.subject;
+      } catch {}
+    }
+
+    const [conn] = await this.db.query(
+      `SELECT inbox_id, tenant_id FROM channel_connections WHERE id=$1 LIMIT 1`,
+      [connectionId],
+    );
+    if (!conn) return;
+    const inboxId = conn.inbox_id ?? null;
+    const tId = tenantId || conn.tenant_id;
+
+    // Find or create a "group contact" keyed by the group JID as phone
+    const [groupContact] = await this.db.query(
+      `SELECT id FROM contacts WHERE tenant_id=$1 AND phone=$2 LIMIT 1`,
+      [tId, groupJid],
+    );
+    let groupContactId: string;
+    if (groupContact) {
+      groupContactId = groupContact.id;
+      // Update group name if we have a better one now
+      if (groupName !== groupJid) {
+        await this.db.query(
+          `UPDATE contacts SET full_name=$1, updated_at=NOW() WHERE id=$2 AND (full_name IS NULL OR full_name=$3)`,
+          [groupName, groupContactId, groupJid],
+        ).catch(() => {});
+      }
+    } else {
+      const [newContact] = await this.db.query(
+        `INSERT INTO contacts (tenant_id, full_name, phone, created_at, updated_at)
+         VALUES ($1,$2,$3,NOW(),NOW()) RETURNING id`,
+        [tId, groupName, groupJid],
+      );
+      groupContactId = newContact.id;
+    }
+
+    // Find or create the group conversation — one permanent conv per group JID.
+    // If the existing conversation was resolved, reopen it so the full history
+    // stays in a single thread rather than spawning a new conversation.
+    const [existingConv] = await this.db.query(
+      `SELECT id, status FROM conversations
+       WHERE tenant_id=$1 AND external_id=$2 AND connection_id=$3
+       ORDER BY created_at DESC LIMIT 1`,
+      [tId, groupJid, connectionId],
+    );
+    let conversationId: string;
+    let isNew = false;
+    if (existingConv) {
+      conversationId = existingConv.id;
+      await this.db.query(
+        `UPDATE conversations
+         SET status = CASE WHEN status = 'resolved' THEN 'open' ELSE status END,
+             subject = CASE WHEN subject IS NULL OR subject = $1 THEN $1 ELSE subject END,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [groupName, conversationId],
+      ).catch(() => {});
+    } else {
+      const [newConv] = await this.db.query(
+        `INSERT INTO conversations
+           (tenant_id, contact_id, inbox_id, connection_id, external_id,
+            channel_type, status, subject, is_group, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,'whatsapp_web','open',$6,true,NOW(),NOW()) RETURNING id`,
+        [tId, groupContactId, inboxId, connectionId, groupJid, groupName],
+      );
+      conversationId = newConv.id;
+      isNew = true;
+    }
+
+    // Dedup check
+    const [dup] = await this.db.query(
+      `SELECT id FROM messages WHERE external_id=$1 AND conversation_id=$2 LIMIT 1`,
+      [msgId, conversationId],
+    );
+    if (dup) return;
+
+    // Prefix body with sender name so agents/bots see who in the group is talking
+    const prefixedBody = `[${senderName}]: ${body}`;
+    const msgTs = msg.messageTimestamp
+      ? new Date(Number(msg.messageTimestamp) * 1000).toISOString()
+      : new Date().toISOString();
+
+    await this.db.query(
+      `INSERT INTO messages
+         (tenant_id, conversation_id, body, content_type, direction, sender_type,
+          is_private, external_id, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,'inbound','contact',false,$5,$6,$6)`,
+      [tId, conversationId, prefixedBody, dbContentType, msgId, msgTs],
+    );
+
+    await this.db.query(
+      `UPDATE conversations SET last_message_at=$1, updated_at=NOW() WHERE id=$2`,
+      [msgTs, conversationId],
+    );
+
+    this.logger.log(`[whatsapp_web][group] ${senderName} in ${groupName} → conv ${conversationId}`);
+
+    const newMessage = {
+      id: msgId, conversationId, body: prefixedBody,
+      direction: 'inbound', senderType: 'contact',
+      contentType: dbContentType, isPrivate: false, createdAt: msgTs,
+    };
+
+    // Real-time SSE push to inbox
+    this.notifications.emit({
+      tenantId: tId,
+      type: 'message_created',
+      payload: { conversationId, message: newMessage },
+    });
+
+    // Events for bot/automation triggers — bot reply goes to conversation.external_id = groupJid
+    const convPayload = {
+      tenantId: tId, conversationId,
+      conversation: {
+        id: conversationId, contact_id: groupContactId,
+        inbox_id: inboxId, channel: 'whatsapp_web', is_group: true,
+      },
+    };
+    if (isNew) this.events.emit('conversation.created', convPayload);
+    this.events.emit('conversation.message_received', {
+      ...convPayload,
+      message: { body: prefixedBody, direction: 'inbound', is_private: false, content_type: dbContentType },
     });
   }
 }

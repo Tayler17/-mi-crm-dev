@@ -35,4 +35,7 @@ export class Conversation extends BaseTenantEntity {
 
   @Column({ name: 'assigned_user_id', nullable: true })
   assignedUserId: string;
+
+  @Column({ name: 'is_group', default: false })
+  isGroup: boolean;
 }

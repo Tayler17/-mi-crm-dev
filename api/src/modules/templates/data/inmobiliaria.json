@@ -1,0 +1,68 @@
+{
+  "slug": "inmobiliaria",
+  "name": "Inmobiliaria",
+  "description": "Gestión de propiedades, visitas y cierres para agencias inmobiliarias y agentes independientes.",
+  "icon": "🏠",
+  "pipelines": [
+    {
+      "name": "Ventas de Propiedades",
+      "stages": ["Interesado", "Visita agendada", "Visita realizada", "Oferta presentada", "En negociación", "Contrato firmado", "Cerrado"]
+    },
+    {
+      "name": "Arriendos",
+      "stages": ["Consulta", "Visita agendada", "Solicitud recibida", "Aprobado", "Contrato firmado", "Activo"]
+    }
+  ],
+  "tags": [
+    { "name": "comprador",      "color": "#3b82f6" },
+    { "name": "arrendatario",   "color": "#22c55e" },
+    { "name": "inversor",       "color": "#f59e0b" },
+    { "name": "urgente",        "color": "#ef4444" },
+    { "name": "exclusivo",      "color": "#8b5cf6" },
+    { "name": "referido",       "color": "#ec4899" },
+    { "name": "propietario",    "color": "#06b6d4" }
+  ],
+  "cannedResponses": [
+    {
+      "title": "Información de propiedad",
+      "shortCode": "inm-info",
+      "category": "Consultas",
+      "content": "Hola {{contact.name}}, gracias por tu interés en la propiedad. Te comparto los detalles: {{property_details}}. ¿Te gustaría agendar una visita?"
+    },
+    {
+      "title": "Confirmar visita",
+      "shortCode": "inm-visita",
+      "category": "Visitas",
+      "content": "¡Hola {{contact.name}}! Tu visita ha sido confirmada para el {{date}} a las {{time}}. La dirección es {{address}}. Te esperamos. 🏠"
+    },
+    {
+      "title": "Recordatorio de visita",
+      "shortCode": "inm-recordatorio",
+      "category": "Visitas",
+      "content": "Hola {{contact.name}}, te recordamos que mañana tienes una visita a las {{time}} en {{address}}. ¿Confirmas tu asistencia?"
+    },
+    {
+      "title": "Seguimiento post-visita",
+      "shortCode": "inm-post-visita",
+      "category": "Seguimiento",
+      "content": "Hola {{contact.name}}, ¿qué te pareció la propiedad que visitaste? Quedamos disponibles para resolver cualquier duda o avanzar con los siguientes pasos."
+    },
+    {
+      "title": "Oferta recibida",
+      "shortCode": "inm-oferta",
+      "category": "Negociación",
+      "content": "Hola {{contact.name}}, recibimos tu oferta de {{amount}}. La estamos evaluando con el propietario y te daremos respuesta en las próximas 24-48 horas."
+    },
+    {
+      "title": "Documentos requeridos",
+      "shortCode": "inm-documentos",
+      "category": "Proceso",
+      "content": "Para avanzar con el proceso necesitamos los siguientes documentos: cédula de identidad, últimas 3 liquidaciones de sueldo y certificado de AFP. ¿Puedes enviárnoslos?"
+    }
+  ],
+  "queues": [
+    { "name": "Ventas",        "description": "Prospectos interesados en compra" },
+    { "name": "Arriendos",     "description": "Consultas de arrendamiento" },
+    { "name": "Post-venta",    "description": "Atención a propietarios y compradores activos" }
+  ]
+}

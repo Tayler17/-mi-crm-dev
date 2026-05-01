@@ -21,7 +21,8 @@ export class CompaniesService {
        LEFT JOIN deals d ON d.company_id = c.id
        WHERE c.tenant_id = $1
        GROUP BY c.id
-       ORDER BY c.name`,
+       ORDER BY c.name
+       LIMIT 500`,
       [tenantId],
     );
   }
@@ -35,7 +36,7 @@ export class CompaniesService {
   async getContacts(id: string, tenantId: string) {
     await this.findOne(id, tenantId);
     return this.db.query(
-      `SELECT id, full_name, email, phone, created_at FROM contacts WHERE company_id = $1 AND tenant_id = $2 ORDER BY full_name`,
+      `SELECT id, full_name, email, phone, created_at FROM contacts WHERE company_id = $1 AND tenant_id = $2 ORDER BY full_name LIMIT 500`,
       [id, tenantId],
     );
   }
@@ -49,7 +50,8 @@ export class CompaniesService {
        LEFT JOIN pipeline_stages ps ON ps.id = d.stage_id
        LEFT JOIN pipelines p ON p.id = ps.pipeline_id
        WHERE d.company_id = $1 AND d.tenant_id = $2
-       ORDER BY d.created_at DESC`,
+       ORDER BY d.created_at DESC
+       LIMIT 300`,
       [id, tenantId],
     );
   }

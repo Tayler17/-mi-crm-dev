@@ -26,7 +26,7 @@ export class NotificationsController {
     // Verify token — if invalid just return an empty stream (client will reconnect)
     try {
       this.jwtService.verify(token, {
-        secret: this.config.get('JWT_SECRET') || 'dev_jwt_secret',
+        secret: this.config.get('JWT_SECRET') || 'dev_jwt_secret', // dev fallback only — JWT_SECRET required in production
       });
     } catch {
       // Return a stream that immediately closes via a one-shot error notice

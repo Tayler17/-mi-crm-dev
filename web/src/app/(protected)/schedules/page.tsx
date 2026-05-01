@@ -8,9 +8,17 @@ import {
   getInboxes,
   Schedule, ScheduleHours, Inbox, ScheduleAssignment,
 } from '@/lib/api';
+import { useLangCtx } from '@/lib/lang-context';
+import { APP } from '@/lib/i18n/app';
 
-const DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-const DAYS_FULL = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+type AppDict = typeof APP[keyof typeof APP];
+
+function getDayNames(locale: string, format: 'short' | 'long'): string[] {
+  return Array.from({ length: 7 }, (_, i) => {
+    const date = new Date(2024, 0, 7 + i); // Jan 7 2024 = Sunday (index 0)
+    return new Intl.DateTimeFormat(locale, { weekday: format }).format(date);
+  });
+}
 
 const TIMEZONES = [
   'UTC',
@@ -31,26 +39,28 @@ function defaultHours(): ScheduleHours[] {
   }));
 }
 
-// Compute if a schedule is currently open (client-side)
-function computeIsOpen(schedule: Schedule): { open: boolean; label: string } {
-  if (!schedule.isActive) return { open: false, label: 'Inactivo' };
+function computeIsOpen(schedule: Schedule, i: AppDict): { open: boolean; label: string } {
+  if (!schedule.isActive) return { open: false, label: i.inactive };
   const now = new Date();
   const dayOfWeek = now.getDay();
   const h = schedule.hours?.find((x) => x.dayOfWeek === dayOfWeek);
-  if (!h || h.isClosed) return { open: false, label: 'Cerrado hoy' };
+  if (!h || h.isClosed) return { open: false, label: i.schedClosedToday };
   const nowMins = now.getHours() * 60 + now.getMinutes();
   const [oh, om] = (h.openTime ?? '09:00').split(':').map(Number);
   const [ch, cm] = (h.closeTime ?? '18:00').split(':').map(Number);
   const openMins = oh * 60 + om;
   const closeMins = ch * 60 + cm;
-  if (nowMins < openMins) return { open: false, label: `Abre a las ${h.openTime}` };
-  if (nowMins >= closeMins) return { open: false, label: `Cerró a las ${h.closeTime}` };
-  return { open: true, label: `Abierto hasta ${h.closeTime}` };
+  if (nowMins < openMins) return { open: false, label: `${i.schedOpensAt} ${h.openTime}` };
+  if (nowMins >= closeMins) return { open: false, label: `${i.schedClosedAt} ${h.closeTime}` };
+  return { open: true, label: `${i.schedOpenUntil} ${h.closeTime}` };
 }
 
 // ── Hours Grid ────────────────────────────────────────────────────────────────
 
 function HoursGrid({ hours, onChange }: { hours: ScheduleHours[]; onChange: (h: ScheduleHours[]) => void }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+  const daysFull = getDayNames(i.locale, 'long');
   const sorted = [...hours].sort((a, b) => a.dayOfWeek - b.dayOfWeek);
 
   function update(dayOfWeek: number, patch: Partial<ScheduleHours>) {
@@ -71,10 +81,10 @@ function HoursGrid({ hours, onChange }: { hours: ScheduleHours[]; onChange: (h: 
         }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
             <input type="checkbox" checked={!h.isClosed} onChange={(e) => update(h.dayOfWeek, { isClosed: !e.target.checked })} />
-            <span style={{ fontWeight: 500, fontSize: 13 }}>{DAYS_FULL[h.dayOfWeek]}</span>
+            <span style={{ fontWeight: 500, fontSize: 13 }}>{daysFull[h.dayOfWeek]}</span>
           </label>
           {h.isClosed ? (
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>Cerrado</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>{i.schedClosed}</span>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input type="time" value={h.openTime ?? '09:00'} onChange={(e) => update(h.dayOfWeek, { openTime: e.target.value })}
@@ -83,8 +93,8 @@ function HoursGrid({ hours, onChange }: { hours: ScheduleHours[]; onChange: (h: 
               <input type="time" value={h.closeTime ?? '18:00'} onChange={(e) => update(h.dayOfWeek, { closeTime: e.target.value })}
                 style={{ padding: '3px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text)', fontSize: 13 }} />
               {[1, 2, 3, 4, 5].includes(h.dayOfWeek) && (
-                <button type="button" className="btn btn-ghost" style={{ fontSize: 10, padding: '2px 6px', flexShrink: 0 }} onClick={() => copyToWeekdays(h)} title="Copiar a todos los días de semana">
-                  Copiar a lun–vie
+                <button type="button" className="btn btn-ghost" style={{ fontSize: 10, padding: '2px 6px', flexShrink: 0 }} onClick={() => copyToWeekdays(h)}>
+                  {i.schedCopyWeekdays}
                 </button>
               )}
             </div>
@@ -108,6 +118,8 @@ function ScheduleModal({ schedule, onSave, onClose }: {
   onSave: (data: ScheduleFormData) => Promise<void>;
   onClose: () => void;
 }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [form, setForm] = useState<ScheduleFormData>({
     name: schedule?.name ?? '',
     timezone: schedule?.timezone ?? 'UTC',
@@ -119,7 +131,7 @@ function ScheduleModal({ schedule, onSave, onClose }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  function applyPreset(preset: 'all-day' | 'weekdays' | 'weekend-off' | 'custom') {
+  function applyPreset(preset: 'all-day' | 'weekdays') {
     if (preset === 'weekdays') {
       setForm({ ...form, hours: form.hours.map((h) => ({ ...h, isClosed: h.dayOfWeek === 0 || h.dayOfWeek === 6, openTime: '09:00', closeTime: '18:00' })) });
     } else if (preset === 'all-day') {
@@ -129,10 +141,10 @@ function ScheduleModal({ schedule, onSave, onClose }: {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.name.trim()) { setError('El nombre es requerido'); return; }
+    if (!form.name.trim()) { setError(i.schedNameReq); return; }
     setSaving(true); setError('');
     try { await onSave(form); onClose(); }
-    catch (err: any) { setError(err.message || 'Error al guardar'); }
+    catch (err: any) { setError(err.message || i.error); }
     finally { setSaving(false); }
   }
 
@@ -140,19 +152,18 @@ function ScheduleModal({ schedule, onSave, onClose }: {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 640, maxHeight: '92vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 style={{ margin: 0, fontSize: 18 }}>{schedule ? 'Editar Schedule' : 'Nuevo Schedule'}</h2>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{schedule ? i.editSchedule : i.newSchedule}</h2>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '16px 0' }}>
-          {/* Basic */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label">Nombre *</label>
-              <input className="form-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Horario Principal" />
+              <label className="form-label">{i.name} *</label>
+              <input className="form-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </div>
             <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label">Zona Horaria</label>
+              <label className="form-label">{i.schedTimezone}</label>
               <select className="form-input" value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })}>
                 {TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
               </select>
@@ -161,37 +172,35 @@ function ScheduleModal({ schedule, onSave, onClose }: {
 
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 14 }}>
             <input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />
-            <span>Horario activo</span>
+            <span>{i.schedActiveLabel}</span>
           </label>
 
-          {/* Weekly hours */}
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Horario Semanal</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{i.schedWeekly}</div>
               <div style={{ display: 'flex', gap: 6 }}>
-                <button type="button" className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => applyPreset('weekdays')}>Lun–Vie 9–18</button>
+                <button type="button" className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => applyPreset('weekdays')}>{i.schedPresetWeekdays}</button>
                 <button type="button" className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => applyPreset('all-day')}>24/7</button>
               </div>
             </div>
             <HoursGrid hours={form.hours} onChange={(hours) => setForm({ ...form, hours })} />
           </div>
 
-          {/* AI */}
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>🤖</span> Configuración IA
-              <span style={{ fontSize: 10, background: 'var(--primary)', color: '#fff', borderRadius: 4, padding: '1px 5px' }}>Próximamente</span>
+              {i.schedAIConfig}
+              <span style={{ fontSize: 10, background: 'var(--primary)', color: '#fff', borderRadius: 4, padding: '1px 5px' }}>{i.schedAIComingSoon}</span>
             </div>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 14, marginBottom: 10 }}>
               <input type="checkbox" checked={form.aiEnabled} onChange={(e) => setForm({ ...form, aiEnabled: e.target.checked })} />
-              <span>Habilitar respuestas automáticas con IA fuera de horario</span>
+              <span>{i.schedAIEnable}</span>
             </label>
             {form.aiEnabled && (
               <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Mensaje fuera de horario</label>
+                <label className="form-label">{i.schedAIMessage}</label>
                 <textarea className="form-input" rows={3} value={form.aiFallbackMessage}
                   onChange={(e) => setForm({ ...form, aiFallbackMessage: e.target.value })}
-                  placeholder="Hola, estamos fuera de horario. Nuestro equipo responderá pronto."
+                  placeholder={i.schedAIPlaceholder}
                   style={{ resize: 'vertical' }} />
               </div>
             )}
@@ -199,8 +208,8 @@ function ScheduleModal({ schedule, onSave, onClose }: {
 
           {error && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</button>
+            <button type="button" className="btn btn-secondary" onClick={onClose}>{i.cancel}</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? i.saving : i.save}</button>
           </div>
         </form>
       </div>
@@ -208,20 +217,97 @@ function ScheduleModal({ schedule, onSave, onClose }: {
   );
 }
 
-// ── Assignments Modal ─────────────────────────────────────────────────────────
+// ── Inbox Assign Modal ────────────────────────────────────────────────────────
 
-const TARGET_TYPES = [
-  { key: 'inbox', label: 'Inboxes', icon: '📥', desc: 'Aplica el horario a los mensajes recibidos por estos inboxes' },
-  { key: 'bot', label: 'Call Bots', icon: '🤖', desc: 'Los bots solo operarán dentro de este horario' },
-  { key: 'campaign', label: 'Campañas', icon: '📣', desc: 'Las campañas envían mensajes solo dentro de este horario' },
-  { key: 'user', label: 'Usuarios', icon: '👤', desc: 'Controla la disponibilidad de estos agentes' },
-];
+function InboxAssignModal({ schedule, onClose, onRefresh }: {
+  schedule: Schedule;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+  const [assigned, setAssigned] = useState<any[]>([]);
+  const [all, setAll] = useState<Inbox[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      getScheduleInboxes(schedule.id).catch(() => []),
+      getInboxes().catch(() => []),
+    ]).then(([a, b]) => { setAssigned(a); setAll(b); });
+  }, [schedule.id]);
+
+  const assignedIds = new Set(assigned.map((ix: any) => ix.id ?? ix.inbox_id));
+  const available = all.filter((ix) => !assignedIds.has(ix.id));
+
+  async function add(inboxId: string) {
+    setSaving(true);
+    try { await assignScheduleInbox(schedule.id, inboxId); const a = await getScheduleInboxes(schedule.id); setAssigned(a); onRefresh(); }
+    finally { setSaving(false); }
+  }
+
+  async function remove(inboxId: string) {
+    setSaving(true);
+    try { await unassignScheduleInbox(schedule.id, inboxId); const a = await getScheduleInboxes(schedule.id); setAssigned(a); onRefresh(); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 style={{ margin: 0, fontSize: 17 }}>Inboxes — {schedule.name}</h2>
+          <button className="btn btn-ghost" onClick={onClose}>✕</button>
+        </div>
+        <div style={{ padding: '12px 0' }}>
+          {assigned.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>{i.schedCurrentAssigned}</div>
+              {assigned.map((ix: any) => (
+                <div key={ix.id ?? ix.inbox_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderRadius: 6, background: '#dcfce7', border: '1px solid #bbf7d0', marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>📥 {ix.name}</span>
+                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--danger)' }} disabled={saving} onClick={() => remove(ix.id ?? ix.inbox_id)}>{i.remove}</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
+              {available.length > 0 ? `${i.schedAvailableLabel} (${available.length})` : i.schedNoMore}
+            </div>
+            {available.map((ix) => (
+              <div key={ix.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderRadius: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border)', marginBottom: 4 }}>
+                <span style={{ fontWeight: 500, fontSize: 13 }}>📥 {ix.name}</span>
+                <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px' }} disabled={saving} onClick={() => add(ix.id)}>+ {i.add}</button>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+          <button className="btn btn-primary" onClick={onClose}>{i.schedDone}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Assignments Modal ─────────────────────────────────────────────────────────
 
 function AssignmentsModal({ schedule, onClose, onRefresh }: {
   schedule: Schedule;
   onClose: () => void;
   onRefresh: () => void;
 }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+
+  const TARGET_TYPES = [
+    { key: 'inbox',    label: i.schedTargetInboxLabel,    icon: '📥', desc: i.schedTargetInboxDesc },
+    { key: 'bot',      label: i.schedTargetBotLabel,      icon: '🤖', desc: i.schedTargetBotDesc },
+    { key: 'campaign', label: i.schedTargetCampaignLabel, icon: '📣', desc: i.schedTargetCampaignDesc },
+    { key: 'user',     label: i.schedTargetUserLabel,     icon: '👤', desc: i.schedTargetUserDesc },
+  ];
+
   const [assignments, setAssignments] = useState<ScheduleAssignment[]>([]);
   const [activeType, setActiveType] = useState<string>('inbox');
   const [available, setAvailable] = useState<any[]>([]);
@@ -265,16 +351,13 @@ function AssignmentsModal({ schedule, onClose, onRefresh }: {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 style={{ margin: 0, fontSize: 17 }}>Asignaciones — {schedule.name}</h2>
+          <h2 style={{ margin: 0, fontSize: 17 }}>{i.schedAssignmentsBtn.replace('⚙ ', '')} — {schedule.name}</h2>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
 
         <div style={{ padding: '12px 0' }}>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>
-            Asigna este schedule a inboxes, bots, campañas o usuarios para controlar cuándo operan.
-          </p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>{i.schedAssignHint}</p>
 
-          {/* Type tabs */}
           <div style={{ display: 'flex', gap: 4, marginBottom: 16, flexWrap: 'wrap' }}>
             {TARGET_TYPES.map((t) => {
               const count = assignments.filter((a) => a.target_type === t.key).length;
@@ -295,12 +378,11 @@ function AssignmentsModal({ schedule, onClose, onRefresh }: {
 
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>{typeInfo.desc}</div>
 
-          {/* Currently assigned */}
           {loading ? (
-            <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 16 }}>Cargando…</div>
+            <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 16 }}>{i.loading}</div>
           ) : byType.length > 0 && (
             <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>Asignados actualmente</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>{i.schedCurrentAssigned}</div>
               {byType.map((a) => (
                 <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderRadius: 6, background: '#dcfce7', border: '1px solid #bbf7d0', marginBottom: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -309,23 +391,17 @@ function AssignmentsModal({ schedule, onClose, onRefresh }: {
                   </div>
                   <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--danger)' }}
                     disabled={saving} onClick={() => handleRemove(a.id)}>
-                    Quitar
+                    {i.remove}
                   </button>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Available to add */}
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
-              {available.length > 0 ? `Disponibles para agregar (${available.length})` : 'Sin más opciones disponibles'}
+              {available.length > 0 ? `${i.schedAvailableLabel} (${available.length})` : i.schedNoMore}
             </div>
-            {available.length === 0 && !loading && (
-              <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '16px 0', fontSize: 13 }}>
-                {byType.length === 0 ? `No hay ${typeInfo.label.toLowerCase()} configurados` : `Todos los ${typeInfo.label.toLowerCase()} ya están asignados`}
-              </div>
-            )}
             {available.map((item) => (
               <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderRadius: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border)', marginBottom: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -337,7 +413,7 @@ function AssignmentsModal({ schedule, onClose, onRefresh }: {
                 </div>
                 <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px' }}
                   disabled={saving} onClick={() => handleAdd(item.id)}>
-                  + Agregar
+                  + {i.add}
                 </button>
               </div>
             ))}
@@ -345,13 +421,12 @@ function AssignmentsModal({ schedule, onClose, onRefresh }: {
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-          <button className="btn btn-primary" onClick={onClose}>Listo</button>
+          <button className="btn btn-primary" onClick={onClose}>{i.schedDone}</button>
         </div>
       </div>
     </div>
   );
 }
-
 
 // ── Schedule Card ─────────────────────────────────────────────────────────────
 
@@ -362,8 +437,12 @@ function ScheduleCard({ schedule, onEdit, onDelete, onAssignInbox, onAssignments
   onAssignInbox: () => void;
   onAssignments: () => void;
 }) {
-  const { open, label } = computeIsOpen(schedule);
-  const openDays = schedule.hours?.filter((h) => !h.isClosed).map((h) => DAYS_SHORT[h.dayOfWeek]).join(', ');
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+  const { open, label } = computeIsOpen(schedule, i);
+  const daysShort = getDayNames(i.locale, 'short');
+  const daysFull  = getDayNames(i.locale, 'long');
+  const openDays = schedule.hours?.filter((h) => !h.isClosed).map((h) => daysShort[h.dayOfWeek]).join(', ');
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -371,7 +450,6 @@ function ScheduleCard({ schedule, onEdit, onDelete, onAssignInbox, onAssignments
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontWeight: 600, fontSize: 16 }}>{schedule.name}</span>
-            {/* Live open/closed badge */}
             <span style={{
               fontSize: 11, padding: '2px 8px', borderRadius: 12, fontWeight: 600,
               background: open ? '#dcfce7' : '#fee2e2',
@@ -379,35 +457,34 @@ function ScheduleCard({ schedule, onEdit, onDelete, onAssignInbox, onAssignments
             }}>
               {open ? '🟢' : '🔴'} {label}
             </span>
-            {!schedule.isActive && <span style={{ fontSize: 11, background: '#f3f4f6', color: '#6b7280', borderRadius: 4, padding: '2px 6px' }}>Inactivo</span>}
+            {!schedule.isActive && <span style={{ fontSize: 11, background: '#f3f4f6', color: '#6b7280', borderRadius: 4, padding: '2px 6px' }}>{i.inactive}</span>}
             {schedule.aiEnabled && <span style={{ fontSize: 11, background: 'var(--primary)', color: '#fff', borderRadius: 4, padding: '2px 6px' }}>🤖 IA</span>}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>🌐 {schedule.timezone}</div>
         </div>
         <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
-          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={onAssignInbox}>📥 Inboxes</button>
-          <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: 12 }} onClick={onAssignments}>⚙ Asignaciones</button>
-          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={onEdit}>Editar</button>
-          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12, color: 'var(--danger)' }} onClick={onDelete}>Eliminar</button>
+          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={onAssignInbox}>{i.schedInboxesBtn}</button>
+          <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: 12 }} onClick={onAssignments}>{i.schedAssignmentsBtn}</button>
+          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={onEdit}>{i.edit}</button>
+          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12, color: 'var(--danger)' }} onClick={onDelete}>{i.delete}</button>
         </div>
       </div>
 
-      {/* Day pills */}
       <div style={{ display: 'flex', gap: 4 }}>
-        {Array.from({ length: 7 }, (_, i) => {
-          const h = schedule.hours?.find((hh) => hh.dayOfWeek === i);
+        {Array.from({ length: 7 }, (_, idx) => {
+          const h = schedule.hours?.find((hh) => hh.dayOfWeek === idx);
           const closed = !h || h.isClosed;
-          const isToday = new Date().getDay() === i;
+          const isToday = new Date().getDay() === idx;
           return (
-            <div key={i}
-              title={closed ? `${DAYS_FULL[i]}: Cerrado` : `${DAYS_FULL[i]}: ${h!.openTime} – ${h!.closeTime}`}
+            <div key={idx}
+              title={closed ? `${daysFull[idx]}: ${i.schedClosed}` : `${daysFull[idx]}: ${h!.openTime} – ${h!.closeTime}`}
               style={{
                 flex: 1, textAlign: 'center', padding: '5px 2px', borderRadius: 4, fontSize: 11, fontWeight: 600,
                 background: closed ? 'var(--bg-secondary)' : '#dcfce7',
                 color: closed ? 'var(--text-muted)' : '#16a34a',
                 border: `${isToday ? 2 : 1}px solid ${closed ? 'var(--border)' : isToday ? '#15803d' : '#bbf7d0'}`,
               }}>
-              {DAYS_SHORT[i]}
+              {daysShort[idx]}
             </div>
           );
         })}
@@ -415,7 +492,7 @@ function ScheduleCard({ schedule, onEdit, onDelete, onAssignInbox, onAssignments
 
       {openDays && (
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-          Días activos: {openDays}
+          {i.schedActiveDays} {openDays}
         </div>
       )}
 
@@ -431,6 +508,8 @@ function ScheduleCard({ schedule, onEdit, onDelete, onAssignInbox, onAssignments
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function SchedulesPage() {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -453,7 +532,7 @@ export default function SchedulesPage() {
   }
 
   async function handleDelete(id: string, name: string) {
-    if (!confirm(`¿Eliminar el schedule "${name}"?`)) return;
+    if (!confirm(`${i.schedConfirmDelete} "${name}"?`)) return;
     await deleteSchedule(id);
     setSchedules((prev) => prev.filter((s) => s.id !== id));
   }
@@ -463,22 +542,20 @@ export default function SchedulesPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Schedules</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
-            Horarios de atención — asigna inboxes para que respeten el horario configurado
-          </p>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>{i.schedTabHint}</p>
         </div>
         <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>
-          + Nuevo Schedule
+          {i.newScheduleBtn}
         </button>
       </div>
 
       {loading ? (
-        <div style={{ color: 'var(--text-muted)', padding: 40, textAlign: 'center' }}>Cargando…</div>
+        <div style={{ color: 'var(--text-muted)', padding: 40, textAlign: 'center' }}>{i.loading}</div>
       ) : schedules.length === 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 280, gap: 16, color: 'var(--text-muted)' }}>
           <div style={{ fontSize: 48 }}>🕐</div>
-          <div style={{ fontSize: 16 }}>No hay schedules configurados</div>
-          <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>+ Crear Schedule</button>
+          <div style={{ fontSize: 16 }}>{i.schedNone}</div>
+          <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>{i.createSchedule}</button>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: 16 }}>
@@ -521,4 +598,3 @@ export default function SchedulesPage() {
     </div>
   );
 }
-

@@ -2,6 +2,22 @@ import { IsString, IsNotEmpty, IsOptional, IsBoolean, IsArray, IsInt, Min, Max, 
 import { Type } from 'class-transformer';
 
 export class ScheduleHoursDto {
+  // Extra fields sent by the frontend when editing existing hours — accepted and ignored
+  @IsString()
+  @IsOptional()
+  id?: string;
+
+  @IsString()
+  @IsOptional()
+  scheduleId?: string;
+
+  @IsString()
+  @IsOptional()
+  tenantId?: string;
+
+  @IsOptional()
+  createdAt?: any;
+
   @IsInt()
   @Min(0)
   @Max(6)

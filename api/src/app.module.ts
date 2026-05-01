@@ -3,6 +3,9 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { BullModule } from '@nestjs/bullmq';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import { LoggerModule } from 'nestjs-pino';
 import { AuthModule } from './modules/auth/auth.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { DealsModule } from './modules/deals/deals.module';
@@ -30,14 +33,49 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { FlowsModule } from './modules/flows/flows.module';
 import { AiChatbotsModule } from './modules/ai-chatbots/ai-chatbots.module';
 import { AiPromptsModule } from './modules/ai-prompts/ai-prompts.module';
+import { KnowledgeBaseModule } from './modules/knowledge-base/knowledge-base.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { PlansModule } from './modules/plans/plans.module';
+import { BillingModule } from './modules/billing/billing.module';
+import { BackupsModule } from './modules/backups/backups.module';
+import { WebchatModule } from './modules/webchat/webchat.module';
+import { HelpModule } from './modules/help/help.module';
+import { TemplatesModule } from './modules/templates/templates.module';
+import { SearchModule } from './modules/search/search.module';
+import { CsatModule } from './modules/csat/csat.module';
+import { OutboundWebhooksModule } from './modules/outbound-webhooks/outbound-webhooks.module';
+import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module';
+import { ContentModule } from './modules/content/content.module';
 import { TenantMiddleware } from './common/middleware/tenant.middleware';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    LoggerModule.forRootAsync({
+      useFactory: () => {
+        const isDev = process.env.NODE_ENV !== 'production';
+        return {
+          pinoHttp: {
+            level: process.env.LOG_LEVEL ?? (isDev ? 'debug' : 'info'),
+            transport: isDev
+              ? { target: 'pino-pretty', options: { colorize: true, singleLine: true, ignore: 'pid,hostname' } }
+              : undefined,
+            serializers: {
+              req: (req: any) => ({ method: req.method, url: req.url, id: req.id }),
+              res: (res: any) => ({ statusCode: res.statusCode }),
+            },
+            autoLogging: {
+              ignore: (req: any) => req.url === '/health',
+            },
+          },
+        };
+      },
+    }),
+    ThrottlerModule.forRoot([
+      { name: 'short',  ttl: 1000,  limit: 10  }, // 10 req/s
+      { name: 'medium', ttl: 60000, limit: 100 }, // 100 req/min
+    ]),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({
@@ -84,9 +122,23 @@ import { TenantMiddleware } from './common/middleware/tenant.middleware';
     FlowsModule,
     AiChatbotsModule,
     AiPromptsModule,
+    KnowledgeBaseModule,
     NotificationsModule,
     WebhooksModule,
     PlansModule,
+    BillingModule,
+    BackupsModule,
+    WebchatModule,
+    HelpModule,
+    TemplatesModule,
+    SearchModule,
+    CsatModule,
+    OutboundWebhooksModule,
+    CustomFieldsModule,
+    ContentModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule implements NestModule {

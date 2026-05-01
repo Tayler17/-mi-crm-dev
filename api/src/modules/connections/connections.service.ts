@@ -3,6 +3,7 @@ import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Connection } from './connection.entity';
 import * as nodemailer from 'nodemailer';
+import { SmsService } from './sms.service';
 
 @Injectable()
 export class ConnectionsService {
@@ -11,6 +12,7 @@ export class ConnectionsService {
   constructor(
     @InjectRepository(Connection) private readonly repo: Repository<Connection>,
     @InjectDataSource() private readonly db: DataSource,
+    private readonly smsSvc: SmsService,
   ) {}
 
   async findAll(tenantId: string) {
@@ -207,6 +209,10 @@ export class ConnectionsService {
         }
       }
 
+      // ── SMS (Twilio / Vonage / Telnyx) ───────────────────────────────────────
+      case 'sms':
+        return this.smsSvc.testCredentials(creds);
+
       // ── WhatsApp Web / Webchat ────────────────────────────────────────────────
       case 'whatsapp_web':
       case 'webchat':
@@ -220,7 +226,7 @@ export class ConnectionsService {
   // ── Helpers ───────────────────────────────────────────────────────────────────
 
   private maskCredentials(channelType: string, creds: Record<string, any>): Record<string, any> {
-    const SENSITIVE = ['accessToken', 'password', 'botToken', 'apiSecret', 'apiKey', 'appSecret', 'webhookVerifyToken'];
+    const SENSITIVE = ['accessToken', 'password', 'botToken', 'apiSecret', 'apiKey', 'appSecret', 'webhookVerifyToken', 'authToken'];
     const result: Record<string, any> = {};
     for (const [k, v] of Object.entries(creds)) {
       result[k] = SENSITIVE.includes(k) && v ? '••••••••' : v;

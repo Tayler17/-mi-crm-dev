@@ -19,6 +19,8 @@ export class AiChatbot {
   @Column({ default: 5 }) memory_conversations: number;
   @Column({ type: 'uuid', array: true, default: [] }) inbox_ids: string[];
   @Column({ type: 'uuid', array: true, default: [] }) queue_ids: string[];
+  @Column({ type: 'uuid', array: true, default: [] }) team_ids: string[];
+  @Column({ default: false }) respond_in_groups: boolean;
   @Column({ default: 0 }) total_conversations: number;
   @Column({ default: 0 }) handoff_count: number;
   @Column({ nullable: true }) created_by: string;

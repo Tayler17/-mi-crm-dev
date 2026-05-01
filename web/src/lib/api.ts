@@ -36,18 +36,56 @@ async function handleResponse(res: Response) {
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
-export async function login(email: string, password: string, tenantId: string) {
+export async function login(email: string, password: string, tenantSlugOrId: string) {
   const res = await fetch(`${API_URL}/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': tenantId },
+    headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': tenantSlugOrId },
     body: JSON.stringify({ email, password }),
   });
-  if (!res.ok) throw new Error('Credenciales incorrectas');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Credenciales incorrectas');
+  }
   const data = await res.json();
   localStorage.setItem('token', data.accessToken);
-  localStorage.setItem('tenantId', tenantId);
+  // Always store the resolved UUID from the response, not the typed slug
+  localStorage.setItem('tenantId', data.user.tenantId);
   localStorage.setItem('user', JSON.stringify(data.user));
   return data;
+}
+
+export async function register(payload: {
+  workspaceName: string;
+  slug: string;
+  fullName: string;
+  email: string;
+  password: string;
+  acceptedTerms: boolean;
+}) {
+  const res = await fetch(`${API_URL}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = Array.isArray(err.message) ? err.message[0] : (err.message || 'Error al crear el workspace');
+    throw new Error(msg);
+  }
+  const data = await res.json();
+  localStorage.setItem('token', data.accessToken);
+  localStorage.setItem('tenantId', data.user.tenantId);
+  localStorage.setItem('user', JSON.stringify(data.user));
+  return data;
+}
+
+export async function verifyEmail(token: string) {
+  const res = await fetch(`${API_URL}/auth/verify-email?token=${encodeURIComponent(token)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'El enlace es inválido o ya fue usado.');
+  }
+  return res.json();
 }
 
 export function logout() {
@@ -127,6 +165,23 @@ export const getContactProfile = (id: string) => apiGet<ContactProfile>(`/contac
 export const createContact = (data: Partial<Contact>) => apiPost<Contact>('/contacts', data);
 export const updateContact = (id: string, data: Partial<Contact>) => apiPatch<Contact>(`/contacts/${id}`, data);
 export const deleteContact = (id: string) => apiDelete(`/contacts/${id}`);
+export const getContactDuplicates = () => apiGet<{ ids: string[]; names: string[]; email: string; phone: string; count: number }[]>('/contacts/duplicates/list');
+export const mergeContacts = (keepId: string, mergeId: string) => apiPost<{ ok: boolean }>(`/contacts/${keepId}/merge/${mergeId}`, {});
+
+export interface CsvImportResult {
+  created: number; updated: number; skipped: number; total: number;
+  errors: { row: number; reason: string }[];
+}
+export async function importContactsCsv(file: File): Promise<CsvImportResult> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_URL}/contacts/import`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken()}`, 'X-Tenant-ID': getTenantId() },
+    body: form,
+  });
+  return handleResponse(res);
+}
 export const addContactTag = (contactId: string, tagId: string) => apiPost(`/contacts/${contactId}/tags/${tagId}`, {});
 export const removeContactTag = (contactId: string, tagId: string) => apiDelete(`/contacts/${contactId}/tags/${tagId}`);
 
@@ -148,11 +203,12 @@ export interface Deal {
 }
 
 export interface DealDetail {
-  deal: Deal & { stage_name: string; pipeline_name: string; pipeline_id: string; contact: any; company: any; assigned_user: any };
+  deal: Deal & { stage_name: string; pipeline_name: string; pipeline_id: string; contact: any; company: any; assigned_user: any; expected_close_date?: string };
   tasks: any[];
   notes: any[];
   conversations: any[];
   activities: any[];
+  calls: any[];
 }
 
 export const getDeals = () => apiGet<Deal[]>('/deals');
@@ -232,9 +288,12 @@ export interface Agent {
   fullName: string;
   email: string;
   role: string;
+  availability?: string; // online | away | busy | offline
 }
 
 export const getAgents = () => apiGet<Agent[]>('/auth/agents');
+export const setMyAvailability = (availability: string) =>
+  apiPatch<{ availability: string }>('/auth/me/availability', { availability });
 
 // ── Users CRUD ────────────────────────────────────────────────────────────────
 
@@ -245,6 +304,7 @@ export interface User {
   role: string;
   isActive: boolean;
   createdAt: string;
+  availability?: string;
 }
 
 export const getUsers = () => apiGet<User[]>('/auth/users');
@@ -288,6 +348,7 @@ export interface Conversation {
   assignedUserId?: string;
   createdAt: string;
   updatedAt: string;
+  isGroup?: boolean;
   // enriched
   contact?: ConversationContact;
   inbox?: ConversationInbox;
@@ -342,6 +403,7 @@ export interface Message {
   direction: string;
   contentType: string;
   isPrivate: boolean;
+  status?: string;
   createdAt: string;
 }
 
@@ -369,6 +431,7 @@ export interface Tag {
   name: string;
   color?: string;
   createdAt: string;
+  contactCount?: number;
 }
 
 export const getTags = () => apiGet<Tag[]>('/tags');
@@ -417,6 +480,103 @@ export const getContactsReport = (from?: string, to?: string) => {
   if (to) p.set('to', to);
   return apiGet<any>(`/reports/contacts${p.toString() ? `?${p}` : ''}`);
 };
+export const getCallsReport = (from?: string, to?: string) => {
+  const p = new URLSearchParams();
+  if (from) p.set('from', from);
+  if (to) p.set('to', to);
+  return apiGet<any>(`/reports/calls${p.toString() ? `?${p}` : ''}`);
+};
+export const getSlaReport = (from?: string, to?: string) => {
+  const p = new URLSearchParams();
+  if (from) p.set('from', from);
+  if (to) p.set('to', to);
+  return apiGet<any>(`/reports/sla${p.toString() ? `?${p}` : ''}`);
+};
+
+// ── CSAT ──────────────────────────────────────────────────────────────────────
+
+export const requestCsat = (conversationId: string) =>
+  apiPost<{ token: string; surveyUrl: string }>(`/csat/request/${conversationId}`, {});
+
+export const submitCsat = (token: string, score: number, comment?: string) =>
+  fetch(`${API_URL}/csat/submit/${token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ score, comment }),
+  }).then((r) => r.json());
+
+export const getCsatReport = (from?: string, to?: string) => {
+  const p = new URLSearchParams();
+  if (from) p.set('from', from);
+  if (to) p.set('to', to);
+  return apiGet<any>(`/csat/report${p.toString() ? `?${p}` : ''}`);
+};
+
+export const getConversationCsat = (conversationId: string) =>
+  apiGet<any[]>(`/csat/conversation/${conversationId}`);
+
+// ── Outbound Webhooks ─────────────────────────────────────────────────────────
+
+export interface OutboundWebhook {
+  id: string;
+  name: string;
+  url: string;
+  secret?: string;
+  events: string[];
+  isActive: boolean;
+  lastFiredAt?: string;
+  createdAt: string;
+}
+
+export const getOutboundWebhooks    = () => apiGet<OutboundWebhook[]>('/outbound-webhooks');
+export const getSupportedWebhookEvents = () => apiGet<{ events: string[] }>('/outbound-webhooks/events');
+export const createOutboundWebhook  = (dto: Partial<OutboundWebhook>) => apiPost<OutboundWebhook>('/outbound-webhooks', dto);
+export const updateOutboundWebhook  = (id: string, dto: Partial<OutboundWebhook>) => apiPatch<OutboundWebhook>(`/outbound-webhooks/${id}`, dto);
+export const deleteOutboundWebhook  = (id: string) => apiDelete(`/outbound-webhooks/${id}`);
+export const testOutboundWebhook    = (id: string) => apiPost<{ ok: boolean }>(`/outbound-webhooks/${id}/test`, {});
+
+export interface WebhookLog {
+  id: string;
+  event: string;
+  status: 'success' | 'error';
+  status_code?: number;
+  error_message?: string;
+  duration_ms?: number;
+  created_at: string;
+}
+export const getWebhookLogs = (id: string) => apiGet<WebhookLog[]>(`/outbound-webhooks/${id}/logs`);
+
+// ── Custom Fields ─────────────────────────────────────────────────────────────
+
+export interface CustomFieldDef {
+  id: string;
+  entityType: string;
+  name: string;
+  label: string;
+  fieldType: string;
+  options?: string[];
+  isRequired: boolean;
+  position: number;
+}
+
+export interface CustomFieldValue {
+  definitionId: string;
+  name: string;
+  label: string;
+  fieldType: string;
+  options?: string[];
+  isRequired: boolean;
+  valueId?: string;
+  value?: string;
+}
+
+export const getCustomFieldDefs    = (entityType?: string) => apiGet<CustomFieldDef[]>(`/custom-fields/definitions${entityType ? `?entityType=${entityType}` : ''}`);
+export const createCustomFieldDef  = (dto: Partial<CustomFieldDef>) => apiPost<CustomFieldDef>('/custom-fields/definitions', dto);
+export const updateCustomFieldDef  = (id: string, dto: Partial<CustomFieldDef>) => apiPatch<CustomFieldDef>(`/custom-fields/definitions/${id}`, dto);
+export const deleteCustomFieldDef  = (id: string) => apiDelete(`/custom-fields/definitions/${id}`);
+export const getCustomFieldValues  = (entityType: string, entityId: string) => apiGet<CustomFieldValue[]>(`/custom-fields/values/${entityType}/${entityId}`);
+export const setCustomFieldValues  = (entityType: string, entityId: string, values: { definitionId: string; value: string | null }[]) =>
+  apiPost(`/custom-fields/values/${entityType}/${entityId}`, { values });
 
 // ── Companies ─────────────────────────────────────────────────────────────────
 
@@ -449,12 +609,15 @@ export interface CallBot {
   phoneNumber?: string;
   language: string;
   voiceType: string;
+  ttsProvider: 'twilio_basic' | 'openai_tts' | 'elevenlabs';
+  ttsVoiceId?: string;
   provider: string;
   providerConfig: Record<string, any>;
   systemPrompt?: string;
   welcomeMessage?: string;
   fallbackMessage?: string;
   handoffKeyword: string;
+  inboxId?: string;
   queueIds: string[];
   maxCallDuration: number;
   totalCalls: number;
@@ -801,7 +964,7 @@ export const assignConversation = (data: { conversationId: string; queueId?: str
 export interface ChannelConnection {
   id: string;
   name: string;
-  channelType: 'whatsapp' | 'whatsapp_web' | 'facebook' | 'instagram' | 'telegram' | 'email' | 'webchat';
+  channelType: 'whatsapp' | 'whatsapp_web' | 'facebook' | 'instagram' | 'telegram' | 'sms' | 'email' | 'webchat';
   status: 'connected' | 'disconnected' | 'error' | 'pending';
   credentials: Record<string, string>;
   inboxId?: string;
@@ -834,6 +997,7 @@ export interface TenantSettings {
   settings: Record<string, any>;
   is_active: boolean;
   created_at: string;
+  allow_own_api_keys?: boolean;
 }
 
 export interface Announcement {
@@ -842,6 +1006,9 @@ export interface Announcement {
   body: string;
   type: 'info' | 'warning' | 'success' | 'urgent';
   is_active: boolean;
+  is_system?: boolean;
+  target_tenant_id?: string | null;
+  target_tenant_name?: string;
   expires_at?: string;
   author_name?: string;
   read_count: number;
@@ -860,7 +1027,9 @@ export const updatePlatformSettings = (data: Record<string, string>) =>
 
 export const getAnnouncements = () => apiGet<Announcement[]>('/settings/announcements');
 export const getUnreadAnnouncements = () => apiGet<Announcement[]>('/settings/announcements/unread');
-export const createAnnouncement = (data: Partial<Announcement>) => apiPost<Announcement>('/settings/announcements', data);
+export const getSystemAnnouncements = () => apiGet<Announcement[]>('/settings/system-announcements');
+export const createAnnouncement = (data: Partial<Announcement> & { isSystem?: boolean; targetTenantId?: string }) =>
+  apiPost<Announcement>('/settings/announcements', data);
 export const updateAnnouncement = (id: string, data: Partial<Announcement>) =>
   apiPatch<Announcement>(`/settings/announcements/${id}`, data);
 export const deleteAnnouncement = (id: string) => apiDelete(`/settings/announcements/${id}`);
@@ -885,6 +1054,7 @@ export interface Plan {
   max_call_bots: number;
   max_ai_chatbots: number;
   max_messages_month: number;
+  max_call_minutes: number;
   has_call_bots: boolean;
   has_ai_chatbots: boolean;
   has_automations: boolean;
@@ -892,11 +1062,16 @@ export interface Plan {
   has_reports: boolean;
   has_api_access: boolean;
   has_webhooks: boolean;
+  allow_own_api_keys: boolean;
+  allow_overage: boolean;
+  extra_message_price: number;
+  extra_call_minute_price: number;
   is_active: boolean;
   is_public: boolean;
   position: number;
   color: string;
   created_at: string;
+  stripe_price_id?: string;
 }
 
 export interface TenantWithPlan {
@@ -919,7 +1094,7 @@ export interface TenantWithPlan {
 
 export const getPlans           = () => apiGet<Plan[]>('/plans');
 export const getPublicPlans     = () => apiGet<Plan[]>('/plans/public');
-export const getCurrentPlan     = () => apiGet<{ tenant: any; usage: Record<string, number> }>('/plans/current');
+export const getCurrentPlan     = () => apiGet<{ tenant: any; usage: Record<string, number>; overage: Record<string, number> | null }>('/plans/current');
 export const createPlan         = (data: Partial<Plan>) => apiPost<Plan>('/plans', data);
 export const updatePlan         = (id: string, data: Partial<Plan>) => apiPatch<Plan>(`/plans/${id}`, data);
 export const deletePlan         = (id: string) => apiDelete(`/plans/${id}`);
@@ -928,6 +1103,84 @@ export const assignPlan         = (tenantId: string, planId: string, expiresAt?:
 export const getTenantsWithPlans = () => apiGet<TenantWithPlan[]>('/plans/tenants/all');
 export const updateTenantBilling = (id: string, data: Partial<TenantWithPlan>) =>
   apiPatch(`/plans/tenants/${id}`, data);
+
+// ── Billing / Stripe ──────────────────────────────────────────────────────────
+
+export interface BillingSubscription {
+  stripe_customer_id?: string;
+  stripe_subscription_id?: string;
+  stripe_subscription_status?: string;
+  plan_id?: string;
+  plan_name?: string;
+  plan_slug?: string;
+  plan_expires_at?: string;
+  billing_email?: string;
+  price?: number;
+  billing_period?: string;
+  color?: string;
+}
+
+export const getBillingSubscription = () =>
+  apiGet<BillingSubscription>('/billing/subscription');
+
+export const createCheckoutSession = (planId: string) =>
+  apiPost<{ url: string }>('/billing/checkout', { planId });
+
+export const createPortalSession = () =>
+  apiPost<{ url: string }>('/billing/portal', {});
+
+export const getBillingTransactions = (limit = 50) =>
+  apiGet<any[]>(`/billing/transactions?limit=${limit}`);
+
+// ── Stripe Connect ────────────────────────────────────────────────────────────
+
+export interface ConnectAccount {
+  id: string;
+  tenant_id: string;
+  provider: string;
+  account_id: string | null;
+  onboarding_complete: boolean;
+  charges_enabled: boolean;
+  payouts_enabled: boolean;
+  details_submitted: boolean;
+  country: string | null;
+  currency: string;
+  created_at: string;
+}
+
+export const getConnectAccount  = () =>
+  apiGet<ConnectAccount | null>('/billing/connect/account');
+
+export const createConnectOnboarding = () =>
+  apiPost<{ accountId: string; onboardingUrl: string | null; isNew: boolean; complete?: boolean }>(
+    '/billing/connect/onboard', {},
+  );
+
+export const syncConnectAccount = () =>
+  apiPost<{ chargesEnabled: boolean; payoutsEnabled: boolean; detailsSubmitted: boolean }>(
+    '/billing/connect/sync', {},
+  );
+
+// ── Backups ───────────────────────────────────────────────────────────────────
+
+export interface BackupLog {
+  id: string;
+  filename: string;
+  size_bytes: number | null;
+  storage: 'local' | 's3';
+  status: 'pending' | 'running' | 'success' | 'failed';
+  triggered_by: 'cron' | 'manual';
+  error_message?: string;
+  duration_ms?: number;
+  created_at: string;
+  completed_at?: string;
+}
+
+export const getBackups     = () => apiGet<BackupLog[]>('/backups');
+export const triggerBackup  = () => apiPost<{ id: string }>('/backups/trigger', {});
+export const deleteBackup   = (id: string) => apiDelete(`/backups/${id}`);
+export const backupDownloadUrl = (filename: string) =>
+  `${(typeof window !== 'undefined' ? '' : process.env.NEXT_PUBLIC_API_URL) || 'http://localhost:4000'}/backups/${encodeURIComponent(filename)}/download`;
 
 // ── Automations ───────────────────────────────────────────────────────────────
 
@@ -966,9 +1219,10 @@ export interface AutomationAction {
 
 export interface FlowStep {
   id: string;
-  type: 'message' | 'menu' | 'condition' | 'assign' | 'tag' | 'wait' | 'end' | 'input';
+  type: 'message' | 'menu' | 'condition' | 'assign' | 'tag' | 'wait' | 'end' | 'input'
+      | 'note' | 'create_deal' | 'close_conversation' | 'http_request';
   label?: string;
-  // message
+  // message / end
   text?: string;
   // menu
   options?: { label: string; nextStepId: string }[];
@@ -984,6 +1238,20 @@ export interface FlowStep {
   seconds?: number;
   // input
   saveAs?: string;
+  // note
+  noteText?: string;
+  // create_deal
+  dealTitle?: string;
+  dealStageId?: string;
+  dealValue?: number;
+  // close_conversation
+  farewellText?: string;
+  // http_request
+  httpMethod?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  httpUrl?: string;
+  httpHeaders?: string;
+  httpBody?: string;
+  httpSaveAs?: string;
   // navigation
   nextStepId?: string;
 }
@@ -1082,10 +1350,17 @@ export interface AiChatbot {
   memory_conversations: number;
   inbox_ids: string[];
   queue_ids: string[];
+  team_ids: string[];
   total_conversations: number;
   handoff_count: number;
   active_sessions?: number;
   sessions_today?: number;
+  respond_in_groups?: boolean;
+  webchat_enabled?: boolean;
+  webchat_color?: string;
+  webchat_title?: string;
+  webchat_subtitle?: string;
+  webchat_placeholder?: string;
   created_at: string;
   updated_at: string;
 }
@@ -1109,6 +1384,67 @@ export const duplicateAiChatbot = (id: string) => apiPost<AiChatbot>(`/ai-chatbo
 export const getAiChatbotSessions = (id: string) => apiGet<any[]>(`/ai-chatbots/${id}/sessions`);
 export const testAiChatbotMessage = (id: string, message: string) =>
   apiPost<{ reply: string | null; error?: string }>(`/ai-chatbots/${id}/test-message`, { message });
+
+// ── Knowledge Base ────────────────────────────────────────────────────────────
+
+export interface KnowledgeSource {
+  id: string;
+  type: 'url' | 'pdf';
+  url?: string;
+  file_name?: string;
+  title?: string;
+  status: 'pending' | 'indexing' | 'indexed' | 'error';
+  error_message?: string;
+  chunk_count: number;
+  last_synced_at?: string;
+  created_at: string;
+}
+
+export interface AllowedDomain {
+  id: string;
+  domain: string;
+  created_at: string;
+}
+
+export const getKnowledgeSources  = (botId: string) => apiGet<KnowledgeSource[]>(`/ai-chatbots/${botId}/knowledge-sources`);
+export const addKnowledgeUrl      = (botId: string, url: string) => apiPost<KnowledgeSource>(`/ai-chatbots/${botId}/knowledge-sources/url`, { url });
+export const reindexKnowledgeSource = (botId: string, sourceId: string) => apiPost<void>(`/ai-chatbots/${botId}/knowledge-sources/${sourceId}/reindex`, {});
+export const deleteKnowledgeSource  = (botId: string, sourceId: string) => apiDelete(`/ai-chatbots/${botId}/knowledge-sources/${sourceId}`);
+
+export const addKnowledgePdf = async (botId: string, file: File): Promise<KnowledgeSource> => {
+  const form = new FormData();
+  form.append('file', file);
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const res = await fetch(`${API_URL}/ai-chatbots/${botId}/knowledge-sources/pdf`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}`, 'x-tenant-id': localStorage.getItem('tenantId') ?? '' } : {},
+    body: form,
+  });
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message ?? 'Error uploading PDF'); }
+  return res.json();
+};
+
+export const getCallBotKnowledgeSources   = (botId: string) => apiGet<KnowledgeSource[]>(`/call-bots/${botId}/knowledge-sources`);
+export const addCallBotKnowledgeUrl       = (botId: string, url: string) => apiPost<KnowledgeSource>(`/call-bots/${botId}/knowledge-sources/url`, { url });
+export const reindexCallBotKnowledgeSource = (botId: string, sourceId: string) => apiPost<void>(`/call-bots/${botId}/knowledge-sources/${sourceId}/reindex`, {});
+export const deleteCallBotKnowledgeSource  = (botId: string, sourceId: string) => apiDelete(`/call-bots/${botId}/knowledge-sources/${sourceId}`);
+
+export const addCallBotKnowledgePdf = async (botId: string, file: File): Promise<KnowledgeSource> => {
+  const form = new FormData();
+  form.append('file', file);
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const res = await fetch(`${API_URL}/call-bots/${botId}/knowledge-sources/pdf`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}`, 'x-tenant-id': localStorage.getItem('tenantId') ?? '' } : {},
+    body: form,
+  });
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message ?? 'Error uploading PDF'); }
+  return res.json();
+};
+
+export const getAllowedDomains  = () => apiGet<AllowedDomain[]>('/knowledge-base/domains');
+export const addAllowedDomain   = (domain: string) => apiPost<AllowedDomain>('/knowledge-base/domains', { domain });
+export const removeAllowedDomain = (id: string) => apiDelete(`/knowledge-base/domains/${id}`);
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
@@ -1157,6 +1493,116 @@ export const cancelScheduledMessage = (conversationId: string, schedId: string) 
  * onEvent receives the parsed event data.
  * Returns the EventSource so the caller can close it.
  */
+// ── Help Center ───────────────────────────────────────────────────────────────
+
+export interface HelpCategory {
+  id: string;
+  name: string;
+  icon: string;
+  position: number;
+  createdAt: string;
+}
+
+export interface HelpArticle {
+  id: string;
+  categoryId: string | null;
+  title: string;
+  body: string | null;
+  videoUrl: string | null;
+  position: number;
+  isPublished: boolean;
+  createdAt: string;
+}
+
+export interface HelpCategoryTree extends HelpCategory {
+  articles: HelpArticle[];
+}
+
+export const getHelpTree       = () => apiGet<HelpCategoryTree[]>('/help/tree');
+export const getHelpCategories = () => apiGet<HelpCategory[]>('/help/categories');
+export const createHelpCategory = (data: Partial<HelpCategory>) =>
+  apiPost<HelpCategory>('/help/categories', data);
+export const updateHelpCategory = (id: string, data: Partial<HelpCategory>) =>
+  apiPatch<HelpCategory>(`/help/categories/${id}`, data);
+export const deleteHelpCategory = (id: string) => apiDelete(`/help/categories/${id}`);
+
+export const getHelpArticles   = (categoryId?: string) =>
+  apiGet<HelpArticle[]>(`/help/articles${categoryId ? `?categoryId=${categoryId}` : ''}`);
+export const getHelpArticle    = (id: string) => apiGet<HelpArticle>(`/help/articles/${id}`);
+export const createHelpArticle = (data: Partial<HelpArticle>) =>
+  apiPost<HelpArticle>('/help/articles', data);
+export const updateHelpArticle = (id: string, data: Partial<HelpArticle>) =>
+  apiPatch<HelpArticle>(`/help/articles/${id}`, data);
+export const deleteHelpArticle = (id: string) => apiDelete(`/help/articles/${id}`);
+
+// ── Admin: Tenant Management ──────────────────────────────────────────────────
+
+export interface TenantAdmin {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  isActive: boolean;
+  createdAt: string;
+  userCount: number;
+  contactCount: number;
+  aiMessagesMonth: number;
+  callSecondsMonth: number;
+  // linked plan
+  planId: string | null;
+  planName: string | null;
+  planColor: string | null;
+  planSlug: string | null;
+  planPrice: number | null;
+  planCurrency: string | null;
+  planBillingPeriod: string | null;
+  // billing
+  billingEmail: string | null;
+  billingNotes: string | null;
+  planExpiresAt: string | null;
+  trialEndsAt: string | null;
+}
+
+export interface TenantUser {
+  id: string;
+  fullName: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+  availability: string;
+  createdAt: string;
+}
+
+export const getAdminTenants = () => apiGet<TenantAdmin[]>('/auth/tenants');
+export const getAdminTenantUsers = (tenantId: string) => apiGet<TenantUser[]>(`/auth/tenants/${tenantId}/users`);
+export const createAdminTenant = (data: {
+  name: string; slug: string; plan?: string;
+  adminEmail: string; adminPassword: string; adminName?: string;
+}) => apiPost<TenantAdmin>('/auth/tenants', data);
+export const updateAdminTenant = (id: string, data: {
+  name?: string; plan?: string; isActive?: boolean;
+  planId?: string | null; billingEmail?: string; billingNotes?: string; planExpiresAt?: string | null;
+}) => apiPatch<{ ok: boolean }>(`/auth/tenants/${id}`, data);
+
+// ── Templates por industria ───────────────────────────────────────────────────
+
+export interface IndustryTemplate {
+  slug: string;
+  name: string;
+  description: string;
+  icon: string;
+  counts: { pipelines: number; tags: number; cannedResponses: number; queues: number };
+  pipelines: { name: string; stages: string[] }[];
+  tags: { name: string; color: string }[];
+  cannedResponses: { title: string; shortCode: string; category: string; content: string }[];
+  queues: { name: string; description: string }[];
+}
+
+export const getTemplates = () => apiGet<IndustryTemplate[]>('/templates');
+export const applyTemplate = (slug: string) => apiPost<{ applied: Record<string, number> }>(`/templates/${slug}/apply`, {});
+
+// ── Real-time SSE ─────────────────────────────────────────────────────────────
+
 export function openNotificationsStream(
   onEvent: (data: Record<string, any>) => void,
   onError?: (e: Event) => void,
@@ -1173,3 +1619,84 @@ export function openNotificationsStream(
   if (onError) es.onerror = onError;
   return es;
 }
+
+// ── Global Search ─────────────────────────────────────────────────────────────
+
+export interface SearchContact { id: string; full_name: string; email: string; phone: string; }
+export interface SearchConversation { id: string; subject: string; status: string; channel_type: string; contact_name: string; }
+export interface SearchDeal { id: string; title: string; value: number; currency: string; status: string; contact_name: string; }
+export interface SearchResults { contacts: SearchContact[]; conversations: SearchConversation[]; deals: SearchDeal[]; }
+
+export const globalSearch = (q: string) => apiGet<SearchResults>(`/search?q=${encodeURIComponent(q)}`);
+
+// ── Contact Timeline ──────────────────────────────────────────────────────────
+
+export interface TimelineConversation { id: string; status: string; channel_type: string; subject: string; created_at: string; last_message: string; }
+export interface TimelineDeal { id: string; title: string; value: number; currency: string; status: string; stage_name: string; created_at: string; }
+export interface TimelineTask { id: string; title: string; status: string; priority: string; due_date: string; created_at: string; }
+export interface ContactTimeline { conversations: TimelineConversation[]; deals: TimelineDeal[]; tasks: TimelineTask[]; }
+
+export const getContactTimeline = (contactId: string) =>
+  apiGet<ContactTimeline>(`/contacts/${contactId}/timeline`);
+
+// ── Content ───────────────────────────────────────────────────────────────────
+
+export interface ContentPost {
+  id: string;
+  tenantId: string;
+  title: string;
+  body?: string;
+  status: 'draft' | 'pending_review' | 'approved' | 'published';
+  channel: string;
+  tags: string[];
+  coverUrl?: string;
+  scheduledAt?: string;
+  publishedAt?: string;
+  authorId?: string;
+  authorName?: string;
+  assignedTo?: string;
+  assignedTeam?: string;
+  mediaUrl?: string;
+  mediaType?: string;
+  altText?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const getContentPosts = (params?: { status?: string; channel?: string }) => {
+  const q = new URLSearchParams();
+  if (params?.status)  q.set('status',  params.status);
+  if (params?.channel) q.set('channel', params.channel);
+  return apiGet<ContentPost[]>(`/content${q.toString() ? `?${q}` : ''}`);
+};
+
+export const getContentPost  = (id: string) => apiGet<ContentPost>(`/content/${id}`);
+
+export const createContentPost = (data: Partial<ContentPost>) =>
+  apiPost<ContentPost>('/content', data);
+
+export const updateContentPost = (id: string, data: Partial<ContentPost>) =>
+  apiPatch<ContentPost>(`/content/${id}`, data);
+
+export const deleteContentPost = (id: string) => apiDelete(`/content/${id}`);
+
+export const generateContentPost = (data: { title: string; channel: string; keywords?: string; tone?: string }) =>
+  apiPost<{ body: string }>('/content/generate', data);
+
+export const getContentPostSchedule = (id: string) =>
+  apiGet<{ scheduled: boolean; state?: string; runAt?: string | null }>(`/content/${id}/schedule`);
+
+export const uploadContentMedia = async (file: File): Promise<{ url: string; mediaType: string }> => {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_URL}/content/upload`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${localStorage.getItem('token') ?? ''}`,
+      'X-Tenant-ID': localStorage.getItem('tenantId') ?? '',
+    },
+    body: form,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};

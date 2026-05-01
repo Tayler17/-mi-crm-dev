@@ -56,7 +56,8 @@ export class ContactListsService {
        FROM contact_list_contacts clc
        JOIN contacts ct ON ct.id = clc.contact_id
        WHERE clc.list_id = $1
-       ORDER BY ct.full_name`,
+       ORDER BY ct.full_name
+       LIMIT 1000`,
       [listId],
     );
   }

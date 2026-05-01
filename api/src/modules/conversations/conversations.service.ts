@@ -94,6 +94,7 @@ export class ConversationsService extends BaseTenantService<Conversation> {
               c.subject, c.status, c.channel_type AS "channelType", c.assigned_to AS "assignedTo",
               c.connection_id AS "connectionId", c.external_id AS "externalId",
               c.queue_id AS "queueId", c.team_id AS "teamId", c.assigned_user_id AS "assignedUserId",
+              c.is_group AS "isGroup",
               c.created_at AS "createdAt", c.updated_at AS "updatedAt",
         json_build_object('id', ct.id, 'fullName', ct.full_name, 'email', ct.email, 'phone', ct.phone) AS contact,
         json_build_object('id', i.id, 'name', i.name, 'channelType', i.channel_type) AS inbox,
@@ -112,7 +113,8 @@ export class ConversationsService extends BaseTenantService<Conversation> {
        LEFT JOIN users u ON u.id = c.assigned_to
        WHERE c.tenant_id = $1
        ${where}
-       ORDER BY c.updated_at DESC`,
+       ORDER BY c.updated_at DESC
+       LIMIT 300`,
       params,
     );
     return rows;
@@ -121,6 +123,6 @@ export class ConversationsService extends BaseTenantService<Conversation> {
   findAllFiltered(tenantId: string, status?: string) {
     const where: any = { tenantId };
     if (status) where.status = status;
-    return this.convRepo.find({ where, order: { updatedAt: 'DESC' } });
+    return this.convRepo.find({ where, order: { updatedAt: 'DESC' }, take: 300 });
   }
 }

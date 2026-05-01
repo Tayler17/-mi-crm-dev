@@ -8,8 +8,11 @@ export class SettingsService {
 
   async getSettings(tenantId: string) {
     const rows = await this.db.query(
-      `SELECT id, name, slug, plan, is_active, logo_url, timezone, language, currency, settings, created_at
-       FROM tenants WHERE id = $1`,
+      `SELECT t.id, t.name, t.slug, t.plan, t.is_active, t.logo_url, t.timezone, t.language, t.currency, t.settings, t.created_at,
+              COALESCE(p.allow_own_api_keys, false) AS allow_own_api_keys
+       FROM tenants t
+       LEFT JOIN plans p ON p.id = t.plan_id
+       WHERE t.id = $1`,
       [tenantId],
     );
     return rows[0] ?? null;
@@ -36,10 +39,6 @@ export class SettingsService {
         values.push(JSON.stringify(rest));
       }
       if (aiKeys && typeof aiKeys === 'object') {
-        // Build a patch object of only the non-empty keys, then merge into settings->'aiKeys'
-        // using || so existing sibling keys are preserved.
-        // jsonb_set with a nested path fails when the intermediate key doesn't exist yet,
-        // so we merge the whole aiKeys object in one step instead.
         const aiKeysPatch: Record<string, string> = {};
         for (const [provider, key] of Object.entries(aiKeys)) {
           if (typeof key === 'string' && key) aiKeysPatch[provider] = key;
@@ -74,17 +73,40 @@ export class SettingsService {
        LEFT JOIN users u ON u.id = a.created_by
        LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id
        WHERE a.tenant_id = $1
+          OR (a.is_system = true AND (a.target_tenant_id IS NULL OR a.target_tenant_id = $1))
        GROUP BY a.id, u.full_name
-       ORDER BY a.created_at DESC`,
+       ORDER BY a.is_system DESC, a.created_at DESC`,
       [tenantId],
+    );
+  }
+
+  async getSystemAnnouncements() {
+    return this.db.query(
+      `SELECT a.*,
+              u.full_name AS author_name,
+              t.name AS target_tenant_name,
+              COUNT(ar.user_id)::int AS read_count
+       FROM announcements a
+       LEFT JOIN users u ON u.id = a.created_by
+       LEFT JOIN tenants t ON t.id = a.target_tenant_id
+       LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id
+       WHERE a.is_system = true
+       GROUP BY a.id, u.full_name, t.name
+       ORDER BY a.created_at DESC`,
     );
   }
 
   async createAnnouncement(dto: any, tenantId: string, userId: string) {
     const rows = await this.db.query(
-      `INSERT INTO announcements (tenant_id, title, body, type, expires_at, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [tenantId, dto.title, dto.body, dto.type ?? 'info', dto.expiresAt ?? null, userId],
+      `INSERT INTO announcements (tenant_id, title, body, type, expires_at, created_by, is_system, target_tenant_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [
+        tenantId,
+        dto.title, dto.body, dto.type ?? 'info',
+        dto.expiresAt ?? null, userId,
+        dto.isSystem ?? false,
+        dto.targetTenantId ?? null,
+      ],
     );
     return rows[0];
   }
@@ -98,7 +120,7 @@ export class SettingsService {
            expires_at = COALESCE($6, expires_at),
            is_active = COALESCE($7, is_active),
            updated_at = NOW()
-       WHERE id = $1 AND tenant_id = $2
+       WHERE id = $1 AND (tenant_id = $2 OR is_system = true)
        RETURNING *`,
       [id, tenantId, dto.title, dto.body, dto.type, dto.expiresAt, dto.isActive],
     );
@@ -106,7 +128,10 @@ export class SettingsService {
   }
 
   async deleteAnnouncement(id: string, tenantId: string) {
-    await this.db.query(`DELETE FROM announcements WHERE id = $1 AND tenant_id = $2`, [id, tenantId]);
+    await this.db.query(
+      `DELETE FROM announcements WHERE id = $1 AND (tenant_id = $2 OR is_system = true)`,
+      [id, tenantId],
+    );
   }
 
   async markAnnouncementRead(id: string, userId: string) {
@@ -120,7 +145,7 @@ export class SettingsService {
   async getUnreadAnnouncements(tenantId: string, userId: string) {
     return this.db.query(
       `SELECT a.* FROM announcements a
-       WHERE a.tenant_id = $1
+       WHERE (a.tenant_id = $1 OR (a.is_system = true AND (a.target_tenant_id IS NULL OR a.target_tenant_id = $1)))
          AND a.is_active = true
          AND (a.expires_at IS NULL OR a.expires_at > NOW())
          AND NOT EXISTS (

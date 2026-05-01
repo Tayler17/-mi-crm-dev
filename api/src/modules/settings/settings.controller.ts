@@ -12,17 +12,17 @@ export class SettingsController {
     private readonly platformSettings: PlatformSettingsService,
   ) {}
 
-  // ── Platform settings (operator only) ────────────────────────────────────────
+  // ── Platform settings (owner only) ───────────────────────────────────────────
 
   @Get('platform')
   async getPlatformSettings(@Request() req: any) {
-    if (req.user?.role !== 'admin') throw new ForbiddenException();
+    if (req.user?.role !== 'owner') throw new ForbiddenException();
     return this.platformSettings.getAll();
   }
 
   @Patch('platform')
   async updatePlatformSettings(@Body() dto: Record<string, string>, @Request() req: any) {
-    if (req.user?.role !== 'admin') throw new ForbiddenException();
+    if (req.user?.role !== 'owner') throw new ForbiddenException();
     await this.platformSettings.setMultiple(dto);
     return this.platformSettings.getAll();
   }
@@ -52,9 +52,20 @@ export class SettingsController {
     return this.svc.getUnreadAnnouncements(tenantId, userId);
   }
 
+  // Owner: list all system-level announcements (broadcasts)
+  @Get('system-announcements')
+  getSystemAnnouncements(@Request() req: any) {
+    if (req.user?.role !== 'owner') throw new ForbiddenException();
+    return this.svc.getSystemAnnouncements();
+  }
+
   @Post('announcements')
   createAnnouncement(@Body() dto: any, @TenantId() tenantId: string, @Request() req: any) {
     const userId = req.user?.sub ?? req.user?.id;
+    // Only owner can create system-level announcements
+    if (dto.isSystem && req.user?.role !== 'owner') {
+      throw new ForbiddenException('Solo el owner puede crear anuncios del sistema');
+    }
     return this.svc.createAnnouncement(dto, tenantId, userId);
   }
 

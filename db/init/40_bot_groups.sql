@@ -1,0 +1,2 @@
+ALTER TABLE ai_chatbots
+  ADD COLUMN IF NOT EXISTS respond_in_groups BOOLEAN NOT NULL DEFAULT false;

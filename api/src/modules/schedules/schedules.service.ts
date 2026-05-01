@@ -193,23 +193,38 @@ export class SchedulesService {
     return [];
   }
 
-  // Check if currently open (server-side, UTC-based)
   async checkStatus(id: string, tenantId: string) {
     const schedule = await this.findOne(id, tenantId);
     if (!schedule.isActive) return { open: false, reason: 'inactive' };
 
+    const tz = schedule.timezone || 'UTC';
     const now = new Date();
-    const dayOfWeek = now.getUTCDay(); // 0=Sun
+
+    // Convert current time to the schedule's timezone using Intl
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(now);
+
+    const DAY_MAP: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    const dayStr  = parts.find((p) => p.type === 'weekday')?.value ?? 'Sun';
+    const hourVal = parseInt(parts.find((p) => p.type === 'hour')?.value   ?? '0', 10);
+    const minVal  = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10);
+    const dayOfWeek = DAY_MAP[dayStr] ?? now.getUTCDay();
+    const nowMins   = (hourVal % 24) * 60 + minVal;
+
     const hours = schedule.hours?.find((h) => h.dayOfWeek === dayOfWeek);
     if (!hours || hours.isClosed) return { open: false, reason: 'closed_day', day: dayOfWeek };
 
-    const [oh, om] = (hours.openTime ?? '09:00').split(':').map(Number);
+    const [oh, om] = (hours.openTime  ?? '09:00').split(':').map(Number);
     const [ch, cm] = (hours.closeTime ?? '18:00').split(':').map(Number);
-    const nowMins = now.getUTCHours() * 60 + now.getUTCMinutes();
-    const openMins = oh * 60 + om;
+    const openMins  = oh * 60 + om;
     const closeMins = ch * 60 + cm;
     const open = nowMins >= openMins && nowMins < closeMins;
-    return { open, openTime: hours.openTime, closeTime: hours.closeTime, timezone: schedule.timezone };
+    return { open, openTime: hours.openTime, closeTime: hours.closeTime, timezone: tz };
   }
 
   private async saveHours(scheduleId: string, tenantId: string, hours: any[]) {

@@ -1,0 +1,67 @@
+{
+  "slug": "standard",
+  "name": "Standard",
+  "description": "Plantilla universal para cualquier tipo de negocio. Pipeline de ventas genérico, etiquetas y respuestas esenciales.",
+  "icon": "⭐",
+  "pipelines": [
+    {
+      "name": "Pipeline de Ventas",
+      "stages": ["Prospecto", "Calificado", "Propuesta enviada", "Negociación", "Ganado", "Perdido"]
+    },
+    {
+      "name": "Soporte al Cliente",
+      "stages": ["Nuevo", "En proceso", "Esperando respuesta", "Resuelto", "Cerrado"]
+    }
+  ],
+  "tags": [
+    { "name": "cliente-potencial", "color": "#3b82f6" },
+    { "name": "cliente-activo",    "color": "#22c55e" },
+    { "name": "prioritario",       "color": "#ef4444" },
+    { "name": "seguimiento",       "color": "#f59e0b" },
+    { "name": "inactivo",          "color": "#94a3b8" },
+    { "name": "referido",          "color": "#8b5cf6" }
+  ],
+  "cannedResponses": [
+    {
+      "title": "Saludo inicial",
+      "shortCode": "std-saludo",
+      "category": "General",
+      "content": "¡Hola {{contact.name}}! Gracias por contactarnos. ¿En qué podemos ayudarte hoy?"
+    },
+    {
+      "title": "Agradecimiento",
+      "shortCode": "std-gracias",
+      "category": "General",
+      "content": "Muchas gracias por tu mensaje, {{contact.name}}. Estamos revisando tu consulta y te responderemos a la brevedad."
+    },
+    {
+      "title": "Seguimiento",
+      "shortCode": "std-seguimiento",
+      "category": "Ventas",
+      "content": "Hola {{contact.name}}, te contactamos para hacer seguimiento a tu consulta. ¿Pudiste revisar la información que te enviamos? Quedamos atentos a tus preguntas."
+    },
+    {
+      "title": "Envío de propuesta",
+      "shortCode": "std-propuesta",
+      "category": "Ventas",
+      "content": "Hola {{contact.name}}, adjunto encontrarás nuestra propuesta personalizada. Estaremos felices de resolver cualquier duda. ¿Tienes disponibilidad para una llamada esta semana?"
+    },
+    {
+      "title": "Cierre y despedida",
+      "shortCode": "std-despedida",
+      "category": "General",
+      "content": "Ha sido un placer atenderte, {{contact.name}}. Si necesitas algo más, no dudes en escribirnos. ¡Que tengas un excelente día!"
+    },
+    {
+      "title": "Fuera de horario",
+      "shortCode": "std-horario",
+      "category": "General",
+      "content": "Hola {{contact.name}}, en este momento estamos fuera de nuestro horario de atención. Te responderemos el próximo día hábil. ¡Gracias por tu paciencia!"
+    }
+  ],
+  "queues": [
+    { "name": "Ventas",   "description": "Consultas de nuevos prospectos y clientes" },
+    { "name": "Soporte",  "description": "Atención post-venta y resolución de problemas" },
+    { "name": "General",  "description": "Consultas generales y otros temas" }
+  ]
+}

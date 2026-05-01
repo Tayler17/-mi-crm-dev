@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, UseGuards, Request, UploadedFile, UseInterceptors, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, UseGuards, Request, UploadedFile, UseInterceptors, UsePipes, ValidationPipe, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
@@ -39,7 +39,7 @@ export class MessagesController {
     const msg = await this.service.create(cid, dto, tenantId, req.user.id);
 
     // Deliver through the conversation's actual channel (WA Web, Telegram, etc.)
-    await this.deliverOutbound(cid, tenantId, dto.body ?? '', dto.contentType);
+    await this.deliverOutbound(cid, tenantId, dto.body ?? '', dto.contentType, msg.id);
 
     this.notifications.emit({
       tenantId,
@@ -62,13 +62,49 @@ export class MessagesController {
   }
 
   @Post('notes')
-  sendNote(
+  async sendNote(
     @Param('conversationId') cid: string,
     @Body() dto: CreateNoteDto,
     @TenantId() tenantId: string,
     @Request() req: any,
   ) {
-    return this.service.createNote(cid, dto, tenantId, req.user.id);
+    const note = await this.service.createNote(cid, dto, tenantId, req.user.id);
+
+    // Emit note_created so inbox SSE appends it in real-time for other agents
+    this.notifications.emit({
+      tenantId, type: 'note_created',
+      payload: { conversationId: cid, note },
+    });
+
+    // Parse @mentions and notify each mentioned agent
+    const handles = [...new Set((dto.body ?? '').match(/@([\w.]+)/g) ?? [])];
+    if (handles.length) {
+      const placeholders = handles.map((_, i) => `$${i + 2}`).join(',');
+      const names = handles.map((h) => h.slice(1).toLowerCase());
+      const users = await this.db.query(
+        `SELECT id, full_name FROM users
+         WHERE tenant_id = $1 AND LOWER(REPLACE(full_name,' ','')) = ANY(ARRAY[${placeholders}])`,
+        [tenantId, ...names],
+      ).catch(() => []);
+      const [author] = await this.db.query(
+        `SELECT full_name FROM users WHERE id=$1 LIMIT 1`, [req.user.id],
+      ).catch(() => []);
+      for (const u of users) {
+        if (u.id === req.user.id) continue; // don't self-notify
+        this.notifications.emit({
+          tenantId, type: 'mention_created',
+          payload: {
+            conversationId: cid,
+            noteId: note.id,
+            mentionedUserId: u.id,
+            mentionedBy: author?.full_name ?? 'Alguien',
+            body: dto.body?.slice(0, 120) ?? '',
+          },
+        });
+      }
+    }
+
+    return note;
   }
 
   // ── Scheduled messages ────────────────────────────────────────────────────
@@ -116,6 +152,13 @@ export class MessagesController {
         cb(null, `${unique}${extname(file.originalname)}`);
       },
     }),
+    fileFilter: (_req, file, cb) => {
+      const allowed = /\.(jpg|jpeg|png|gif|webp|pdf|mp3|ogg|wav|m4a|opus|mp4|mov|avi|webm|txt|csv|xlsx|xls|doc|docx|zip)$/i;
+      if (!allowed.test(file.originalname)) {
+        return cb(new BadRequestException('Tipo de archivo no permitido'), false);
+      }
+      cb(null, true);
+    },
     limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB
   }))
   async uploadFile(
@@ -163,7 +206,7 @@ export class MessagesController {
 
   // ── Channel delivery ──────────────────────────────────────────────────────
 
-  private async deliverOutbound(conversationId: string, tenantId: string, text: string, contentType = 'text') {
+  private async deliverOutbound(conversationId: string, tenantId: string, text: string, contentType = 'text', messageId?: string) {
     if (!text) return;
     try {
       const [conv] = await this.db.query(
@@ -176,7 +219,7 @@ export class MessagesController {
       );
       if (!conv) return;
 
-      const channelType = conv.channel_type ?? conv.conn_channel_type;
+      const channelType = conv.conn_channel_type ?? conv.channel_type;
 
       switch (channelType) {
 
@@ -184,19 +227,23 @@ export class MessagesController {
           const remoteJid    = conv.external_id;
           const connectionId = conv.connection_id;
           if (!remoteJid || !connectionId) return;
-          let sent = false;
+          let waId: string | false = false;
           if (contentType === 'image' || contentType === 'audio' || contentType === 'video' || contentType === 'file') {
-            // Deliver file — body is "/uploads/filename.ext|originalname"
             const [fileUrl] = text.split('|');
-            sent = await this.waSvc.sendFile(connectionId, remoteJid, fileUrl, contentType);
+            waId = await this.waSvc.sendFile(connectionId, remoteJid, fileUrl, contentType);
           } else {
-            sent = await this.waSvc.sendMessage(connectionId, remoteJid, text);
+            waId = await this.waSvc.sendMessage(connectionId, remoteJid, text);
           }
-          if (!sent) {
+          if (!waId) {
             await this.db.query(
               `INSERT INTO messages (tenant_id, conversation_id, body, content_type, direction, sender_type, is_private, created_at, updated_at)
                VALUES ($1,$2,'⚠ No se pudo entregar: sesión de WhatsApp Web desconectada','text','outbound','system',true,NOW(),NOW())`,
               [tenantId, conversationId],
+            ).catch(() => {});
+          } else if (messageId && typeof waId === 'string') {
+            await this.db.query(
+              `UPDATE messages SET external_id=$1 WHERE id=$2`,
+              [waId, messageId],
             ).catch(() => {});
           }
           break;
@@ -234,6 +281,24 @@ export class MessagesController {
                 messaging_product: 'whatsapp', to: toPhone,
                 type: 'text', text: { body: text },
               }),
+              signal: AbortSignal.timeout(8000),
+            },
+          ).catch(() => {});
+          break;
+        }
+
+        case 'facebook':
+        case 'instagram': {
+          const creds = conv.credentials ?? {};
+          const recipientId = conv.external_id;
+          const token = creds.accessToken;
+          if (!recipientId || !token) return;
+          await (globalThis as any).fetch(
+            `https://graph.facebook.com/v19.0/me/messages?access_token=${token}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ recipient: { id: recipientId }, message: { text } }),
               signal: AbortSignal.timeout(8000),
             },
           ).catch(() => {});

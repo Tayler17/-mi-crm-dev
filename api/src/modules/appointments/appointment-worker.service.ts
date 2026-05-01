@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { WhatsappWebService } from '../connections/whatsapp-web.service';
 
 /**
  * Polls every 60 s for pending appointments whose scheduled_at has passed.
@@ -16,7 +17,10 @@ export class AppointmentWorkerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AppointmentWorkerService.name);
   private timer: NodeJS.Timeout | null = null;
 
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly waSvc: WhatsappWebService,
+  ) {}
 
   onModuleInit() {
     this.dispatch();
@@ -73,6 +77,38 @@ export class AppointmentWorkerService implements OnModuleInit, OnModuleDestroy {
       .replace(/\{Fecha\}/gi,         fecha)
       .replace(/\{Hora\}/gi,          hora);
 
+    // Resolve WhatsApp connection from inbox
+    let connectionId: string | null = null;
+    let channelType: string | null = null;
+    let externalId: string | null = null;
+
+    if (appt.inbox_id) {
+      const [inboxInfo] = await this.db.query(
+        `SELECT i.channel_type, cc.id AS connection_id
+         FROM inboxes i
+         LEFT JOIN channel_connections cc ON cc.inbox_id = i.id AND cc.status = 'connected'
+         WHERE i.id = $1 LIMIT 1`,
+        [appt.inbox_id],
+      );
+      if (inboxInfo) {
+        channelType  = inboxInfo.channel_type;
+        connectionId = inboxInfo.connection_id ?? null;
+      }
+    }
+
+    // Build destination JID from contact phone
+    if (phone) {
+      if (phone.startsWith('lid:')) {
+        const lidDigits = phone.slice(4);
+        const resolved  = connectionId ? this.waSvc.resolveLid(connectionId, lidDigits) : null;
+        // Use real phone if resolved; otherwise route via LID JID directly (WhatsApp servers accept it)
+        externalId = resolved ? `${resolved}@s.whatsapp.net` : `${lidDigits}@lid`;
+      } else {
+        const digits = phone.replace(/\D/g, '');
+        externalId = digits ? `${digits}@s.whatsapp.net` : null;
+      }
+    }
+
     // Find or create conversation
     let conversationId: string;
     const [existing] = await this.db.query(
@@ -107,6 +143,12 @@ export class AppointmentWorkerService implements OnModuleInit, OnModuleDestroy {
         `UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1`,
         [conversationId],
       );
+
+      // Deliver via WhatsApp Web when session is active
+      if (channelType === 'whatsapp_web' && connectionId && externalId) {
+        const sent = await this.waSvc.sendMessage(connectionId, externalId, body);
+        if (!sent) this.logger.warn(`Appointment ${appt.id}: WA delivery failed to ${externalId}`);
+      }
     }
 
     // If openTicket enabled, ensure conversation is open

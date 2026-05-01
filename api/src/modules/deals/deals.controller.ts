@@ -36,7 +36,7 @@ export class DealsController {
 
   @Get(':id/detail')
   async getDealDetail(@Param('id') id: string, @TenantId() tenantId: string) {
-    const [deal, tasks, notes, conversations, activities] = await Promise.all([
+    const [deal, tasks, notes, conversations, activities, calls] = await Promise.all([
       this.db.query(
         `SELECT d.*,
            ps.name AS stage_name, p.name AS pipeline_name, p.id AS pipeline_id,
@@ -91,8 +91,17 @@ export class DealsController {
          ORDER BY al.created_at DESC LIMIT 30`,
         [id, tenantId],
       ),
+      this.db.query(
+        `SELECT cl.*, cb.name AS bot_name
+         FROM call_logs cl
+         LEFT JOIN call_bots cb ON cb.id = cl.bot_id
+         WHERE cl.contact_id = (SELECT contact_id FROM deals WHERE id = $1)
+           AND cl.tenant_id = $2
+         ORDER BY cl.started_at DESC LIMIT 30`,
+        [id, tenantId],
+      ),
     ]);
-    return { deal: deal[0], tasks, notes, conversations, activities };
+    return { deal: deal[0], tasks, notes, conversations, activities, calls };
   }
 
   @Patch(':id')

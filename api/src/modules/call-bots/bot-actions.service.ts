@@ -37,21 +37,21 @@ export class BotActionsService {
     return contact ?? null;
   }
 
-  /** Returns pipeline stages (default pipeline) and available tags for context injection. */
+  /** Returns pipeline stages (all pipelines, default first) and available tags for context injection. */
   async getContext(tenantId: string): Promise<{ stages: Array<{ id: string; name: string }>; tags: Array<{ id: string; name: string }> }> {
     const [stages, tags] = await Promise.all([
       this.db
         .query(
-          `SELECT ps.id, ps.name
+          `SELECT ps.id, ps.name, p.name AS pipeline_name
            FROM pipeline_stages ps
            JOIN pipelines p ON p.id = ps.pipeline_id
-           WHERE p.tenant_id = $1 AND p.is_default = true
-           ORDER BY ps.position`,
+           WHERE p.tenant_id = $1
+           ORDER BY p.is_default DESC, p.created_at, ps.position`,
           [tenantId],
         )
         .catch(() => []),
       this.db
-        .query(`SELECT id, name FROM tags ORDER BY name LIMIT 50`)
+        .query(`SELECT id, name FROM tags WHERE tenant_id = $1 ORDER BY name LIMIT 50`, [tenantId])
         .catch(() => []),
     ]);
     return { stages, tags };
@@ -106,13 +106,13 @@ export class BotActionsService {
     tagName: string,
   ): Promise<{ success: boolean; message: string }> {
     let [tag] = await this.db
-      .query(`SELECT id FROM tags WHERE LOWER(name) = LOWER($1) LIMIT 1`, [tagName])
+      .query(`SELECT id FROM tags WHERE tenant_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`, [tenantId, tagName])
       .catch(() => [null]);
 
     if (!tag) {
       [tag] = await this.db.query(
-        `INSERT INTO tags (name, created_at, updated_at) VALUES ($1, NOW(), NOW()) RETURNING id`,
-        [tagName],
+        `INSERT INTO tags (tenant_id, name, created_at, updated_at) VALUES ($1, $2, NOW(), NOW()) RETURNING id`,
+        [tenantId, tagName],
       ).catch(() => [null]);
     }
 
@@ -153,8 +153,10 @@ export class BotActionsService {
     toolName: string,
     args: Record<string, any>,
   ): Promise<string> {
-    if (!contactId && toolName !== 'update_deal') {
-      return JSON.stringify({ success: false, message: 'No se encontró el contacto en el sistema.' });
+    // For contact-scoped actions without a known contact, skip gracefully
+    if (!contactId && !['update_deal'].includes(toolName)) {
+      this.logger.warn(`[bot-action] ${toolName} skipped — no contactId for tenant ${tenantId}`);
+      return JSON.stringify({ success: false, message: 'Contacto no registrado en el sistema. Acción no guardada.' });
     }
 
     try {

@@ -101,10 +101,10 @@ export class ReportsController {
       this.db.query(
         `SELECT
            COUNT(*)::int AS total,
-           COUNT(*) FILTER (WHERE status = 'active')::int AS active,
+           COUNT(*) FILTER (WHERE status NOT IN ('won','lost'))::int AS active,
            COUNT(*) FILTER (WHERE status = 'won')::int AS won,
            COUNT(*) FILTER (WHERE status = 'lost')::int AS lost,
-           COALESCE(SUM(value) FILTER (WHERE status = 'active'), 0)::numeric AS pipeline_value,
+           COALESCE(SUM(value) FILTER (WHERE status NOT IN ('won','lost')), 0)::numeric AS pipeline_value,
            COALESCE(SUM(value) FILTER (WHERE status = 'won'), 0)::numeric AS won_value,
            COALESCE(SUM(value) FILTER (WHERE status = 'lost'), 0)::numeric AS lost_value,
            ROUND(
@@ -119,7 +119,7 @@ export class ReportsController {
                 COUNT(d.id)::int AS count,
                 COALESCE(SUM(d.value), 0)::numeric AS value
          FROM pipeline_stages ps
-         LEFT JOIN deals d ON d.stage_id = ps.id AND d.tenant_id = $1 AND d.status = 'active'
+         LEFT JOIN deals d ON d.stage_id = ps.id AND d.tenant_id = $1 AND d.status NOT IN ('won','lost')
          JOIN pipelines p ON p.id = ps.pipeline_id AND p.tenant_id = $1
          GROUP BY ps.id, ps.name, ps.position ORDER BY ps.position`,
         [tenantId],
@@ -202,6 +202,73 @@ export class ReportsController {
     return { teamStats, queueStats, agentLoad };
   }
 
+  // ── Call bots report ─────────────────────────────────────────────────────────
+
+  @Get('calls')
+  async calls(
+    @TenantId() tenantId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    const f = from || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const t = to || new Date().toISOString().slice(0, 10);
+
+    const [summary, byDay, byBot, byOutcome, avgDuration] = await Promise.all([
+      this.db.query(
+        `SELECT
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE direction = 'inbound')::int AS inbound,
+           COUNT(*) FILTER (WHERE direction = 'outbound')::int AS outbound,
+           COUNT(*) FILTER (WHERE outcome = 'handled')::int AS handled,
+           COUNT(*) FILTER (WHERE outcome = 'abandoned')::int AS abandoned,
+           COUNT(*) FILTER (WHERE outcome = 'failed')::int AS failed,
+           COALESCE(ROUND(AVG(duration)::numeric, 0), 0)::int AS avg_duration_secs,
+           COALESCE(SUM(duration), 0)::int AS total_duration_secs
+         FROM call_logs
+         WHERE tenant_id = $1 AND started_at::date BETWEEN $2 AND $3`,
+        [tenantId, f, t],
+      ),
+      this.db.query(
+        `SELECT TO_CHAR(started_at::date, 'DD/MM') AS day,
+                COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE outcome = 'handled')::int AS handled
+         FROM call_logs
+         WHERE tenant_id = $1 AND started_at::date BETWEEN $2 AND $3
+         GROUP BY started_at::date ORDER BY started_at::date`,
+        [tenantId, f, t],
+      ),
+      this.db.query(
+        `SELECT cb.name AS bot,
+                COUNT(cl.id)::int AS total,
+                COUNT(cl.id) FILTER (WHERE cl.outcome = 'handled')::int AS handled,
+                COALESCE(ROUND(AVG(cl.duration)::numeric, 0), 0)::int AS avg_duration
+         FROM call_logs cl
+         JOIN call_bots cb ON cb.id = cl.bot_id
+         WHERE cl.tenant_id = $1 AND cl.started_at::date BETWEEN $2 AND $3
+         GROUP BY cb.id, cb.name ORDER BY total DESC LIMIT 10`,
+        [tenantId, f, t],
+      ),
+      this.db.query(
+        `SELECT outcome, COUNT(*)::int AS count
+         FROM call_logs
+         WHERE tenant_id = $1 AND started_at::date BETWEEN $2 AND $3
+         GROUP BY outcome`,
+        [tenantId, f, t],
+      ),
+      this.db.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE duration < 60)::int AS under_1min,
+           COUNT(*) FILTER (WHERE duration BETWEEN 60 AND 300)::int AS one_to_5min,
+           COUNT(*) FILTER (WHERE duration > 300)::int AS over_5min
+         FROM call_logs
+         WHERE tenant_id = $1 AND started_at::date BETWEEN $2 AND $3`,
+        [tenantId, f, t],
+      ),
+    ]);
+
+    return { summary: summary[0], byDay, byBot, byOutcome, avgDuration: avgDuration[0], range: { from: f, to: t } };
+  }
+
   // ── Contacts report ───────────────────────────────────────────────────────────
 
   @Get('contacts')
@@ -239,5 +306,104 @@ export class ReportsController {
     ]);
 
     return { summary: summary[0], byDay, topTags, range: { from: f, to: t } };
+  }
+
+  // ── SLA report ────────────────────────────────────────────────────────────────
+
+  @Get('sla')
+  async sla(
+    @TenantId() tenantId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    const f = from || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const t = to || new Date().toISOString().slice(0, 10);
+
+    // First response time = elapsed seconds between conv.created_at and first agent outbound message
+    // Resolution time     = elapsed seconds between conv.created_at and when resolved (updated_at when status='resolved')
+    const [summary, byDay, byAgent, worst] = await Promise.all([
+      this.db.query(
+        `WITH frt AS (
+           SELECT c.id,
+                  EXTRACT(EPOCH FROM (MIN(m.created_at) - c.created_at)) AS first_response_secs,
+                  CASE WHEN c.status = 'resolved'
+                       THEN EXTRACT(EPOCH FROM (c.updated_at - c.created_at))
+                       ELSE NULL END AS resolution_secs
+           FROM conversations c
+           JOIN messages m ON m.conversation_id = c.id
+                           AND m.direction = 'outbound'
+                           AND m.sender_type = 'agent'
+           WHERE c.tenant_id = $1
+             AND c.created_at::date BETWEEN $2 AND $3
+           GROUP BY c.id, c.status, c.updated_at, c.created_at
+         )
+         SELECT
+           COUNT(*)::int                                              AS total,
+           ROUND(AVG(first_response_secs))::int                      AS avg_first_response_secs,
+           ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY first_response_secs))::int AS median_first_response_secs,
+           ROUND(AVG(resolution_secs))::int                          AS avg_resolution_secs,
+           COUNT(*) FILTER (WHERE first_response_secs <= 300)::int   AS within_5min,
+           COUNT(*) FILTER (WHERE first_response_secs <= 3600)::int  AS within_1h,
+           COUNT(*) FILTER (WHERE first_response_secs IS NOT NULL)::int AS with_response
+         FROM frt`,
+        [tenantId, f, t],
+      ),
+      this.db.query(
+        `WITH frt AS (
+           SELECT c.id, c.created_at::date AS day,
+                  EXTRACT(EPOCH FROM (MIN(m.created_at) - c.created_at)) AS first_response_secs
+           FROM conversations c
+           JOIN messages m ON m.conversation_id = c.id
+                           AND m.direction = 'outbound'
+                           AND m.sender_type = 'agent'
+           WHERE c.tenant_id = $1
+             AND c.created_at::date BETWEEN $2 AND $3
+           GROUP BY c.id, c.created_at::date
+         )
+         SELECT TO_CHAR(day, 'DD/MM') AS day,
+                ROUND(AVG(first_response_secs))::int AS avg_secs,
+                COUNT(*)::int AS conversations
+         FROM frt GROUP BY day ORDER BY day`,
+        [tenantId, f, t],
+      ),
+      this.db.query(
+        `WITH frt AS (
+           SELECT m.sender_id,
+                  EXTRACT(EPOCH FROM (MIN(m.created_at) - c.created_at)) AS first_response_secs
+           FROM conversations c
+           JOIN messages m ON m.conversation_id = c.id
+                           AND m.direction = 'outbound'
+                           AND m.sender_type = 'agent'
+           WHERE c.tenant_id = $1
+             AND c.created_at::date BETWEEN $2 AND $3
+           GROUP BY c.id, m.sender_id, c.created_at
+         )
+         SELECT u.full_name AS agent,
+                ROUND(AVG(frt.first_response_secs))::int AS avg_secs,
+                COUNT(*)::int AS conversations
+         FROM frt
+         JOIN users u ON u.id = frt.sender_id
+         GROUP BY u.full_name ORDER BY avg_secs LIMIT 10`,
+        [tenantId, f, t],
+      ),
+      this.db.query(
+        `WITH frt AS (
+           SELECT c.id, c.subject, ct.full_name AS contact_name,
+                  EXTRACT(EPOCH FROM (MIN(m.created_at) - c.created_at)) AS first_response_secs
+           FROM conversations c
+           JOIN messages m ON m.conversation_id = c.id
+                           AND m.direction = 'outbound'
+                           AND m.sender_type = 'agent'
+           LEFT JOIN contacts ct ON ct.id = c.contact_id
+           WHERE c.tenant_id = $1
+             AND c.created_at::date BETWEEN $2 AND $3
+           GROUP BY c.id, c.subject, ct.full_name, c.created_at
+         )
+         SELECT * FROM frt ORDER BY first_response_secs DESC LIMIT 10`,
+        [tenantId, f, t],
+      ),
+    ]);
+
+    return { summary: summary[0], byDay, byAgent, worst, range: { from: f, to: t } };
   }
 }

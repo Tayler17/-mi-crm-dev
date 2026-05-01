@@ -1,13 +1,19 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Request, Req } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { CallBotsService } from './call-bots.service';
 import { CreateCallBotDto, UpdateCallBotDto } from './dto/call-bot.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantId } from '../../common/decorators/tenant.decorator';
+import { checkPlanLimit } from '../../common/utils/limits';
 
 @Controller('call-bots')
 @UseGuards(JwtAuthGuard)
 export class CallBotsController {
-  constructor(private readonly svc: CallBotsService) {}
+  constructor(
+    private readonly svc: CallBotsService,
+    @InjectDataSource() private readonly db: DataSource,
+  ) {}
 
   @Get('stats')
   getStats(@TenantId() tenantId: string) {
@@ -34,7 +40,8 @@ export class CallBotsController {
   }
 
   @Post()
-  create(@Body() dto: CreateCallBotDto, @TenantId() tenantId: string, @Request() req: any) {
+  async create(@Body() dto: CreateCallBotDto, @TenantId() tenantId: string, @Request() req: any) {
+    await checkPlanLimit(this.db, tenantId, 'call_bots');
     return this.svc.create(dto, tenantId, req.user?.id);
   }
 
@@ -51,6 +58,18 @@ export class CallBotsController {
   @Post(':id/toggle')
   toggle(@Param('id') id: string, @TenantId() tenantId: string) {
     return this.svc.toggleStatus(id, tenantId);
+  }
+
+  @Get(':id/webhook-info')
+  getWebhookInfo(@Param('id') id: string, @Req() req: any) {
+    const baseUrl = process.env.TWILIO_WEBHOOK_BASE_URL
+      ?? `${req.headers['x-forwarded-proto'] ?? req.protocol ?? 'https'}://${req.headers['x-forwarded-host'] ?? req.headers['host'] ?? req.get('host')}`;
+    return {
+      voiceUrl:      `${baseUrl}/call-bots/twilio/${id}/voice`,
+      statusCallback:`${baseUrl}/call-bots/twilio/${id}/status`,
+      method: 'HTTP POST',
+      note: 'Configura voiceUrl en Twilio Console → Phone Numbers → tu número → Voice & Fax → "A call comes in"',
+    };
   }
 
   @Post(':id/call')

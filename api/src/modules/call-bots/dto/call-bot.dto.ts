@@ -1,111 +1,104 @@
 import { IsString, IsNotEmpty, IsOptional, IsEnum, IsInt, Min, Max, IsObject, IsArray, IsUUID } from 'class-validator';
 
 export class CreateCallBotDto {
-  @IsString()
-  @IsNotEmpty()
+  @IsString() @IsNotEmpty()
   name: string;
 
-  @IsString()
-  @IsOptional()
+  @IsString() @IsOptional()
   phoneNumber?: string;
 
-  @IsString()
-  @IsOptional()
+  @IsString() @IsOptional()
   language?: string;
 
-  @IsEnum(['neutral', 'female', 'male'])
-  @IsOptional()
+  @IsEnum(['neutral', 'female', 'male']) @IsOptional()
   voiceType?: string;
 
-  @IsEnum(['twilio', 'vonage', 'telnyx'])
-  @IsOptional()
+  @IsEnum(['twilio', 'vonage', 'telnyx']) @IsOptional()
   provider?: string;
 
-  @IsObject()
-  @IsOptional()
+  @IsObject() @IsOptional()
   providerConfig?: Record<string, any>;
 
-  @IsString()
-  @IsOptional()
+  @IsString() @IsOptional()
   systemPrompt?: string;
 
-  @IsString()
-  @IsOptional()
+  @IsString() @IsOptional()
   welcomeMessage?: string;
 
-  @IsString()
-  @IsOptional()
+  @IsString() @IsOptional()
   fallbackMessage?: string;
 
-  @IsString()
-  @IsOptional()
+  @IsString() @IsOptional()
   handoffKeyword?: string;
 
-  @IsInt()
-  @Min(30)
-  @Max(3600)
-  @IsOptional()
+  @IsInt() @Min(30) @Max(3600) @IsOptional()
   maxCallDuration?: number;
 
-  @IsArray()
-  @IsUUID('4', { each: true })
-  @IsOptional()
+  @IsUUID('4') @IsOptional()
+  inboxId?: string;
+
+  @IsArray() @IsUUID('4', { each: true }) @IsOptional()
   queueIds?: string[];
+
+  @IsEnum(['twilio_basic', 'openai_tts', 'elevenlabs']) @IsOptional()
+  ttsProvider?: string;
+
+  @IsString() @IsOptional()
+  ttsVoiceId?: string;
+
+  @IsString() @IsOptional()
+  transferToNumber?: string;
 }
 
 export class UpdateCallBotDto {
-  @IsString()
-  @IsOptional()
+  @IsString() @IsOptional()
   name?: string;
 
-  @IsEnum(['active', 'inactive', 'draft'])
-  @IsOptional()
+  @IsEnum(['active', 'inactive', 'draft']) @IsOptional()
   status?: string;
 
-  @IsString()
-  @IsOptional()
+  @IsString() @IsOptional()
   phoneNumber?: string;
 
-  @IsString()
-  @IsOptional()
+  @IsString() @IsOptional()
   language?: string;
 
-  @IsEnum(['neutral', 'female', 'male'])
-  @IsOptional()
+  @IsEnum(['neutral', 'female', 'male']) @IsOptional()
   voiceType?: string;
 
-  @IsEnum(['twilio', 'vonage', 'telnyx'])
-  @IsOptional()
+  @IsEnum(['twilio', 'vonage', 'telnyx']) @IsOptional()
   provider?: string;
 
-  @IsObject()
-  @IsOptional()
+  @IsObject() @IsOptional()
   providerConfig?: Record<string, any>;
 
-  @IsString()
-  @IsOptional()
+  @IsString() @IsOptional()
   systemPrompt?: string;
 
-  @IsString()
-  @IsOptional()
+  @IsString() @IsOptional()
   welcomeMessage?: string;
 
-  @IsString()
-  @IsOptional()
+  @IsString() @IsOptional()
   fallbackMessage?: string;
 
-  @IsString()
-  @IsOptional()
+  @IsString() @IsOptional()
   handoffKeyword?: string;
 
-  @IsInt()
-  @Min(30)
-  @Max(3600)
-  @IsOptional()
+  @IsInt() @Min(30) @Max(3600) @IsOptional()
   maxCallDuration?: number;
 
-  @IsArray()
-  @IsUUID('4', { each: true })
-  @IsOptional()
+  @IsUUID('4') @IsOptional()
+  inboxId?: string;
+
+  @IsArray() @IsUUID('4', { each: true }) @IsOptional()
   queueIds?: string[];
+
+  @IsEnum(['twilio_basic', 'openai_tts', 'elevenlabs']) @IsOptional()
+  ttsProvider?: string;
+
+  @IsString() @IsOptional()
+  ttsVoiceId?: string;
+
+  @IsString() @IsOptional()
+  transferToNumber?: string;
 }

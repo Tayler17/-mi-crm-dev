@@ -6,6 +6,8 @@ import {
   getTeamMembers, getAvailableUsersForTeam, addTeamMember, removeTeamMember,
   Team, TeamMember,
 } from '@/lib/api';
+import { useLangCtx } from '@/lib/lang-context';
+import { APP } from '@/lib/i18n/app';
 
 const COLORS = ['#6366f1', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
 
@@ -16,6 +18,8 @@ function TeamModal({ team, onSave, onClose }: {
   onSave: (data: { name: string; description: string; color: string }) => Promise<void>;
   onClose: () => void;
 }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [name, setName] = useState(team?.name ?? '');
   const [description, setDescription] = useState(team?.description ?? '');
   const [color, setColor] = useState(team?.color ?? '#6366f1');
@@ -24,10 +28,10 @@ function TeamModal({ team, onSave, onClose }: {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) { setError('El nombre es requerido'); return; }
+    if (!name.trim()) { setError(i.nameRequired); return; }
     setSaving(true); setError('');
     try { await onSave({ name, description, color }); onClose(); }
-    catch (err: any) { setError(err.message || 'Error'); }
+    catch (err: any) { setError(err.message || i.error); }
     finally { setSaving(false); }
   }
 
@@ -35,17 +39,17 @@ function TeamModal({ team, onSave, onClose }: {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 style={{ margin: 0, fontSize: 18 }}>{team ? 'Editar Equipo' : 'Nuevo Equipo'}</h2>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{team ? i.editTeam : i.newTeam}</h2>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '16px 0' }}>
           <div className="form-group" style={{ margin: 0 }}>
-            <label className="form-label">Nombre *</label>
-            <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Soporte Técnico" />
+            <label className="form-label">{i.name} *</label>
+            <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="form-group" style={{ margin: 0 }}>
-            <label className="form-label">Descripción (opcional)</label>
-            <input className="form-input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Equipo de soporte nivel 1…" />
+            <label className="form-label">{i.descOptional}</label>
+            <input className="form-input" value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
           <div className="form-group" style={{ margin: 0 }}>
             <label className="form-label">Color</label>
@@ -58,8 +62,8 @@ function TeamModal({ team, onSave, onClose }: {
           </div>
           {error && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</button>
+            <button type="button" className="btn btn-secondary" onClick={onClose}>{i.cancel}</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? i.saving : i.save}</button>
           </div>
         </form>
       </div>
@@ -70,11 +74,18 @@ function TeamModal({ team, onSave, onClose }: {
 // ── Team Detail Drawer ────────────────────────────────────────────────────────
 
 function TeamDetail({ team, onClose, onRefresh }: { team: Team; onClose: () => void; onRefresh: () => void }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [available, setAvailable] = useState<any[]>([]);
   const [tab, setTab] = useState<'members' | 'add'>('members');
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+
+  const ROLE_CFG: Record<string, { label: string; bg: string; color: string }> = {
+    supervisor: { label: i.roleSupervisor, bg: '#ede9fe', color: '#7c3aed' },
+    agent: { label: i.roleAgent, bg: '#dbeafe', color: '#1d4ed8' },
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,16 +107,10 @@ function TeamDetail({ team, onClose, onRefresh }: { team: Team; onClose: () => v
     await removeTeamMember(team.id, userId); await load(); onRefresh();
   }
 
-  const ROLE_CFG: Record<string, { label: string; bg: string; color: string }> = {
-    supervisor: { label: 'Supervisor', bg: '#ede9fe', color: '#7c3aed' },
-    agent: { label: 'Agente', bg: '#dbeafe', color: '#1d4ed8' },
-  };
-
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex' }}>
       <div style={{ flex: 1, background: 'rgba(0,0,0,0.3)' }} onClick={onClose} />
       <div style={{ width: 480, background: 'var(--bg)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -113,14 +118,15 @@ function TeamDetail({ team, onClose, onRefresh }: { team: Team; onClose: () => v
               <span style={{ fontWeight: 700, fontSize: 18 }}>{team.name}</span>
             </div>
             {team.description && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{team.description}</div>}
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{members.length} miembro{members.length !== 1 ? 's' : ''}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+              {members.length} {members.length !== 1 ? i.memberPlural : i.memberSingular}
+            </div>
           </div>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
 
-        {/* Tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 20px' }}>
-          {[{ key: 'members', label: `👥 Miembros (${members.length})` }, { key: 'add', label: '+ Agregar' }].map((t) => (
+          {[{ key: 'members', label: `${i.membersTab} (${members.length})` }, { key: 'add', label: i.addMemberTab }].map((t) => (
             <button key={t.key} onClick={() => setTab(t.key as any)}
               style={{ padding: '10px 14px', fontSize: 13, fontWeight: 500, background: 'none', border: 'none', cursor: 'pointer', borderBottom: tab === t.key ? '2px solid var(--primary)' : '2px solid transparent', color: tab === t.key ? 'var(--primary)' : 'var(--text-muted)' }}>
               {t.label}
@@ -129,14 +135,13 @@ function TeamDetail({ team, onClose, onRefresh }: { team: Team; onClose: () => v
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
-          {/* Members tab */}
           {tab === 'members' && (
-            loading ? <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 30 }}>Cargando…</div>
+            loading ? <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 30 }}>{i.loading}</div>
             : members.length === 0 ? (
               <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>
                 <div style={{ fontSize: 36, marginBottom: 10 }}>👥</div>
-                Sin miembros.
-                <div style={{ marginTop: 10 }}><button className="btn btn-primary" style={{ fontSize: 13 }} onClick={() => setTab('add')}>+ Agregar</button></div>
+                {i.noMembers}
+                <div style={{ marginTop: 10 }}><button className="btn btn-primary" style={{ fontSize: 13 }} onClick={() => setTab('add')}>{i.addMemberTab}</button></div>
               </div>
             ) : members.map((m) => {
               const rc = ROLE_CFG[m.role] ?? { label: m.role, bg: '#f3f4f6', color: '#6b7280' };
@@ -156,11 +161,10 @@ function TeamDetail({ team, onClose, onRefresh }: { team: Team; onClose: () => v
             })
           )}
 
-          {/* Add tab */}
           {tab === 'add' && (
             <div>
               {available.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 30, fontSize: 13 }}>Todos los usuarios ya son miembros del equipo</div>
+                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 30, fontSize: 13 }}>{i.allMembersAdded}</div>
               ) : available.map((u) => (
                 <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8, background: 'var(--bg-secondary)', marginBottom: 6 }}>
                   <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
@@ -171,8 +175,8 @@ function TeamDetail({ team, onClose, onRefresh }: { team: Team; onClose: () => v
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{u.email}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                    <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: 11 }} disabled={adding} onClick={() => handleAdd(u.id, 'agent')}>+ Agente</button>
-                    <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: 11 }} disabled={adding} onClick={() => handleAdd(u.id, 'supervisor')}>+ Supervisor</button>
+                    <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: 11 }} disabled={adding} onClick={() => handleAdd(u.id, 'agent')}>{i.addAgent}</button>
+                    <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: 11 }} disabled={adding} onClick={() => handleAdd(u.id, 'supervisor')}>{i.addSupervisor}</button>
                   </div>
                 </div>
               ))}
@@ -187,6 +191,8 @@ function TeamDetail({ team, onClose, onRefresh }: { team: Team; onClose: () => v
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function TeamsPage() {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -208,7 +214,7 @@ export default function TeamsPage() {
   }
 
   async function handleDelete(t: Team) {
-    if (!confirm(`¿Eliminar el equipo "${t.name}"?`)) return;
+    if (!confirm(`${i.delete} "${t.name}"?`)) return;
     await deleteTeam(t.id);
     setTeams((p) => p.filter((x) => x.id !== t.id));
   }
@@ -223,19 +229,19 @@ export default function TeamsPage() {
     <div style={{ padding: 24 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Equipos</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>Organiza agentes en equipos y asigna conversaciones</p>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>{i.teamsTitle}</h1>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>{i.teamsSubtitle}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>+ Nuevo Equipo</button>
+        <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>+ {i.newTeam}</button>
       </div>
 
       {loading ? (
-        <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>Cargando…</div>
+        <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>{i.loading}</div>
       ) : teams.length === 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 60, gap: 12, color: 'var(--text-muted)' }}>
           <div style={{ fontSize: 48 }}>👥</div>
-          <div style={{ fontSize: 16 }}>No hay equipos configurados</div>
-          <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>+ Crear Equipo</button>
+          <div style={{ fontSize: 16 }}>{i.noTeamsYet}</div>
+          <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>+ {i.createFirstTeam}</button>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
@@ -249,15 +255,14 @@ export default function TeamsPage() {
                   <div style={{ fontWeight: 700, fontSize: 15 }}>{t.name}</div>
                   {t.description && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{t.description}</div>}
                 </div>
-                {!t.isActive && <span style={{ fontSize: 10, background: '#f3f4f6', color: '#6b7280', borderRadius: 4, padding: '2px 6px', fontWeight: 600 }}>Inactivo</span>}
+                {!t.isActive && <span style={{ fontSize: 10, background: '#f3f4f6', color: '#6b7280', borderRadius: 4, padding: '2px 6px', fontWeight: 600 }}>{i.inactive}</span>}
               </div>
 
-              {/* Member avatars */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
                 <div style={{ display: 'flex' }}>
-                  {(t.members ?? []).slice(0, 5).map((m, i) => (
+                  {(t.members ?? []).slice(0, 5).map((m, idx) => (
                     <div key={m.user_id} title={m.full_name}
-                      style={{ width: 30, height: 30, borderRadius: '50%', background: t.color, border: '2px solid var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 12, marginLeft: i > 0 ? -8 : 0, zIndex: 5 - i }}>
+                      style={{ width: 30, height: 30, borderRadius: '50%', background: t.color, border: '2px solid var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 12, marginLeft: idx > 0 ? -8 : 0, zIndex: 5 - idx }}>
                       {(m.full_name || m.email || '?')[0].toUpperCase()}
                     </div>
                   ))}
@@ -267,24 +272,22 @@ export default function TeamsPage() {
                     </div>
                   )}
                 </div>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t.memberCount ?? 0} miembro{(t.memberCount ?? 0) !== 1 ? 's' : ''}</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {t.memberCount ?? 0} {(t.memberCount ?? 0) !== 1 ? i.memberPlural : i.memberSingular}
+                </span>
               </div>
 
               <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
-                <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => { setEditing(t); setShowModal(true); }}>Editar</button>
-                <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12, color: 'var(--danger)' }} onClick={() => handleDelete(t)}>Eliminar</button>
+                <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => { setEditing(t); setShowModal(true); }}>{i.edit}</button>
+                <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12, color: 'var(--danger)' }} onClick={() => handleDelete(t)}>{i.delete}</button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {showModal && (
-        <TeamModal team={editing} onSave={handleSave} onClose={() => { setShowModal(false); setEditing(null); }} />
-      )}
-      {detail && (
-        <TeamDetail team={detail} onClose={() => setDetail(null)} onRefresh={refreshDetail} />
-      )}
+      {showModal && <TeamModal team={editing} onSave={handleSave} onClose={() => { setShowModal(false); setEditing(null); }} />}
+      {detail && <TeamDetail team={detail} onClose={() => setDetail(null)} onRefresh={refreshDetail} />}
     </div>
   );
 }

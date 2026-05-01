@@ -24,7 +24,8 @@ export class FlowsService {
        LEFT JOIN flow_sessions s ON s.flow_id = f.id
        WHERE f.tenant_id = $1
        GROUP BY f.id, i.name, u.full_name
-       ORDER BY f.created_at DESC`,
+       ORDER BY f.created_at DESC
+       LIMIT 200`,
       [tenantId],
     );
   }

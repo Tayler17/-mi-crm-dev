@@ -48,8 +48,8 @@ export class ConnectionsController {
   }
 
   @Delete(':id/qr')
-  disconnectQr(@Param('id') id: string) {
-    this.waSvc.disconnectSession(id);
+  async disconnectQr(@Param('id') id: string) {
+    await this.waSvc.disconnectSession(id);
     return { ok: true };
   }
 }

@@ -1,16 +1,23 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { InboxesService } from './inboxes.service';
 import { CreateInboxDto, UpdateInboxDto } from './dto/inbox.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantId } from '../../common/decorators/tenant.decorator';
+import { checkPlanLimit } from '../../common/utils/limits';
 
 @Controller('inboxes')
 @UseGuards(JwtAuthGuard)
 export class InboxesController {
-  constructor(private readonly service: InboxesService) {}
+  constructor(
+    private readonly service: InboxesService,
+    @InjectDataSource() private readonly db: DataSource,
+  ) {}
 
   @Post()
-  create(@Body() dto: CreateInboxDto, @TenantId() tenantId: string, @Request() req: any) {
+  async create(@Body() dto: CreateInboxDto, @TenantId() tenantId: string, @Request() req: any) {
+    await checkPlanLimit(this.db, tenantId, 'inboxes');
     return this.service.create(dto as any, tenantId, req.user.id);
   }
 

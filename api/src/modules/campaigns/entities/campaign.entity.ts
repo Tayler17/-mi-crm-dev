@@ -13,7 +13,7 @@ export class Campaign {
   name: string;
 
   @Column({ default: 'email' })
-  type: string; // email | whatsapp | sms
+  type: string; // email | whatsapp | sms | phone
 
   @Column({ default: 'draft' })
   status: string; // draft | scheduled | running | paused | completed | cancelled
@@ -24,13 +24,13 @@ export class Campaign {
   @Column({ type: 'text', nullable: true })
   content?: string;
 
-  @Column({ name: 'scheduled_at', nullable: true, type: 'timestamp' })
+  @Column({ name: 'scheduled_at', nullable: true, type: 'timestamptz' })
   scheduledAt?: Date;
 
-  @Column({ name: 'started_at', nullable: true, type: 'timestamp' })
+  @Column({ name: 'started_at', nullable: true, type: 'timestamptz' })
   startedAt?: Date;
 
-  @Column({ name: 'completed_at', nullable: true, type: 'timestamp' })
+  @Column({ name: 'completed_at', nullable: true, type: 'timestamptz' })
   completedAt?: Date;
 
   @Column({ name: 'sent_count', default: 0 })
@@ -51,11 +51,17 @@ export class Campaign {
   @Column({ name: 'inbox_id', nullable: true, type: 'uuid' })
   inboxId?: string;
 
+  @Column({ name: 'bot_id', nullable: true, type: 'uuid' })
+  botId?: string;
+
   @Column({ name: 'schedule_id', nullable: true, type: 'uuid' })
   scheduleId?: string;
 
   @Column({ name: 'confirmation_enabled', default: false })
   confirmationEnabled: boolean;
+
+  @Column({ name: 'queue_id', nullable: true, type: 'uuid' })
+  queueId?: string;
 
   @Column({ name: 'created_by', nullable: true, type: 'uuid' })
   createdBy?: string;

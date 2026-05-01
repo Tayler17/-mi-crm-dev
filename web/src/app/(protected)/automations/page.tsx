@@ -8,6 +8,8 @@ import {
   type AutomationRule, type AutomationCondition, type AutomationAction,
   type Agent, type Tag, type Team, type Queue,
 } from '@/lib/api';
+import { useLangCtx } from '@/lib/lang-context';
+import { APP } from '@/lib/i18n/app';
 
 // ── Trigger events catalog ────────────────────────────────────────────────────
 
@@ -43,7 +45,7 @@ const TRIGGERS = [
 ];
 
 const TRIGGER_LABEL: Record<string, string> = {};
-TRIGGERS.forEach((g) => g.items.forEach((i) => { TRIGGER_LABEL[i.value] = i.label; }));
+TRIGGERS.forEach((g) => g.items.forEach((item) => { TRIGGER_LABEL[item.value] = item.label; }));
 
 // ── Condition fields ──────────────────────────────────────────────────────────
 
@@ -94,7 +96,7 @@ const ACTION_TYPES = [
 ];
 
 const ACTION_LABEL: Record<string, { label: string; icon: string }> = {};
-ACTION_TYPES.forEach((g) => g.items.forEach((i) => { ACTION_LABEL[i.value] = i; }));
+ACTION_TYPES.forEach((g) => g.items.forEach((item) => { ACTION_LABEL[item.value] = item; }));
 
 // ── Condition builder ─────────────────────────────────────────────────────────
 
@@ -215,7 +217,7 @@ function ActionRow({ action, idx, agents, tags, teams, queues, onChange, onRemov
           <option value="">— Seleccionar acción —</option>
           {ACTION_TYPES.map((g) => (
             <optgroup key={g.group} label={g.group}>
-              {g.items.map((i) => <option key={i.value} value={i.value}>{i.icon} {i.label}</option>)}
+              {g.items.map((item) => <option key={item.value} value={item.value}>{item.icon} {item.label}</option>)}
             </optgroup>
           ))}
         </select>
@@ -239,6 +241,9 @@ interface RuleModalProps {
 }
 
 function RuleModal({ rule, agents, tags, teams, queues, onClose, onSaved }: RuleModalProps) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+
   const [name, setName] = useState(rule?.name ?? '');
   const [triggerEvent, setTriggerEvent] = useState(rule?.triggerEvent ?? rule?.trigger_event ?? '');
   const [conditions, setConditions] = useState<AutomationCondition[]>(rule?.conditions ?? []);
@@ -248,15 +253,15 @@ function RuleModal({ rule, agents, tags, teams, queues, onClose, onSaved }: Rule
   function addCondition() { setConditions((p) => [...p, { field: '', operator: 'equals', value: '' }]); }
   function addAction() { setActions((p) => [...p, { type: '' }]); }
 
-  function updateCondition(i: number, c: AutomationCondition) {
-    setConditions((p) => p.map((x, j) => j === i ? c : x));
+  function updateCondition(idx: number, c: AutomationCondition) {
+    setConditions((p) => p.map((x, j) => j === idx ? c : x));
   }
-  function removeCondition(i: number) { setConditions((p) => p.filter((_, j) => j !== i)); }
+  function removeCondition(idx: number) { setConditions((p) => p.filter((_, j) => j !== idx)); }
 
-  function updateAction(i: number, a: AutomationAction) {
-    setActions((p) => p.map((x, j) => j === i ? a : x));
+  function updateAction(idx: number, a: AutomationAction) {
+    setActions((p) => p.map((x, j) => j === idx ? a : x));
   }
-  function removeAction(i: number) { setActions((p) => p.filter((_, j) => j !== i)); }
+  function removeAction(idx: number) { setActions((p) => p.filter((_, j) => j !== idx)); }
 
   async function handleSave() {
     if (!name.trim() || !triggerEvent) return;
@@ -273,25 +278,25 @@ function RuleModal({ rule, agents, tags, teams, queues, onClose, onSaved }: Rule
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 620, maxHeight: '92vh', overflowY: 'auto' }}>
         <div className="modal-header">
-          <h2 className="modal-title">{rule ? 'Editar automatización' : 'Nueva automatización'}</h2>
+          <h2 className="modal-title">{rule ? i.editAutomation : i.newAutomation}</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {/* Name */}
           <div>
-            <label className="form-label">Nombre *</label>
+            <label className="form-label">{i.name} *</label>
             <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Asignar conversaciones de WhatsApp al equipo de soporte" autoFocus />
           </div>
 
           {/* Trigger */}
           <div>
-            <label className="form-label">Cuándo ocurre *</label>
+            <label className="form-label">{i.triggerLabel} *</label>
             <select className="form-input" value={triggerEvent} onChange={(e) => setTriggerEvent(e.target.value)}>
               <option value="">— Seleccionar evento disparador —</option>
               {TRIGGERS.map((g) => (
                 <optgroup key={g.group} label={g.group}>
-                  {g.items.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
+                  {g.items.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                 </optgroup>
               ))}
             </select>
@@ -300,14 +305,14 @@ function RuleModal({ rule, agents, tags, teams, queues, onClose, onSaved }: Rule
           {/* Conditions */}
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <label className="form-label" style={{ margin: 0 }}>Si se cumplen estas condiciones <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(opcional)</span></label>
-              <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={addCondition}>+ Añadir condición</button>
+              <label className="form-label" style={{ margin: 0 }}>{i.conditionsLabel}</label>
+              <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={addCondition}>{i.addCondition}</button>
             </div>
             {conditions.length === 0
-              ? <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic', padding: '8px 0' }}>Sin condiciones — la automatización se ejecutará siempre que ocurra el evento</div>
+              ? <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic', padding: '8px 0' }}>{i.noConditions}</div>
               : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {conditions.map((c, i) => (
-                    <ConditionRow key={i} cond={c} onChange={(nc) => updateCondition(i, nc)} onRemove={() => removeCondition(i)} />
+                  {conditions.map((c, idx) => (
+                    <ConditionRow key={idx} cond={c} onChange={(nc) => updateCondition(idx, nc)} onRemove={() => removeCondition(idx)} />
                   ))}
                 </div>
             }
@@ -316,15 +321,15 @@ function RuleModal({ rule, agents, tags, teams, queues, onClose, onSaved }: Rule
           {/* Actions */}
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <label className="form-label" style={{ margin: 0 }}>Ejecutar estas acciones *</label>
-              <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={addAction}>+ Añadir acción</button>
+              <label className="form-label" style={{ margin: 0 }}>{i.actionsLabel} *</label>
+              <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={addAction}>{i.addAction}</button>
             </div>
             {actions.length === 0
-              ? <div style={{ fontSize: 12, color: '#ef4444', fontStyle: 'italic', padding: '8px 0' }}>Agrega al menos una acción</div>
+              ? <div style={{ fontSize: 12, color: '#ef4444', fontStyle: 'italic', padding: '8px 0' }}>{i.noActions}</div>
               : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {actions.map((a, i) => (
-                    <ActionRow key={i} action={a} idx={i} agents={agents} tags={tags} teams={teams} queues={queues}
-                      onChange={(na) => updateAction(i, na)} onRemove={() => removeAction(i)} />
+                  {actions.map((a, idx) => (
+                    <ActionRow key={idx} action={a} idx={idx} agents={agents} tags={tags} teams={teams} queues={queues}
+                      onChange={(na) => updateAction(idx, na)} onRemove={() => removeAction(idx)} />
                   ))}
                 </div>
             }
@@ -332,9 +337,9 @@ function RuleModal({ rule, agents, tags, teams, queues, onClose, onSaved }: Rule
         </div>
 
         <div className="modal-footer" style={{ marginTop: 20 }}>
-          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-secondary" onClick={onClose}>{i.cancel}</button>
           <button className="btn btn-primary" disabled={saving || !name.trim() || !triggerEvent || actions.length === 0} onClick={handleSave}>
-            {saving ? 'Guardando...' : rule ? 'Guardar cambios' : 'Crear automatización'}
+            {saving ? i.saving : rule ? i.save : i.createAutomationBtn}
           </button>
         </div>
       </div>
@@ -345,6 +350,9 @@ function RuleModal({ rule, agents, tags, teams, queues, onClose, onSaved }: Rule
 // ── Execution Log Drawer ──────────────────────────────────────────────────────
 
 function ExecutionLog({ rule, onClose }: { rule: AutomationRule; onClose: () => void }) {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+
   const [executions, setExecutions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [testing, setTesting] = useState(false);
@@ -376,7 +384,7 @@ function ExecutionLog({ rule, onClose }: { rule: AutomationRule; onClose: () => 
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={handleTest} disabled={testing}>
-              {testing ? '⏳ Ejecutando...' : '▶ Probar'}
+              {testing ? `⏳ ${i.automTesting}` : `▶ ${i.automTest}`}
             </button>
             <button className="modal-close" onClick={onClose}>✕</button>
           </div>
@@ -385,32 +393,32 @@ function ExecutionLog({ rule, onClose }: { rule: AutomationRule; onClose: () => 
         {testResult && (
           <div style={{ padding: '12px 20px', background: testResult.ok ? '#f0fdf4' : '#fef2f2', borderBottom: '1px solid var(--border)' }}>
             <div style={{ fontWeight: 600, color: testResult.ok ? '#15803d' : '#dc2626', marginBottom: 6 }}>
-              {testResult.ok ? '✅ Ejecución exitosa' : '❌ Error en ejecución'}
+              {testResult.ok ? `✅ ${i.automTestOk}` : `❌ ${i.automTestError}`}
             </div>
-            {testResult.result?.log?.map((l: string, i: number) => (
-              <div key={i} style={{ fontSize: 12, color: '#166534' }}>{l}</div>
+            {testResult.result?.log?.map((l: string, idx: number) => (
+              <div key={idx} style={{ fontSize: 12, color: '#166534' }}>{l}</div>
             ))}
-            {testResult.result?.errors?.map((e: string, i: number) => (
-              <div key={i} style={{ fontSize: 12, color: '#dc2626' }}>{e}</div>
+            {testResult.result?.errors?.map((e: string, idx: number) => (
+              <div key={idx} style={{ fontSize: 12, color: '#dc2626' }}>{e}</div>
             ))}
           </div>
         )}
 
         <div style={{ padding: '16px 24px', flex: 1 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>Historial de ejecuciones</h3>
-          {loading && <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Cargando...</div>}
-          {!loading && executions.length === 0 && <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Sin ejecuciones aún. Usa "Probar" para ejecutar manualmente.</div>}
+          <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>{i.execHistoryTitle}</h3>
+          {loading && <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>{i.loading}</div>}
+          {!loading && executions.length === 0 && <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>{i.noExecYet}</div>}
           {executions.map((e) => (
             <div key={e.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
               <span style={{ fontSize: 16 }}>{e.status === 'completed' ? '✅' : e.status === 'failed' ? '❌' : '⏳'}</span>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{e.trigger_event}</div>
-                {e.result?.log?.slice(0, 2).map((l: string, i: number) => (
-                  <div key={i} style={{ fontSize: 11, color: 'var(--text-muted)' }}>{l}</div>
+                {e.result?.log?.slice(0, 2).map((l: string, idx: number) => (
+                  <div key={idx} style={{ fontSize: 11, color: 'var(--text-muted)' }}>{l}</div>
                 ))}
                 {e.error && <div style={{ fontSize: 11, color: '#ef4444' }}>{e.error}</div>}
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                  {e.created_at ? new Date(e.created_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
+                  {e.created_at ? new Date(e.created_at).toLocaleString(i.locale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
                 </div>
               </div>
             </div>
@@ -424,6 +432,9 @@ function ExecutionLog({ rule, onClose }: { rule: AutomationRule; onClose: () => 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function AutomationsPage() {
+  const { lang } = useLangCtx();
+  const i = APP[lang];
+
   const [rules, setRules] = useState<AutomationRule[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -456,7 +467,7 @@ export default function AutomationsPage() {
   }
 
   async function handleDelete(rule: AutomationRule) {
-    if (!confirm(`¿Eliminar la automatización "${rule.name}"?`)) return;
+    if (!confirm(`${i.delete} "${rule.name}"?`)) return;
     await deleteAutomation(rule.id);
     load();
   }
@@ -468,20 +479,20 @@ export default function AutomationsPage() {
     <div className="page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Automatizaciones</h1>
-          <p className="page-subtitle">Reglas que se ejecutan automáticamente cuando ocurren eventos en el CRM</p>
+          <h1 className="page-title">{i.automations}</h1>
+          <p className="page-subtitle">{i.automationsSubtitle}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>+ Nueva automatización</button>
+        <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>{i.newAutomation}</button>
       </div>
 
       {/* Stats */}
       {!loading && rules.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
           {[
-            { label: 'Total reglas', value: rules.length, color: '#6366f1' },
-            { label: 'Activas', value: active.length, color: '#22c55e' },
-            { label: 'Inactivas', value: inactive.length, color: '#64748b' },
-            { label: 'Ejecuciones OK', value: rules.reduce((s, r) => s + (r.executionsOk ?? r.executions_ok ?? 0), 0), color: '#3b82f6' },
+            { label: i.totalRules, value: rules.length, color: '#6366f1' },
+            { label: i.active, value: active.length, color: '#22c55e' },
+            { label: i.inactive, value: inactive.length, color: '#64748b' },
+            { label: i.execsOk, value: rules.reduce((s, r) => s + (r.executionsOk ?? r.executions_ok ?? 0), 0), color: '#3b82f6' },
           ].map((s) => (
             <div key={s.label} className="card" style={{ padding: '16px 20px' }}>
               <div style={{ fontSize: 24, fontWeight: 700, color: s.color }}>{s.value}</div>
@@ -492,16 +503,16 @@ export default function AutomationsPage() {
       )}
 
       {loading ? (
-        <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>Cargando automatizaciones...</div>
+        <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>{i.loading}</div>
       ) : rules.length === 0 ? (
         <div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>⚡</div>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Sin automatizaciones</div>
-          <div style={{ fontSize: 13, marginBottom: 20 }}>Crea reglas para automatizar tareas repetitivas en tu CRM</div>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>{i.noAutomations}</div>
+          <div style={{ fontSize: 13, marginBottom: 20 }}>{i.noAutomationsHint}</div>
           <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24, maxWidth: 400, margin: '0 auto 24px' }}>
-            Ejemplo: <em>"Cuando llegue una conversación de WhatsApp → asignar al equipo de soporte + añadir tag 'whatsapp'"</em>
+            <em>{i.automationsExample}</em>
           </div>
-          <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>+ Crear primera automatización</button>
+          <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>{i.createFirstAutomation}</button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -522,7 +533,7 @@ export default function AutomationsPage() {
                         background: isActive ? '#dcfce7' : '#f1f5f9',
                         color: isActive ? '#15803d' : '#64748b',
                       }}>
-                        {isActive ? '● Activa' : '○ Inactiva'}
+                        {isActive ? `● ${i.active}` : `○ ${i.inactive}`}
                       </span>
                     </div>
 
@@ -530,10 +541,10 @@ export default function AutomationsPage() {
                       <span style={{ fontSize: 12, background: '#eff6ff', color: '#3b82f6', padding: '3px 8px', borderRadius: 4, fontWeight: 600 }}>
                         ⚡ {triggerLabel}
                       </span>
-                      {(rule.actions ?? []).slice(0, 3).map((a, i) => {
+                      {(rule.actions ?? []).slice(0, 3).map((a, idx) => {
                         const m = ACTION_LABEL[a.type];
                         return m ? (
-                          <span key={i} style={{ fontSize: 11, background: 'var(--bg-hover)', color: 'var(--text-muted)', padding: '3px 8px', borderRadius: 4 }}>
+                          <span key={idx} style={{ fontSize: 11, background: 'var(--bg-hover)', color: 'var(--text-muted)', padding: '3px 8px', borderRadius: 4 }}>
                             {m.icon} {m.label}
                           </span>
                         ) : null;
@@ -547,13 +558,13 @@ export default function AutomationsPage() {
                       {(okCount + failCount) > 0 && (
                         <>
                           <span style={{ color: '#22c55e' }}>✅ {okCount} OK</span>
-                          {failCount > 0 && <span style={{ color: '#ef4444' }}>❌ {failCount} errores</span>}
+                          {failCount > 0 && <span style={{ color: '#ef4444' }}>❌ {failCount} {i.automationErrors}</span>}
                         </>
                       )}
                       {rule.last_executed_at && (
-                        <span>Última: {new Date(rule.last_executed_at).toLocaleDateString('es-ES')}</span>
+                        <span>{i.automationLast} {new Date(rule.last_executed_at).toLocaleDateString(i.locale)}</span>
                       )}
-                      {rule.created_by_name && <span>Por: {rule.created_by_name}</span>}
+                      {rule.created_by_name && <span>{rule.created_by_name}</span>}
                     </div>
                   </div>
 
@@ -566,13 +577,13 @@ export default function AutomationsPage() {
                       style={{ fontSize: 11, padding: '4px 10px', color: isActive ? '#f59e0b' : '#22c55e' }}
                       onClick={() => handleToggle(rule)}
                     >
-                      {isActive ? '⏸ Pausar' : '▶ Activar'}
+                      {isActive ? `⏸ ${i.flowPauseBtn}` : `▶ ${i.flowActivateBtn}`}
                     </button>
                     <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => { setEditing(rule); setShowModal(true); }}>
-                      Editar
+                      {i.edit}
                     </button>
                     <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px', color: '#ef4444', borderColor: '#ef444444' }} onClick={() => handleDelete(rule)}>
-                      Eliminar
+                      {i.delete}
                     </button>
                   </div>
                 </div>

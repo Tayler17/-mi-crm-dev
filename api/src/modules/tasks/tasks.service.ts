@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, FindManyOptions } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BaseTenantService } from '../../common/services/base-tenant.service';
 import { Task } from './entities/task.entity';
@@ -17,7 +17,7 @@ export class TasksService extends BaseTenantService<Task> {
     super(tasksRepo, auditService, eventEmitter);
   }
 
-  findAll(tenantId: string) {
-    return this.tasksRepo.find({ where: { tenantId }, order: { createdAt: 'DESC' } });
+  findAll(tenantId: string, options?: FindManyOptions<Task>): Promise<Task[]> {
+    return this.tasksRepo.find({ where: { tenantId }, order: { createdAt: 'DESC' }, take: 500, ...options });
   }
 }
