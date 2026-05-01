@@ -374,12 +374,18 @@ export default function PlansPage() {
 
   async function load() {
     setLoading(true);
-    const [p, t, sub] = await Promise.all([
-      getPlans(),
-      getTenantsWithPlans(),
-      getBillingSubscription().catch(() => null),
-    ]).finally(() => setLoading(false));
-    setPlans(p); setTenants(t); setSubscription(sub);
+    try {
+      const [p, t, sub] = await Promise.all([
+        getPlans(),
+        getTenantsWithPlans(),
+        getBillingSubscription().catch(() => null),
+      ]);
+      setPlans(p); setTenants(t); setSubscription(sub);
+    } catch (err: any) {
+      console.error('Plans load error:', err);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleCheckout(planId: string) {
