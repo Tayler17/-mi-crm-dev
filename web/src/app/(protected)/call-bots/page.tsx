@@ -721,9 +721,7 @@ export default function CallBotsPage() {
   const { lang } = useLangCtx();
   const i = APP[lang];
 
-  const isOwner: boolean = (() => {
-    try { return JSON.parse(localStorage.getItem('user') ?? '{}').role === 'owner'; } catch { return false; }
-  })();
+  const [isOwner, setIsOwner] = useState(false);
 
   const [bots, setBots] = useState<CallBot[]>([]);
   const [logs, setLogs] = useState<CallLog[]>([]);
@@ -744,7 +742,10 @@ export default function CallBotsPage() {
   const [voiceForm, setVoiceForm] = useState({ name: '', description: '', language: 'es-MX', gender: 'neutral', ttsProvider: 'twilio_basic', ttsVoiceId: '', isActive: true, sortOrder: 0 });
   const [voiceSaving, setVoiceSaving] = useState(false);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    try { setIsOwner(JSON.parse(localStorage.getItem('user') ?? '{}').role === 'owner'); } catch {}
+    load();
+  }, []);
   useEffect(() => {
     if (tab === 'logs') getCallLogs(selectedBot || undefined).then(setLogs).catch(() => {});
   }, [tab, selectedBot]);

@@ -20,6 +20,14 @@ CREATE TABLE IF NOT EXISTS call_bots (
   total_calls       INT          DEFAULT 0,
   handled_calls     INT          DEFAULT 0,            -- resolved by bot
   transferred_calls INT          DEFAULT 0,            -- handed off to human
+  -- Inbox / queue linking
+  inbox_id          UUID,
+  queue_ids         UUID[]       DEFAULT '{}',
+  -- TTS / voice
+  tts_provider      VARCHAR(50)  DEFAULT 'twilio_basic',
+  tts_voice_id      VARCHAR(255),
+  transfer_to_number VARCHAR(50),
+  voice_catalog_id  UUID,
   -- Meta
   created_by        UUID,
   created_at        TIMESTAMP    DEFAULT NOW(),
