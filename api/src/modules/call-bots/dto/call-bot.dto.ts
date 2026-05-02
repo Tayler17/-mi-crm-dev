@@ -48,6 +48,9 @@ export class CreateCallBotDto {
 
   @IsString() @IsOptional()
   transferToNumber?: string;
+
+  @IsUUID('4') @IsOptional()
+  voiceCatalogId?: string;
 }
 
 export class UpdateCallBotDto {
@@ -101,4 +104,7 @@ export class UpdateCallBotDto {
 
   @IsString() @IsOptional()
   transferToNumber?: string;
+
+  @IsUUID('4') @IsOptional()
+  voiceCatalogId?: string;
 }

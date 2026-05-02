@@ -65,10 +65,10 @@ export class CallBotsController {
     const baseUrl = process.env.TWILIO_WEBHOOK_BASE_URL
       ?? `${req.headers['x-forwarded-proto'] ?? req.protocol ?? 'https'}://${req.headers['x-forwarded-host'] ?? req.headers['host'] ?? req.get('host')}`;
     return {
-      voiceUrl:      `${baseUrl}/call-bots/twilio/${id}/voice`,
-      statusCallback:`${baseUrl}/call-bots/twilio/${id}/status`,
+      voiceUrl:      `${baseUrl}/call-bots/twilio/voice`,
+      statusCallback:`${baseUrl}/call-bots/twilio/status`,
       method: 'HTTP POST',
-      note: 'Configura voiceUrl en Twilio Console → Phone Numbers → tu número → Voice & Fax → "A call comes in"',
+      note: 'URL global — un solo webhook para todos tus bots, enrutado automáticamente por número de teléfono',
     };
   }
 

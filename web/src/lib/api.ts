@@ -623,6 +623,7 @@ export interface CallBot {
   totalCalls: number;
   handledCalls: number;
   transferredCalls: number;
+  voiceCatalogId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1700,3 +1701,23 @@ export const uploadContentMedia = async (file: File): Promise<{ url: string; med
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 };
+
+// ── Voice Catalog ─────────────────────────────────────────────────────────────
+
+export interface Voice {
+  id: string;
+  name: string;
+  description?: string;
+  language: string;
+  gender: string;
+  ttsProvider: string;
+  ttsVoiceId?: string;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+export const getVoices = () => apiGet<Voice[]>('/voices');
+export const createVoice = (data: Omit<Voice, 'id'>) => apiPost<Voice>('/voices', data);
+export const updateVoice = (id: string, data: Partial<Omit<Voice, 'id'>>) =>
+  apiPatch<Voice>(`/voices/${id}`, data);
+export const deleteVoice = (id: string) => apiDelete(`/voices/${id}`);

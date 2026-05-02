@@ -68,6 +68,9 @@ export class CallBot {
   @Column({ name: 'transfer_to_number', nullable: true })
   transferToNumber?: string;
 
+  @Column({ name: 'voice_catalog_id', nullable: true, type: 'uuid' })
+  voiceCatalogId?: string;
+
   @Column({ name: 'created_by', nullable: true, type: 'uuid' })
   createdBy?: string;
 

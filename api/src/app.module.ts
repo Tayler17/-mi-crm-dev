@@ -47,6 +47,7 @@ import { CsatModule } from './modules/csat/csat.module';
 import { OutboundWebhooksModule } from './modules/outbound-webhooks/outbound-webhooks.module';
 import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module';
 import { ContentModule } from './modules/content/content.module';
+import { VoicesModule } from './modules/voices/voices.module';
 import { TenantMiddleware } from './common/middleware/tenant.middleware';
 
 @Module({
@@ -136,6 +137,7 @@ import { TenantMiddleware } from './common/middleware/tenant.middleware';
     OutboundWebhooksModule,
     CustomFieldsModule,
     ContentModule,
+    VoicesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

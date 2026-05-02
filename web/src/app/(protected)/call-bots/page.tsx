@@ -18,6 +18,10 @@ import {
   reindexCallBotKnowledgeSource,
   deleteCallBotKnowledgeSource,
   addCallBotKnowledgePdf,
+  getVoices,
+  createVoice,
+  updateVoice,
+  deleteVoice,
   API_URL,
   CallBot,
   CallLog,
@@ -25,6 +29,7 @@ import {
   type Queue,
   type Inbox,
   type KnowledgeSource,
+  type Voice,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
 import { APP } from '@/lib/i18n/app';
@@ -215,9 +220,13 @@ type BotForm = {
   inboxId: string;
   queueIds: string[];
   transferToNumber: string;
+  voiceCatalogId: string;
 };
 
-function BotModal({ bot, queues, inboxes, onSave, onClose }: { bot: CallBot | null; queues: Queue[]; inboxes: Inbox[]; onSave: (f: BotForm) => Promise<void>; onClose: () => void }) {
+function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
+  bot: CallBot | null; queues: Queue[]; inboxes: Inbox[]; voices: Voice[]; isOwner: boolean;
+  onSave: (f: BotForm) => Promise<void>; onClose: () => void;
+}) {
   const { lang } = useLangCtx();
   const i = APP[lang];
   const [tab, setTab] = useState<'basic' | 'ai' | 'knowledge'>('basic');
@@ -288,6 +297,7 @@ function BotModal({ bot, queues, inboxes, onSave, onClose }: { bot: CallBot | nu
     inboxId: bot?.inboxId ?? '',
     queueIds: bot?.queueIds ?? [],
     transferToNumber: pc.transferToNumber ?? '',
+    voiceCatalogId: (bot as any)?.voiceCatalogId ?? '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -302,10 +312,10 @@ function BotModal({ bot, queues, inboxes, onSave, onClose }: { bot: CallBot | nu
     if (!form.name.trim()) { setError(i.nameRequired); return; }
     setSaving(true); setError('');
     try {
-      const { transferToNumber, inboxId, ...rest } = form;
+      const { transferToNumber, inboxId, voiceCatalogId, ...rest } = form;
       const providerConfig: Record<string, string> = {};
       if (transferToNumber) providerConfig.transferToNumber = transferToNumber;
-      await onSave({ ...rest, inboxId: inboxId || undefined, providerConfig } as any);
+      await onSave({ ...rest, inboxId: inboxId || undefined, voiceCatalogId: voiceCatalogId || undefined, providerConfig } as any);
       onClose();
     }
     catch (err: any) { setError(err.message || i.error); }
@@ -428,45 +438,70 @@ function BotModal({ bot, queues, inboxes, onSave, onClose }: { bot: CallBot | nu
 
           {tab === 'ai' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Voz (estilo Twilio/Polly)</label>
-                  <select className="form-input" value={form.voiceType} onChange={f('voiceType')}>
-                    <option value="neutral">Neutral</option>
-                    <option value="female">Femenina</option>
-                    <option value="male">Masculina</option>
-                  </select>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Solo aplica si el TTS es Twilio básico</div>
-                </div>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Proveedor TTS</label>
-                  <select className="form-input" value={form.ttsProvider}
-                    onChange={(e) => setForm((p) => ({ ...p, ttsProvider: e.target.value as BotForm['ttsProvider'] }))}>
-                    <option value="twilio_basic">🔊 Twilio Polly (incluido)</option>
-                    <option value="openai_tts">🟢 OpenAI TTS (usa key de IA)</option>
-                    <option value="elevenlabs">🎙️ ElevenLabs (hiperrealista)</option>
-                  </select>
-                </div>
-              </div>
 
-              {form.ttsProvider === 'elevenlabs' && (
+              {/* Voice catalog (all users) */}
+              {voices.filter((v) => v.isActive).length > 0 && (
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Voice ID de ElevenLabs</label>
-                  <select className="form-input" value={form.ttsVoiceId}
-                    onChange={(e) => setForm((p) => ({ ...p, ttsVoiceId: e.target.value }))}>
-                    <option value="">— Voz por defecto (Sarah) —</option>
-                    <option value="EXAVITQu4vr4xnSDxMaL">Sarah — EN, neutral</option>
-                    <option value="TX3LPaxmHKxFdv7VOQHJ">Liam — EN, masculina</option>
-                    <option value="XB0fDUnXU5powFXDhCwa">Charlotte — EN, femenina</option>
-                    <option value="nPczCjzI2devNBz1zQrb">Brian — EN, grave</option>
-                    <option value="cgSgspJ2msm6clMCkdW9">Jessica — ES, femenina</option>
-                    <option value="iP95p4xoKVk53GoZ742B">Chris — ES, masculina</option>
-                    <option value="onwK4e9ZLuTAKqWW03F9">Daniel — ES, autoritativa</option>
+                  <label className="form-label">Voz del sistema</label>
+                  <select className="form-input" value={form.voiceCatalogId}
+                    onChange={(e) => setForm((p) => ({ ...p, voiceCatalogId: e.target.value }))}>
+                    <option value="">{isOwner ? '— Configuración manual (avanzado) —' : '— Seleccionar voz —'}</option>
+                    {voices.filter((v) => v.isActive).map((v) => (
+                      <option key={v.id} value={v.id}>{v.name}</option>
+                    ))}
                   </select>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
-                    Requiere API Key de ElevenLabs en <strong>Configuración → Plataforma</strong>. Sin ella, usará Twilio como fallback.
+                    La voz seleccionada aquí tiene prioridad sobre la configuración manual.
                   </div>
                 </div>
+              )}
+
+              {/* TTS settings — owner only (or when no catalog voice chosen) */}
+              {(isOwner || !form.voiceCatalogId) && (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label">Voz (estilo Twilio/Polly)</label>
+                      <select className="form-input" value={form.voiceType} onChange={f('voiceType')}>
+                        <option value="neutral">Neutral</option>
+                        <option value="female">Femenina</option>
+                        <option value="male">Masculina</option>
+                      </select>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Solo aplica si el TTS es Twilio básico</div>
+                    </div>
+                    {isOwner && (
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">Proveedor TTS</label>
+                        <select className="form-input" value={form.ttsProvider}
+                          onChange={(e) => setForm((p) => ({ ...p, ttsProvider: e.target.value as BotForm['ttsProvider'] }))}>
+                          <option value="twilio_basic">🔊 Twilio Polly (incluido)</option>
+                          <option value="openai_tts">🟢 OpenAI TTS (usa key de IA)</option>
+                          <option value="elevenlabs">🎙️ ElevenLabs (hiperrealista)</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+
+                  {isOwner && form.ttsProvider === 'elevenlabs' && (
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label">Voice ID de ElevenLabs</label>
+                      <select className="form-input" value={form.ttsVoiceId}
+                        onChange={(e) => setForm((p) => ({ ...p, ttsVoiceId: e.target.value }))}>
+                        <option value="">— Voz por defecto (Sarah) —</option>
+                        <option value="EXAVITQu4vr4xnSDxMaL">Sarah — EN, neutral</option>
+                        <option value="TX3LPaxmHKxFdv7VOQHJ">Liam — EN, masculina</option>
+                        <option value="XB0fDUnXU5powFXDhCwa">Charlotte — EN, femenina</option>
+                        <option value="nPczCjzI2devNBz1zQrb">Brian — EN, grave</option>
+                        <option value="cgSgspJ2msm6clMCkdW9">Jessica — ES, femenina</option>
+                        <option value="iP95p4xoKVk53GoZ742B">Chris — ES, masculina</option>
+                        <option value="onwK4e9ZLuTAKqWW03F9">Daniel — ES, autoritativa</option>
+                      </select>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+                        Requiere API Key de ElevenLabs en <strong>Configuración → Plataforma</strong>. Sin ella, usará Twilio como fallback.
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
               <div className="form-group" style={{ margin: 0 }}>
                 <label className="form-label">Prompt del Sistema (Personalidad del Bot)</label>
@@ -686,17 +721,28 @@ export default function CallBotsPage() {
   const { lang } = useLangCtx();
   const i = APP[lang];
 
+  const isOwner: boolean = (() => {
+    try { return JSON.parse(localStorage.getItem('user') ?? '{}').role === 'owner'; } catch { return false; }
+  })();
+
   const [bots, setBots] = useState<CallBot[]>([]);
   const [logs, setLogs] = useState<CallLog[]>([]);
   const [stats, setStats] = useState<CallBotStats | null>(null);
   const [queues, setQueues] = useState<Queue[]>([]);
   const [inboxes, setInboxes] = useState<Inbox[]>([]);
+  const [voices, setVoices] = useState<Voice[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<CallBot | null>(null);
   const [dialBot, setDialBot] = useState<CallBot | null>(null);
-  const [tab, setTab] = useState<'bots' | 'logs'>('bots');
+  const [tab, setTab] = useState<'bots' | 'logs' | 'voices'>('bots');
   const [selectedBot, setSelectedBot] = useState<string>('');
+
+  // Voice catalog management state (owner only)
+  const [voiceModalOpen, setVoiceModalOpen] = useState(false);
+  const [editingVoice, setEditingVoice] = useState<Voice | null>(null);
+  const [voiceForm, setVoiceForm] = useState({ name: '', description: '', language: 'es-MX', gender: 'neutral', ttsProvider: 'twilio_basic', ttsVoiceId: '', isActive: true, sortOrder: 0 });
+  const [voiceSaving, setVoiceSaving] = useState(false);
 
   useEffect(() => { load(); }, []);
   useEffect(() => {
@@ -706,8 +752,8 @@ export default function CallBotsPage() {
   async function load() {
     setLoading(true);
     try {
-      const [b, s, q, ix] = await Promise.all([getCallBots(), getCallBotStats(), getQueues(), getInboxes()]);
-      setBots(b); setStats(s); setQueues(q); setInboxes(ix);
+      const [b, s, q, ix, v] = await Promise.all([getCallBots(), getCallBotStats(), getQueues(), getInboxes(), getVoices()]);
+      setBots(b); setStats(s); setQueues(q); setInboxes(ix); setVoices(v);
     } finally { setLoading(false); }
   }
 
@@ -733,6 +779,36 @@ export default function CallBotsPage() {
     borderBottom: tab === t ? '2px solid var(--primary)' : '2px solid transparent',
     color: tab === t ? 'var(--primary)' : 'var(--text-muted)',
   });
+
+  async function handleSaveVoice() {
+    setVoiceSaving(true);
+    try {
+      if (editingVoice) {
+        const updated = await updateVoice(editingVoice.id, voiceForm as any);
+        setVoices((p) => p.map((v) => v.id === editingVoice.id ? updated : v));
+      } else {
+        const created = await createVoice(voiceForm as any);
+        setVoices((p) => [...p, created]);
+      }
+      setVoiceModalOpen(false); setEditingVoice(null);
+    } catch (e: any) { alert(e.message || 'Error'); }
+    finally { setVoiceSaving(false); }
+  }
+
+  async function handleDeleteVoice(id: string, name: string) {
+    if (!confirm(`Eliminar voz "${name}"?`)) return;
+    await deleteVoice(id);
+    setVoices((p) => p.filter((v) => v.id !== id));
+  }
+
+  function openVoiceModal(voice: Voice | null) {
+    setEditingVoice(voice);
+    setVoiceForm(voice
+      ? { name: voice.name, description: voice.description ?? '', language: voice.language, gender: voice.gender, ttsProvider: voice.ttsProvider, ttsVoiceId: voice.ttsVoiceId ?? '', isActive: voice.isActive, sortOrder: voice.sortOrder }
+      : { name: '', description: '', language: 'es-MX', gender: 'neutral', ttsProvider: 'twilio_basic', ttsVoiceId: '', isActive: true, sortOrder: 0 },
+    );
+    setVoiceModalOpen(true);
+  }
 
   return (
     <div style={{ padding: 24 }}>
@@ -763,6 +839,7 @@ export default function CallBotsPage() {
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>
         <button style={tabStyle('bots')} onClick={() => setTab('bots')}>Bots ({bots.length})</button>
         <button style={tabStyle('logs')} onClick={() => setTab('logs')}>{i.callBotLogsTab}</button>
+        {isOwner && <button style={tabStyle('voices')} onClick={() => setTab('voices')}>Catálogo de Voces ({voices.length})</button>}
       </div>
 
       {tab === 'bots' ? (
@@ -885,11 +962,61 @@ export default function CallBotsPage() {
         </div>
       )}
 
+      {tab === 'voices' && isOwner && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              Gestiona las voces disponibles para los bots. Los tenants solo ven el nombre de la voz, no el proveedor ni las keys.
+            </div>
+            <button className="btn btn-primary" onClick={() => openVoiceModal(null)}>+ Nueva voz</button>
+          </div>
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+                  {['Nombre', 'Idioma', 'Género', 'Proveedor TTS', 'Voice ID', 'Estado', ''].map((h) => (
+                    <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {voices.length === 0 ? (
+                  <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>No hay voces. Añade una para que los bots puedan usarla.</td></tr>
+                ) : voices.map((v) => (
+                  <tr key={v.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '8px 12px', fontWeight: 500 }}>{v.name}</td>
+                    <td style={{ padding: '8px 12px' }}>{v.language}</td>
+                    <td style={{ padding: '8px 12px' }}>{v.gender}</td>
+                    <td style={{ padding: '8px 12px' }}>
+                      <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#f3f4f6' }}>{v.ttsProvider}</span>
+                    </td>
+                    <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)' }}>{v.ttsVoiceId || '—'}</td>
+                    <td style={{ padding: '8px 12px' }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: v.isActive ? '#10b981' : '#6b7280' }}>
+                        {v.isActive ? 'Activa' : 'Inactiva'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '8px 12px' }}>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => openVoiceModal(v)}>Editar</button>
+                        <button className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: 11, color: 'var(--danger)' }} onClick={() => handleDeleteVoice(v.id, v.name)}>✕</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {showModal && (
         <BotModal
           bot={editing}
           queues={queues}
           inboxes={inboxes}
+          voices={voices}
+          isOwner={isOwner}
           onSave={handleSave}
           onClose={() => { setShowModal(false); setEditing(null); }}
         />
@@ -897,6 +1024,74 @@ export default function CallBotsPage() {
 
       {dialBot && (
         <DialModal bot={dialBot} onClose={() => setDialBot(null)} />
+      )}
+
+      {voiceModalOpen && isOwner && (
+        <div className="modal-overlay" onClick={() => setVoiceModalOpen(false)}>
+          <div className="modal" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 style={{ margin: 0, fontSize: 18 }}>{editingVoice ? 'Editar voz' : 'Nueva voz'}</h2>
+              <button className="btn btn-ghost" onClick={() => setVoiceModalOpen(false)}>✕</button>
+            </div>
+            <div style={{ padding: '20px 20px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group" style={{ margin: 0, gridColumn: '1/-1' }}>
+                  <label className="form-label">Nombre visible *</label>
+                  <input className="form-input" value={voiceForm.name} onChange={(e) => setVoiceForm((p) => ({ ...p, name: e.target.value }))} placeholder="María – ES MX (ElevenLabs)" />
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Este nombre lo ven los tenants al elegir voz.</div>
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Idioma</label>
+                  <select className="form-input" value={voiceForm.language} onChange={(e) => setVoiceForm((p) => ({ ...p, language: e.target.value }))}>
+                    {['es-MX', 'es-ES', 'es-AR', 'es-CO', 'en-US', 'en-GB', 'pt-BR'].map((l) => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Género</label>
+                  <select className="form-input" value={voiceForm.gender} onChange={(e) => setVoiceForm((p) => ({ ...p, gender: e.target.value }))}>
+                    <option value="neutral">Neutral</option>
+                    <option value="female">Femenino</option>
+                    <option value="male">Masculino</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Proveedor TTS</label>
+                  <select className="form-input" value={voiceForm.ttsProvider} onChange={(e) => setVoiceForm((p) => ({ ...p, ttsProvider: e.target.value }))}>
+                    <option value="twilio_basic">🔊 Twilio Polly (incluido)</option>
+                    <option value="openai_tts">🟢 OpenAI TTS</option>
+                    <option value="elevenlabs">🎙️ ElevenLabs</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Voice ID (proveedor)</label>
+                  <input className="form-input" value={voiceForm.ttsVoiceId} onChange={(e) => setVoiceForm((p) => ({ ...p, ttsVoiceId: e.target.value }))} placeholder="EXAVITQu4vr4xnSDxMaL" />
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>ID interno del proveedor. Vacío = voz por defecto.</div>
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Orden</label>
+                  <input type="number" className="form-input" value={voiceForm.sortOrder} onChange={(e) => setVoiceForm((p) => ({ ...p, sortOrder: +e.target.value }))} min={0} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Estado</label>
+                  <select className="form-input" value={voiceForm.isActive ? 'true' : 'false'} onChange={(e) => setVoiceForm((p) => ({ ...p, isActive: e.target.value === 'true' }))}>
+                    <option value="true">Activa</option>
+                    <option value="false">Inactiva</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ margin: 0, gridColumn: '1/-1' }}>
+                  <label className="form-label">Descripción (interna)</label>
+                  <input className="form-input" value={voiceForm.description} onChange={(e) => setVoiceForm((p) => ({ ...p, description: e.target.value }))} placeholder="Nota interna sobre esta voz" />
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer" style={{ marginTop: 20 }}>
+              <button className="btn btn-secondary" onClick={() => setVoiceModalOpen(false)}>Cancelar</button>
+              <button className="btn btn-primary" disabled={voiceSaving || !voiceForm.name.trim()} onClick={handleSaveVoice}>
+                {voiceSaving ? 'Guardando…' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

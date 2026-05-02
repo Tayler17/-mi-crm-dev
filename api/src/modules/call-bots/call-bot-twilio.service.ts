@@ -56,7 +56,7 @@ const TOOL_ACK: Record<string, Record<string, string>> = {
 };
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
-type CallMeta = { contactId: string | null; tenantId: string; contactName?: string | null };
+type CallMeta = { contactId: string | null; tenantId: string; contactName?: string | null; botId?: string };
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
@@ -229,9 +229,52 @@ export class CallBotTwilioService {
   private async getBot(botId: string): Promise<any> {
     const c = this.botCache.get(botId);
     if (c && c.exp > Date.now()) return c.v;
-    const [bot] = await this.db.query(`SELECT * FROM call_bots WHERE id = $1`, [botId]);
-    if (bot) this.botCache.set(botId, { v: bot, exp: Date.now() + 30_000 }); // 30s
+    const [bot] = await this.db.query(
+      `SELECT cb.*,
+              v.tts_provider  AS catalog_tts_provider,
+              v.tts_voice_id  AS catalog_tts_voice_id,
+              v.gender        AS catalog_gender
+       FROM call_bots cb
+       LEFT JOIN voices v ON v.id = cb.voice_catalog_id AND v.is_active = true
+       WHERE cb.id = $1`,
+      [botId],
+    ).catch(() => this.db.query(`SELECT * FROM call_bots WHERE id = $1`, [botId]));
+    if (bot) {
+      if (bot.catalog_tts_provider) {
+        bot.tts_provider = bot.catalog_tts_provider;
+        bot.tts_voice_id = bot.catalog_tts_voice_id ?? '';
+        if (bot.catalog_gender && bot.catalog_gender !== 'neutral') bot.voice_type = bot.catalog_gender;
+      }
+      this.botCache.set(botId, { v: bot, exp: Date.now() + 30_000 });
+    }
     return bot ?? null;
+  }
+
+  async getBotByPhone(toNumber: string): Promise<any | null> {
+    const normalized = toNumber.replace(/[^0-9+]/g, '');
+    const [bot] = await this.db.query(
+      `SELECT cb.*,
+              v.tts_provider  AS catalog_tts_provider,
+              v.tts_voice_id  AS catalog_tts_voice_id,
+              v.gender        AS catalog_gender
+       FROM call_bots cb
+       LEFT JOIN voices v ON v.id = cb.voice_catalog_id AND v.is_active = true
+       WHERE cb.status = 'active'
+         AND (cb.phone_number = $1 OR REGEXP_REPLACE(cb.phone_number, '[^0-9+]', '', 'g') = $2)
+       LIMIT 1`,
+      [toNumber, normalized],
+    ).catch(() => [null]);
+    if (!bot) return null;
+    if (bot.catalog_tts_provider) {
+      bot.tts_provider = bot.catalog_tts_provider;
+      bot.tts_voice_id = bot.catalog_tts_voice_id ?? '';
+      if (bot.catalog_gender && bot.catalog_gender !== 'neutral') bot.voice_type = bot.catalog_gender;
+    }
+    return bot;
+  }
+
+  getBotIdByCallSid(callSid: string): string | null {
+    return this.callMeta.get(callSid)?.botId ?? null;
   }
 
   private async getQueues(botId: string, tenantId: string): Promise<any[]> {
@@ -356,7 +399,7 @@ export class CallBotTwilioService {
       contact = existingMeta.contactId ? { id: existingMeta.contactId, name: existingMeta.contactName ?? '', email: null } : null;
     } else {
       contact = await this.botActions.lookupContactByPhone(bot.tenant_id, from);
-      this.callMeta.set(callSid, { contactId: contact?.id ?? null, tenantId: bot.tenant_id, contactName: contact?.name });
+      this.callMeta.set(callSid, { contactId: contact?.id ?? null, tenantId: bot.tenant_id, contactName: contact?.name, botId });
     }
 
     // Auto-create contact for unknown callers so CRM actions work
@@ -391,7 +434,7 @@ export class CallBotTwilioService {
       }
 
       if (contact) {
-        this.callMeta.set(callSid, { contactId: contact.id, tenantId: bot.tenant_id, contactName: contact.name });
+        this.callMeta.set(callSid, { contactId: contact.id, tenantId: bot.tenant_id, contactName: contact.name, botId });
         this.logger.log(`[callbot] Contact resolved for ${from}: ${contact.id}`);
       }
     }

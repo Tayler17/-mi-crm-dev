@@ -47,6 +47,7 @@ export class CallBotsService {
       ttsProvider: dto.ttsProvider ?? 'twilio_basic',
       ttsVoiceId: dto.ttsVoiceId,
       transferToNumber: dto.transferToNumber,
+      voiceCatalogId: dto.voiceCatalogId,
       status: 'draft',
       createdBy: userId,
     });
@@ -115,8 +116,8 @@ export class CallBotsService {
         );
       }
 
-      const voiceUrl   = `${baseUrl}/call-bots/twilio/${botId}/voice`;
-      const statusUrl  = `${baseUrl}/call-bots/twilio/${botId}/status`;
+      const voiceUrl   = `${baseUrl}/call-bots/twilio/${botId}/voice`;  // per-bot for outbound
+      const statusUrl  = `${baseUrl}/call-bots/twilio/status`;
 
       const params = new URLSearchParams({
         To:             toNumber,
