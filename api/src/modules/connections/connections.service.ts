@@ -156,7 +156,7 @@ export class ConnectionsService {
         }
         try {
           const res = await (globalThis as any).fetch(
-            `https://graph.facebook.com/v19.0/${creds.phoneNumberId}?access_token=${creds.accessToken}`,
+            `https://graph.facebook.com/v21.0/${creds.phoneNumberId}?access_token=${creds.accessToken}`,
             { signal: AbortSignal.timeout(8000) },
           );
           if (res.ok) return { ok: true };
@@ -174,13 +174,38 @@ export class ConnectionsService {
           return { ok: false, error: 'Faltan credenciales: pageId y accessToken son requeridos' };
         }
         try {
-          const res = await (globalThis as any).fetch(
-            `https://graph.facebook.com/v19.0/${creds.pageId}?fields=id,name&access_token=${creds.accessToken}`,
+          // 1. Verify the page/token is valid
+          const pageRes = await (globalThis as any).fetch(
+            `https://graph.facebook.com/v21.0/${creds.pageId}?fields=id,name&access_token=${creds.accessToken}`,
             { signal: AbortSignal.timeout(8000) },
           );
-          if (res.ok) return { ok: true };
-          const data = await res.json();
-          return { ok: false, error: `Meta API: ${data?.error?.message ?? 'token inválido'}` };
+          if (!pageRes.ok) {
+            const data = await pageRes.json();
+            return { ok: false, error: `Meta API: ${data?.error?.message ?? 'token inválido'}` };
+          }
+
+          // 2. Subscribe the page to webhook events (messages + postbacks)
+          const subscribeRes = await (globalThis as any).fetch(
+            `https://graph.facebook.com/v21.0/${creds.pageId}/subscribed_apps`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                subscribed_fields: 'messages,messaging_postbacks,messaging_optins,message_deliveries',
+                access_token: creds.accessToken,
+              }),
+              signal: AbortSignal.timeout(8000),
+            },
+          );
+          const subscribeData = await subscribeRes.json();
+          if (subscribeData.success) {
+            this.logger.log(`Meta page ${creds.pageId} subscribed to webhook events`);
+          } else {
+            // Subscription failure is non-fatal — token might not have pages_manage_metadata
+            this.logger.warn(`Meta page ${creds.pageId} webhook subscription warning: ${JSON.stringify(subscribeData)}`);
+          }
+
+          return { ok: true };
         } catch (e: any) {
           return { ok: false, error: `No se pudo conectar con Meta: ${e.message}` };
         }
