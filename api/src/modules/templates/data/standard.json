@@ -63,5 +63,17 @@
     { "name": "Ventas",   "description": "Consultas de nuevos prospectos y clientes" },
     { "name": "Soporte",  "description": "Atención post-venta y resolución de problemas" },
     { "name": "General",  "description": "Consultas generales y otros temas" }
+  ],
+  "callBots": [
+    {
+      "name": "Asistente General",
+      "language": "es-MX",
+      "voiceType": "female",
+      "welcomeMessage": "Hola, gracias por llamar. ¿En qué te puedo ayudar hoy?",
+      "systemPrompt": "Eres el asistente de voz del negocio. Ayudas a los clientes con consultas generales, ventas y soporte. Registra el nombre del cliente y el motivo de su llamada como trato en el CRM. Si la consulta requiere atención especializada, transfiere al agente correspondiente. Mantén un tono amable y profesional.",
+      "fallbackMessage": "Lo siento, no te escuché bien. ¿Puedes repetir por favor?",
+      "handoffKeyword": "agente",
+      "maxCallDuration": 300
+    }
   ]
 }

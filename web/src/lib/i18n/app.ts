@@ -117,8 +117,8 @@ export const APP: Record<LangCode, {
   templateApplyError: string; templateNoChanges: string;
   hideDetail: string; viewDetail: string; reapplyTemplate: string; applyTemplateBtn: string;
   templateDetail: string; templateConfirmApply: string;
-  tplSectionPipelines: string; tplSectionTags: string; tplSectionResponses: string; tplSectionQueues: string;
-  tplPipelines: string; tplStages: string; tplTags: string; tplResponses: string; tplQueues: string;
+  tplSectionPipelines: string; tplSectionTags: string; tplSectionResponses: string; tplSectionQueues: string; tplSectionCallBots: string;
+  tplPipelines: string; tplStages: string; tplTags: string; tplResponses: string; tplQueues: string; tplCallBots: string;
   // Quick responses
   newResponse: string; newQuickResponse: string; editResponse: string;
   searchResponseHint: string; allCategories: string;
@@ -464,8 +464,8 @@ export const APP: Record<LangCode, {
     recommended: 'RECOMENDADO', templateApplyError: '⚠ Error al aplicar la plantilla', templateNoChanges: 'Todo ya existía — sin cambios',
     hideDetail: 'Ocultar', viewDetail: 'Ver detalle', reapplyTemplate: '↻ Aplicar de nuevo', applyTemplateBtn: 'Aplicar plantilla',
     templateDetail: 'Detalle', templateConfirmApply: '¿Aplicar la plantilla "{name}" a este workspace?\n\nSe crearán pipelines, etiquetas, respuestas rápidas y colas. Los elementos que ya existan no se duplicarán.',
-    tplSectionPipelines: '📊 Pipelines', tplSectionTags: '🏷 Etiquetas', tplSectionResponses: '💬 Respuestas rápidas', tplSectionQueues: '🗂 Colas',
-    tplPipelines: 'pipelines', tplStages: 'etapas', tplTags: 'etiquetas', tplResponses: 'respuestas', tplQueues: 'colas',
+    tplSectionPipelines: '📊 Pipelines', tplSectionTags: '🏷 Etiquetas', tplSectionResponses: '💬 Respuestas rápidas', tplSectionQueues: '🗂 Colas', tplSectionCallBots: '🤖 Bots de Llamada',
+    tplPipelines: 'pipelines', tplStages: 'etapas', tplTags: 'etiquetas', tplResponses: 'respuestas', tplQueues: 'colas', tplCallBots: 'bots',
     newResponse: '+ Nueva respuesta', newQuickResponse: 'Nueva respuesta rápida', editResponse: 'Editar respuesta',
     searchResponseHint: 'Buscar por título o contenido…', allCategories: 'Todas las categorías',
     noResponsesYet: 'No hay respuestas rápidas todavía.', createFirstResponse: 'Crear primera respuesta',
@@ -880,8 +880,8 @@ export const APP: Record<LangCode, {
     recommended: 'RECOMMENDED', templateApplyError: '⚠ Error applying template', templateNoChanges: 'Nothing new — no changes',
     hideDetail: 'Hide', viewDetail: 'View detail', reapplyTemplate: '↻ Re-apply', applyTemplateBtn: 'Apply template',
     templateDetail: 'Detail', templateConfirmApply: 'Apply template "{name}" to this workspace?\n\nPipelines, tags, quick responses and queues will be created. Existing items will not be duplicated.',
-    tplSectionPipelines: '📊 Pipelines', tplSectionTags: '🏷 Tags', tplSectionResponses: '💬 Quick responses', tplSectionQueues: '🗂 Queues',
-    tplPipelines: 'pipelines', tplStages: 'stages', tplTags: 'tags', tplResponses: 'responses', tplQueues: 'queues',
+    tplSectionPipelines: '📊 Pipelines', tplSectionTags: '🏷 Tags', tplSectionResponses: '💬 Quick responses', tplSectionQueues: '🗂 Queues', tplSectionCallBots: '🤖 Call Bots',
+    tplPipelines: 'pipelines', tplStages: 'stages', tplTags: 'tags', tplResponses: 'responses', tplQueues: 'queues', tplCallBots: 'bots',
     newResponse: '+ New response', newQuickResponse: 'New quick response', editResponse: 'Edit response',
     searchResponseHint: 'Search by title or content…', allCategories: 'All categories',
     noResponsesYet: 'No quick responses yet.', createFirstResponse: 'Create first response',
@@ -1296,8 +1296,8 @@ export const APP: Record<LangCode, {
     recommended: 'RECOMENDADO', templateApplyError: '⚠ Erro ao aplicar o modelo', templateNoChanges: 'Tudo já existia — sem alterações',
     hideDetail: 'Ocultar', viewDetail: 'Ver detalhes', reapplyTemplate: '↻ Aplicar novamente', applyTemplateBtn: 'Aplicar modelo',
     templateDetail: 'Detalhes', templateConfirmApply: 'Aplicar o modelo "{name}" a este workspace?\n\nPipelines, tags, respostas rápidas e filas serão criados. Itens existentes não serão duplicados.',
-    tplSectionPipelines: '📊 Pipelines', tplSectionTags: '🏷 Tags', tplSectionResponses: '💬 Respostas rápidas', tplSectionQueues: '🗂 Filas',
-    tplPipelines: 'pipelines', tplStages: 'etapas', tplTags: 'tags', tplResponses: 'respostas', tplQueues: 'filas',
+    tplSectionPipelines: '📊 Pipelines', tplSectionTags: '🏷 Tags', tplSectionResponses: '💬 Respostas rápidas', tplSectionQueues: '🗂 Filas', tplSectionCallBots: '🤖 Bots de Chamada',
+    tplPipelines: 'pipelines', tplStages: 'etapas', tplTags: 'tags', tplResponses: 'respostas', tplQueues: 'filas', tplCallBots: 'bots',
     newResponse: '+ Nova resposta', newQuickResponse: 'Nova resposta rápida', editResponse: 'Editar resposta',
     searchResponseHint: 'Buscar por título ou conteúdo…', allCategories: 'Todas as categorias',
     noResponsesYet: 'Nenhuma resposta rápida ainda.', createFirstResponse: 'Criar primeira resposta',
@@ -1712,8 +1712,8 @@ export const APP: Record<LangCode, {
     recommended: 'ÖNERİLEN', templateApplyError: '⚠ Şablon uygulanırken hata', templateNoChanges: 'Tümü zaten var — değişiklik yok',
     hideDetail: 'Gizle', viewDetail: 'Detayı gör', reapplyTemplate: '↻ Yeniden uygula', applyTemplateBtn: 'Şablonu uygula',
     templateDetail: 'Detay', templateConfirmApply: '"{name}" şablonunu workspace\'e uygulamak istiyor musunuz?\n\nPipelines, etiketler, hızlı yanıtlar ve kuyruklar oluşturulacak. Mevcut öğeler çoğaltılmayacak.',
-    tplSectionPipelines: '📊 Pipelines', tplSectionTags: '🏷 Etiketler', tplSectionResponses: '💬 Hızlı yanıtlar', tplSectionQueues: '🗂 Kuyruklar',
-    tplPipelines: 'hat', tplStages: 'aşama', tplTags: 'etiket', tplResponses: 'yanıt', tplQueues: 'kuyruk',
+    tplSectionPipelines: '📊 Pipelines', tplSectionTags: '🏷 Etiketler', tplSectionResponses: '💬 Hızlı yanıtlar', tplSectionQueues: '🗂 Kuyruklar', tplSectionCallBots: '🤖 Çağrı Botları',
+    tplPipelines: 'hat', tplStages: 'aşama', tplTags: 'etiket', tplResponses: 'yanıt', tplQueues: 'kuyruk', tplCallBots: 'bot',
     newResponse: '+ Yeni yanıt', newQuickResponse: 'Yeni hızlı yanıt', editResponse: 'Yanıtı düzenle',
     searchResponseHint: 'Başlık veya içeriğe göre ara…', allCategories: 'Tüm kategoriler',
     noResponsesYet: 'Henüz hızlı yanıt yok.', createFirstResponse: 'İlk yanıtı oluştur',
@@ -2128,8 +2128,8 @@ export const APP: Record<LangCode, {
     recommended: 'موصى به', templateApplyError: '⚠ خطأ في تطبيق القالب', templateNoChanges: 'كل شيء موجود — لا تغييرات',
     hideDetail: 'إخفاء', viewDetail: 'عرض التفاصيل', reapplyTemplate: '↻ تطبيق مجدداً', applyTemplateBtn: 'تطبيق القالب',
     templateDetail: 'تفاصيل', templateConfirmApply: 'تطبيق القالب "{name}" على مساحة العمل؟\n\nسيتم إنشاء مسارات ووسوم وردود سريعة وطوابير. العناصر الموجودة لن تتكرر.',
-    tplSectionPipelines: '📊 Pipelines', tplSectionTags: '🏷 الوسوم', tplSectionResponses: '💬 الردود السريعة', tplSectionQueues: '🗂 الطوابير',
-    tplPipelines: 'مسارات', tplStages: 'مراحل', tplTags: 'وسوم', tplResponses: 'ردود', tplQueues: 'طوابير',
+    tplSectionPipelines: '📊 Pipelines', tplSectionTags: '🏷 الوسوم', tplSectionResponses: '💬 الردود السريعة', tplSectionQueues: '🗂 الطوابير', tplSectionCallBots: '🤖 بوتات المكالمات',
+    tplPipelines: 'مسارات', tplStages: 'مراحل', tplTags: 'وسوم', tplResponses: 'ردود', tplQueues: 'طوابير', tplCallBots: 'بوت',
     newResponse: '+ رد جديد', newQuickResponse: 'رد سريع جديد', editResponse: 'تعديل الرد',
     searchResponseHint: 'بحث بالعنوان أو المحتوى…', allCategories: 'جميع الفئات',
     noResponsesYet: 'لا توجد ردود سريعة بعد.', createFirstResponse: 'إنشاء أول رد',

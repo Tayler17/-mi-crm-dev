@@ -1587,16 +1587,28 @@ export const updateAdminTenant = (id: string, data: {
 
 // ── Templates por industria ───────────────────────────────────────────────────
 
+export interface TemplateCallBot {
+  name: string;
+  language: string;
+  voiceType: string;
+  welcomeMessage: string;
+  systemPrompt: string;
+  fallbackMessage: string;
+  handoffKeyword: string;
+  maxCallDuration: number;
+}
+
 export interface IndustryTemplate {
   slug: string;
   name: string;
   description: string;
   icon: string;
-  counts: { pipelines: number; tags: number; cannedResponses: number; queues: number };
+  counts: { pipelines: number; tags: number; cannedResponses: number; queues: number; callBots: number };
   pipelines: { name: string; stages: string[] }[];
   tags: { name: string; color: string }[];
   cannedResponses: { title: string; shortCode: string; category: string; content: string }[];
   queues: { name: string; description: string }[];
+  callBots: TemplateCallBot[];
 }
 
 export const getTemplates = () => apiGet<IndustryTemplate[]>('/templates');

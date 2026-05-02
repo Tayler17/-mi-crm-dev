@@ -67,6 +67,7 @@ export default function TemplatesPage() {
     if (applied.tags)           parts.push(`${applied.tags} ${i.tplTags}`);
     if (applied.cannedResponses) parts.push(`${applied.cannedResponses} ${i.tplResponses}`);
     if (applied.queues)         parts.push(`${applied.queues} ${i.tplQueues}`);
+    if (applied.callBots)       parts.push(`${applied.callBots} ${i.tplCallBots}`);
     const summary = parts.length ? parts.join(' · ') : i.templateNoChanges;
     return (
       <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: '#d1fae5', border: '1px solid #6ee7b7', color: '#065f46', fontSize: 12 }}>
@@ -148,6 +149,11 @@ export default function TemplatesPage() {
                     {tpl.counts.queues > 0 && (
                       <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: '#fef3c7', color: '#78350f' }}>
                         🗂 {tpl.counts.queues} {i.tplQueues}
+                      </span>
+                    )}
+                    {tpl.counts.callBots > 0 && (
+                      <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: '#f0fdf4', color: '#15803d' }}>
+                        🤖 {tpl.counts.callBots} {i.tplCallBots}
                       </span>
                     )}
                   </div>
@@ -250,6 +256,24 @@ export default function TemplatesPage() {
                       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{q.description}</div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {preview.callBots?.length > 0 && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{i.tplSectionCallBots}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {preview.callBots.map((bot: any) => (
+                      <div key={bot.name} style={{ padding: '10px 12px', borderRadius: 8, background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                          <span style={{ fontWeight: 600, fontSize: 12 }}>🤖 {bot.name}</span>
+                          <span style={{ fontSize: 10, background: '#dcfce7', padding: '1px 5px', borderRadius: 4, color: '#166534' }}>{bot.language}</span>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>{bot.voiceType}</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>{bot.welcomeMessage}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

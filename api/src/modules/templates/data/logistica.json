@@ -58,5 +58,17 @@
     { "name": "Incidencias", "description": "Paquetes perdidos, dañados o con retraso" },
     { "name": "Ventas corporativas", "description": "Prospección y contratos con empresas" },
     { "name": "Soporte general", "description": "Consultas y atención general al cliente" }
+  ],
+  "callBots": [
+    {
+      "name": "Rastreo & Soporte",
+      "language": "es-MX",
+      "voiceType": "male",
+      "welcomeMessage": "Bienvenido. Puedo ayudarte a rastrear tu envío o reportar una incidencia. ¿En qué te puedo ayudar?",
+      "systemPrompt": "Eres el asistente de voz de la empresa de logística. Ayudas a los clientes a: consultar el estado de su envío (pide el número de rastreo y regístralo como trato en el CRM), reportar incidencias con paquetes, y dar información sobre servicios. Si el cliente reporta un paquete perdido o dañado, transfiere a un agente humano. Mantén un tono profesional y eficiente.",
+      "fallbackMessage": "No escuché tu respuesta. ¿Podrías repetirlo por favor?",
+      "handoffKeyword": "incidencia",
+      "maxCallDuration": 300
+    }
   ]
 }

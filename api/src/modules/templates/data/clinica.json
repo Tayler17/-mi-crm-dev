@@ -58,5 +58,17 @@
     { "name": "Urgencias", "description": "Casos urgentes que requieren atención inmediata" },
     { "name": "Seguimiento de pacientes", "description": "Resultados, recetas y consultas post-cita" },
     { "name": "Información general", "description": "Precios, servicios y consultas generales" }
+  ],
+  "callBots": [
+    {
+      "name": "Agenda Médica",
+      "language": "es-MX",
+      "voiceType": "female",
+      "welcomeMessage": "Bienvenido a nuestra clínica. Puedo ayudarte a agendar o consultar una cita. ¿En qué te puedo ayudar?",
+      "systemPrompt": "Eres la asistente de voz de la clínica. Ayudas a los pacientes a: agendar citas (registra nombre, fecha y motivo como trato en el CRM), consultar horarios disponibles, y dar información general sobre servicios. Ante síntomas urgentes, transfiere inmediatamente al agente humano. Mantén un tono cálido y profesional.",
+      "fallbackMessage": "No escuché bien tu respuesta. ¿Podrías repetirlo por favor?",
+      "handoffKeyword": "urgente",
+      "maxCallDuration": 300
+    }
   ]
 }

@@ -8,6 +8,16 @@ export interface TemplateTag     { name: string; color: string }
 export interface TemplateCanned  { title: string; shortCode: string; category: string; content: string }
 export interface TemplateQueue   { name: string; description: string }
 export interface TemplatePipeline { name: string; stages: string[] }
+export interface TemplateCallBot {
+  name: string;
+  language: string;
+  voiceType: string;
+  welcomeMessage: string;
+  systemPrompt: string;
+  fallbackMessage: string;
+  handoffKeyword: string;
+  maxCallDuration: number;
+}
 
 interface Template {
   slug: string;
@@ -18,6 +28,7 @@ interface Template {
   tags: TemplateTag[];
   cannedResponses: TemplateCanned[];
   queues: TemplateQueue[];
+  callBots?: TemplateCallBot[];
 }
 
 @Injectable()
@@ -39,18 +50,20 @@ export class TemplatesService {
   }
 
   list() {
-    return [...this.templates.values()].map(({ slug, name, description, icon, pipelines, tags, cannedResponses, queues }) => ({
+    return [...this.templates.values()].map(({ slug, name, description, icon, pipelines, tags, cannedResponses, queues, callBots }) => ({
       slug, name, description, icon,
       counts: {
         pipelines: pipelines.length,
         tags: tags.length,
         cannedResponses: cannedResponses.length,
         queues: queues.length,
+        callBots: (callBots ?? []).length,
       },
       pipelines,
       tags,
       cannedResponses,
       queues,
+      callBots: callBots ?? [],
     }));
   }
 
@@ -58,7 +71,7 @@ export class TemplatesService {
     const tpl = this.templates.get(slug);
     if (!tpl) throw new NotFoundException(`Template "${slug}" no encontrado`);
 
-    const applied = { pipelines: 0, stages: 0, tags: 0, cannedResponses: 0, queues: 0 };
+    const applied = { pipelines: 0, stages: 0, tags: 0, cannedResponses: 0, queues: 0, callBots: 0 };
 
     // ── Pipelines + stages ──────────────────────────────────────────────────
     for (const p of tpl.pipelines) {
@@ -140,6 +153,34 @@ export class TemplatesService {
           [tenantId, q.name, q.description],
         );
         applied.queues++;
+      }
+    }
+
+    // ── Call Bots ────────────────────────────────────────────────────────────
+    for (const bot of tpl.callBots ?? []) {
+      const [exists] = await this.db.query(
+        `SELECT id FROM call_bots WHERE tenant_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
+        [tenantId, bot.name],
+      );
+      if (!exists) {
+        await this.db.query(
+          `INSERT INTO call_bots
+             (tenant_id, name, language, voice_type, welcome_message, system_prompt,
+              fallback_message, handoff_keyword, max_call_duration, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft', NOW(), NOW())`,
+          [
+            tenantId,
+            bot.name,
+            bot.language,
+            bot.voiceType,
+            bot.welcomeMessage,
+            bot.systemPrompt,
+            bot.fallbackMessage,
+            bot.handoffKeyword,
+            bot.maxCallDuration,
+          ],
+        );
+        applied.callBots++;
       }
     }
 

@@ -63,5 +63,17 @@
     { "name": "Pedidos",       "description": "Consultas sobre estado de pedidos y envíos" },
     { "name": "Devoluciones",  "description": "Gestión de cambios y reembolsos" },
     { "name": "Soporte",       "description": "Problemas con productos y consultas generales" }
+  ],
+  "callBots": [
+    {
+      "name": "Soporte Tienda",
+      "language": "es-MX",
+      "voiceType": "female",
+      "welcomeMessage": "Hola, gracias por llamar. Puedo ayudarte con el estado de tu pedido o iniciar una devolución. ¿En qué te puedo ayudar?",
+      "systemPrompt": "Eres el asistente de voz de la tienda online. Ayudas a los clientes a: consultar el estado de su pedido (pide el número de pedido), iniciar procesos de devolución (registra como trato en el CRM con el motivo), y resolver dudas sobre productos. Si el cliente está muy molesto o el caso es complejo, transfiere al agente humano. Mantén un tono amable y resolutivo.",
+      "fallbackMessage": "Lo siento, no te escuché. ¿Puedes repetir por favor?",
+      "handoffKeyword": "humano",
+      "maxCallDuration": 300
+    }
   ]
 }

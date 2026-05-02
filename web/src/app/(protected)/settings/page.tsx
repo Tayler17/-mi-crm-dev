@@ -1481,14 +1481,14 @@ export default function SettingsPage() {
                 )}
               </div>
             </Row>
-            <Row label="Webhook URLs" hint="Configure these URLs in Twilio for each call bot">
+            <Row label="Webhook URLs" hint="Una sola URL global para todos los bots — enrutado automáticamente por número de teléfono">
               <div style={{ background: '#1e293b', borderRadius: 8, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 2 }}>
-                  Twilio → Phone Numbers → Voice webhook
+                  📞 Twilio → Phone Numbers → Voice &amp; Fax (todos los números)
                 </div>
                 {[
-                  { label: 'Voice webhook (A call comes in)', path: '/call-bots/twilio/{botId}/voice' },
-                  { label: 'Status callback', path: '/call-bots/twilio/{botId}/status' },
+                  { label: 'A call comes in (Voice URL)', path: '/call-bots/twilio/voice' },
+                  { label: 'Call status changes (Status Callback)', path: '/call-bots/twilio/status' },
                 ].map(({ label, path }) => {
                   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
                   const full = `${apiUrl}${path}`;
@@ -1505,8 +1505,8 @@ export default function SettingsPage() {
                     </div>
                   );
                 })}
-                <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
-                  Replace <code style={{ background: '#334155', padding: '1px 4px', borderRadius: 3, color: '#f8fafc' }}>{'{botId}'}</code> with the call bot ID.
+                <div style={{ fontSize: 10, color: '#64748b', marginTop: 4, lineHeight: 1.6 }}>
+                  ✅ URL global — configura la misma en todos tus números Twilio. El sistema detecta automáticamente qué bot corresponde a cada número.
                 </div>
               </div>
             </Row>

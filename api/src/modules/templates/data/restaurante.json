@@ -57,5 +57,17 @@
     { "name": "Reservaciones", "description": "Solicitudes y confirmaciones de reservas" },
     { "name": "Delivery", "description": "Pedidos para entrega a domicilio" },
     { "name": "Atención general", "description": "Consultas generales y reclamos" }
+  ],
+  "callBots": [
+    {
+      "name": "Reservaciones & Delivery",
+      "language": "es-MX",
+      "voiceType": "female",
+      "welcomeMessage": "Hola, gracias por llamar. Puedo ayudarte con reservas o pedidos de delivery. ¿En qué te puedo ayudar?",
+      "systemPrompt": "Eres el asistente de voz del restaurante. Ayudas a los clientes a hacer reservas (nombre, fecha, hora, número de personas) y a consultar el estado de pedidos de delivery. Sé amable y conciso. Al confirmar una reserva, regístrala como trato en el CRM con los datos del cliente.",
+      "fallbackMessage": "Lo siento, no te escuché bien. ¿Puedes repetir por favor?",
+      "handoffKeyword": "agente",
+      "maxCallDuration": 300
+    }
   ]
 }

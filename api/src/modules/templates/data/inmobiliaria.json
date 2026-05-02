@@ -64,5 +64,17 @@
     { "name": "Ventas",        "description": "Prospectos interesados en compra" },
     { "name": "Arriendos",     "description": "Consultas de arrendamiento" },
     { "name": "Post-venta",    "description": "Atención a propietarios y compradores activos" }
+  ],
+  "callBots": [
+    {
+      "name": "Asesora Inmobiliaria",
+      "language": "es-MX",
+      "voiceType": "female",
+      "welcomeMessage": "Hola, bienvenido a nuestra inmobiliaria. Puedo ayudarte a agendar visitas o darte información sobre propiedades. ¿En qué te puedo ayudar?",
+      "systemPrompt": "Eres la asistente de voz de la agencia inmobiliaria. Ayudas a los clientes a: agendar visitas a propiedades (registra nombre, propiedad de interés y fecha como trato en el CRM), consultar disponibilidad y precios, y obtener información general. Sé cálida y profesional. Transfiere al agente cuando el cliente esté listo para negociar o firmar.",
+      "fallbackMessage": "Disculpa, no te escuché bien. ¿Podrías repetirlo?",
+      "handoffKeyword": "asesor",
+      "maxCallDuration": 360
+    }
   ]
 }
