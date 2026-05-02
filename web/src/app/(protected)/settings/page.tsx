@@ -811,7 +811,7 @@ export default function SettingsPage() {
   const [platformForm, setPlatformForm] = useState({
     'ai.provider': 'openai', 'ai.api_key': '', 'ai.model': '',
     'voice.provider': 'twilio', 'voice.account_sid': '', 'voice.auth_token': '',
-    'meta.app_id': '', 'meta.app_secret': '',
+    'meta.app_id': '', 'meta.app_secret': '', 'meta.verify_token': '',
     'elevenlabs.api_key': '',
     'stripe.secret_key': '', 'stripe.webhook_secret': '', 'stripe.publishable_key': '',
     'backup.enabled': 'false', 'backup.cron': '0 2 * * *', 'backup.retention_days': '7',
@@ -874,8 +874,9 @@ export default function SettingsPage() {
         'voice.provider':    p['voice.provider']?.value    || 'twilio',
         'voice.account_sid': p['voice.account_sid']?.value || '',
         'voice.auth_token':  p['voice.auth_token']?.masked ? '••••••••' : (p['voice.auth_token']?.value || ''),
-        'meta.app_id':       p['meta.app_id']?.value       || '',
+        'meta.app_id':          p['meta.app_id']?.value       || '',
         'meta.app_secret':      p['meta.app_secret']?.masked       ? '••••••••' : (p['meta.app_secret']?.value || ''),
+        'meta.verify_token':    p['meta.verify_token']?.masked     ? '••••••••' : (p['meta.verify_token']?.value || ''),
         'elevenlabs.api_key':   p['elevenlabs.api_key']?.masked    ? '••••••••' : (p['elevenlabs.api_key']?.value || ''),
         'stripe.secret_key':    p['stripe.secret_key']?.masked     ? '••••••••' : (p['stripe.secret_key']?.value || ''),
         'stripe.webhook_secret':p['stripe.webhook_secret']?.masked ? '••••••••' : (p['stripe.webhook_secret']?.value || ''),
@@ -1441,13 +1442,35 @@ export default function SettingsPage() {
                 )}
               </div>
             </Row>
-            <Row label="Callback URL" hint="Register this URL in Meta dashboard as Redirect URI">
+            <Row label="Webhook Verify Token" hint="Secret token you choose — must match what you enter in Meta Webhooks">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" type="password" style={{ maxWidth: 400 }}
+                  value={platformForm['meta.verify_token']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'meta.verify_token': e.target.value }))}
+                  placeholder="automarkiq_meta_webhook" />
+                {platformCfg['meta.verify_token']?.masked && platformForm['meta.verify_token'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
+                )}
+              </div>
+            </Row>
+            <Row label="OAuth Callback URL" hint="Register in Meta → Facebook Login → Valid OAuth Redirect URIs">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border)' }}>
                 <code style={{ fontSize: 12, flex: 1, wordBreak: 'break-all' }}>
-                  {typeof window !== 'undefined' ? `${window.location.origin.replace('3000', '4000')}/connections/meta/callback` : 'http://localhost:4000/connections/meta/callback'}
+                  {typeof window !== 'undefined' ? `${window.location.origin.replace(':3000', ':4000').replace('app.', 'api.')}/connections/meta/callback` : 'https://api.automarkiq.com/connections/meta/callback'}
                 </code>
                 <button type="button" className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px', flexShrink: 0 }}
-                  onClick={() => navigator.clipboard?.writeText(`${window.location.origin.replace('3000', '4000')}/connections/meta/callback`)}>
+                  onClick={() => navigator.clipboard?.writeText(`${window.location.origin.replace(':3000', ':4000').replace('app.', 'api.')}/connections/meta/callback`)}>
+                  {i.platformCopy}
+                </button>
+              </div>
+            </Row>
+            <Row label="Webhook Callback URL" hint="Register in Meta → Webhooks → Edit Subscription">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                <code style={{ fontSize: 12, flex: 1, wordBreak: 'break-all' }}>
+                  {typeof window !== 'undefined' ? `${window.location.origin.replace(':3000', ':4000').replace('app.', 'api.')}/meta/webhook` : 'https://api.automarkiq.com/meta/webhook'}
+                </code>
+                <button type="button" className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px', flexShrink: 0 }}
+                  onClick={() => navigator.clipboard?.writeText(`${window.location.origin.replace(':3000', ':4000').replace('app.', 'api.')}/meta/webhook`)}>
                   {i.platformCopy}
                 </button>
               </div>

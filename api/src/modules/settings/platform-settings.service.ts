@@ -11,6 +11,7 @@ export const PLATFORM_KEYS = [
   'voice.auth_token',
   'meta.app_id',
   'meta.app_secret',
+  'meta.verify_token',
   'elevenlabs.api_key',
   'stripe.secret_key',
   'stripe.webhook_secret',
@@ -27,7 +28,7 @@ export const PLATFORM_KEYS = [
 
 export type PlatformKey = (typeof PLATFORM_KEYS)[number];
 
-const SENSITIVE = new Set<PlatformKey>(['ai.api_key', 'voice.auth_token', 'meta.app_secret', 'elevenlabs.api_key', 'stripe.secret_key', 'stripe.webhook_secret', 'backup.s3_secret_key']);
+const SENSITIVE = new Set<PlatformKey>(['ai.api_key', 'voice.auth_token', 'meta.app_secret', 'meta.verify_token', 'elevenlabs.api_key', 'stripe.secret_key', 'stripe.webhook_secret', 'backup.s3_secret_key']);
 const MASK = '••••••••';
 
 /** Maps each platform key to its env-var fallback (for local dev / initial setup). */
@@ -40,6 +41,7 @@ const ENV_FALLBACKS: Record<PlatformKey, string> = {
   'voice.auth_token':  'TWILIO_AUTH_TOKEN',
   'meta.app_id':          'META_APP_ID',
   'meta.app_secret':      'META_APP_SECRET',
+  'meta.verify_token':    'META_WEBHOOK_VERIFY_TOKEN',
   'elevenlabs.api_key':   'ELEVENLABS_API_KEY',
   'stripe.secret_key':     'STRIPE_SECRET_KEY',
   'stripe.webhook_secret': 'STRIPE_WEBHOOK_SECRET',
@@ -82,11 +84,12 @@ export class PlatformSettingsService {
   }
 
   /** Get Meta (Facebook/Instagram) credentials in one shot. */
-  async getMeta(): Promise<{ appId: string; appSecret: string }> {
+  async getMeta(): Promise<{ appId: string; appSecret: string; verifyToken: string }> {
     await this.loadCache();
     return {
-      appId:     await this.get('meta.app_id'),
-      appSecret: await this.get('meta.app_secret'),
+      appId:       await this.get('meta.app_id'),
+      appSecret:   await this.get('meta.app_secret'),
+      verifyToken: (await this.get('meta.verify_token')) || 'automarkiq_meta_webhook',
     };
   }
 
