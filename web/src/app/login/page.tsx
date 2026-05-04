@@ -146,7 +146,7 @@ export default function LoginPage() {
                   style={{ width: '100%', boxSizing: 'border-box', padding: '11px 14px 11px 36px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14, color: '#111', background: '#fff', outline: 'none', transition: 'border-color .15s' }}
                   placeholder={AUTH[lang].workspacePlaceholder}
                   value={workspace}
-                  onChange={(e) => setWorkspace(e.target.value)}
+                  onChange={(e) => setWorkspace(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
                   autoFocus
                   onFocus={(e) => (e.target.style.borderColor = '#6366f1')}
                   onBlur={(e)  => (e.target.style.borderColor = '#e5e7eb')}

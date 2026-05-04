@@ -117,9 +117,11 @@ export class AuthService {
   // ── Tenant resolution ─────────────────────────────────────────────────────
 
   private async resolveTenantId(slugOrUuid: string): Promise<string> {
-    const where: any = UUID_RE.test(slugOrUuid)
-      ? [{ id: slugOrUuid }, { slug: slugOrUuid }]
-      : [{ slug: slugOrUuid }];
+    // Normalize: trim, lowercase, spaces → dashes so "taylor services" works same as "taylor-services"
+    const normalized = slugOrUuid.trim().toLowerCase().replace(/\s+/g, '-');
+    const where: any = UUID_RE.test(normalized)
+      ? [{ id: normalized }, { slug: normalized }]
+      : [{ slug: normalized }];
     const tenant = await this.tenantRepo.findOne({ where });
     if (!tenant) throw new UnauthorizedException('Workspace no encontrado');
     if (!tenant.isActive) throw new UnauthorizedException('Workspace inactivo');
