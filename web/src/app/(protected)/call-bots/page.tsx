@@ -232,6 +232,17 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
   const [tab, setTab] = useState<'basic' | 'ai' | 'knowledge'>('basic');
   const pc = bot?.providerConfig ?? {};
 
+  const [availableNumbers, setAvailableNumbers] = useState<string[]>([]);
+  useEffect(() => {
+    apiGet<string[]>('/call-bots/available-phone-numbers')
+      .then((nums) => {
+        const nums2 = [...nums];
+        if (bot?.phoneNumber && !nums2.includes(bot.phoneNumber)) nums2.unshift(bot.phoneNumber);
+        setAvailableNumbers(nums2);
+      })
+      .catch(() => {});
+  }, [bot?.phoneNumber]);
+
   // ── KB state ────────────────────────────────────────────────────────────────
   const [kbSources, setKbSources] = useState<KnowledgeSource[]>([]);
   const [kbLoading, setKbLoading] = useState(false);
@@ -353,7 +364,21 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">{i.callBotPhoneLabel}</label>
-                  <input className="form-input" value={form.phoneNumber} onChange={f('phoneNumber')} placeholder="+52 55 1234 5678" />
+                  {availableNumbers.length > 0 ? (
+                    <select className="form-input" value={form.phoneNumber} onChange={f('phoneNumber')}>
+                      <option value="">— Seleccionar número —</option>
+                      {availableNumbers.map((n) => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input className="form-input" value={form.phoneNumber} onChange={f('phoneNumber')} placeholder="+52 55 1234 5678" />
+                  )}
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                    {availableNumbers.length > 0
+                      ? 'Números disponibles del pool de la plataforma.'
+                      : 'El owner debe añadir números en Configuración → Plataforma → Voice.'}
+                  </div>
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

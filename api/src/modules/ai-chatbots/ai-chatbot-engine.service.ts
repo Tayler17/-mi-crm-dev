@@ -9,6 +9,7 @@ const FormData = require('form-data');
 import { WhatsappWebService } from '../connections/whatsapp-web.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { KnowledgeBaseService } from '../knowledge-base/knowledge-base.service';
+import { PlatformSettingsService } from '../settings/platform-settings.service';
 
 interface MediaResult {
   /** Text to pass to the LLM (transcription for audio, empty for images) */
@@ -47,6 +48,7 @@ export class AiChatbotEngineService {
     private readonly waSvc: WhatsappWebService,
     private readonly notifications: NotificationsService,
     private readonly kbSvc: KnowledgeBaseService,
+    private readonly platformSettings: PlatformSettingsService,
   ) {}
 
   // ── Core processing (called by BotQueueProcessor) ────────────────────────────
@@ -166,12 +168,19 @@ export class AiChatbotEngineService {
       return;
     }
 
-    // 6. Get tenant AI keys
+    // 6. Get tenant AI keys — fall back to platform key if tenant has none
     const [tenant] = await this.db.query(`SELECT settings FROM tenants WHERE id=$1`, [tenantId]);
     const aiKeys: Record<string, string> = tenant?.settings?.aiKeys ?? {};
-    const apiKey = aiKeys[bot.provider];
+    let apiKey = aiKeys[bot.provider];
     if (!apiKey) {
-      this.logger.warn(`[engine] No API key for provider "${bot.provider}" in tenant ${tenantId} — bot "${bot.name}" cannot respond.`);
+      const platformAI = await this.platformSettings.getAI();
+      if (platformAI.provider === bot.provider && platformAI.apiKey) {
+        apiKey = platformAI.apiKey;
+        this.logger.log(`[engine] Using platform AI key for provider "${bot.provider}" (tenant ${tenantId})`);
+      }
+    }
+    if (!apiKey) {
+      this.logger.warn(`[engine] No API key for provider "${bot.provider}" in tenant ${tenantId} or platform — bot "${bot.name}" cannot respond.`);
       await this.saveBotMessage(tenantId, conversationId,
         bot.fallback_message || 'Lo siento, no estoy disponible en este momento. Por favor contacta a un agente.');
       return;

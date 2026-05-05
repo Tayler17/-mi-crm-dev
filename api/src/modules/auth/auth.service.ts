@@ -94,7 +94,7 @@ export class AuthService {
   async forgotPassword(email: string, workspace: string): Promise<void> {
     const tenantId = await this.resolveTenantId(workspace).catch(() => null);
     if (!tenantId) return; // silent — avoid workspace enumeration
-    const user = await this.userRepo.findOne({ where: { email, tenantId, isActive: true } });
+    const user = await this.userRepo.findOne({ where: { email: email.trim().toLowerCase(), tenantId, isActive: true } });
     if (!user) return; // silent — avoid email enumeration
 
     const token = crypto.randomBytes(32).toString('hex');
@@ -132,9 +132,10 @@ export class AuthService {
 
   async login(dto: LoginDto, tenantSlugOrId: string) {
     const tenantId = await this.resolveTenantId(tenantSlugOrId);
+    const email = dto.email.trim().toLowerCase();
 
     const user = await this.userRepo.findOne({
-      where: { email: dto.email, tenantId, isActive: true },
+      where: { email, tenantId, isActive: true },
     });
     if (!user) throw new UnauthorizedException('Credenciales incorrectas');
 
@@ -196,12 +197,13 @@ export class AuthService {
 
   async createUser(dto: CreateUserDto, tenantId: string) {
     await checkPlanLimit(this.db, tenantId, 'users');
-    const exists = await this.userRepo.findOne({ where: { email: dto.email, tenantId } });
+    const email = dto.email.trim().toLowerCase();
+    const exists = await this.userRepo.findOne({ where: { email, tenantId } });
     if (exists) throw new ConflictException('Ya existe un usuario con ese email en este tenant');
     const passwordHash = await bcrypt.hash(dto.password, 10);
     const user = this.userRepo.create({
       tenantId,
-      email: dto.email,
+      email,
       fullName: dto.fullName,
       passwordHash,
       role: dto.role ?? 'agent',
@@ -245,11 +247,17 @@ export class AuthService {
     });
     const savedTenant = await this.tenantRepo.save(tenant);
 
+    // Assign the free plan so checkPlanLimit enforces limits from day 1
+    const [freePlan] = await this.db.query(`SELECT id FROM plans WHERE slug = 'free' LIMIT 1`);
+    if (freePlan?.id) {
+      await this.db.query(`UPDATE tenants SET plan_id = $1 WHERE id = $2`, [freePlan.id, savedTenant.id]);
+    }
+
     const passwordHash = await bcrypt.hash(dto.password, 10);
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const user = this.userRepo.create({
       tenantId: savedTenant.id,
-      email: dto.email,
+      email: dto.email.trim().toLowerCase(),
       fullName: dto.fullName,
       passwordHash,
       role: 'admin',

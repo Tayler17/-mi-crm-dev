@@ -32,13 +32,21 @@ export async function checkPlanLimit(
   // If plan allows overage (pay-as-you-go), never block resource creation
   if (row.allow_overage) return;
 
+  // Safety net: if tenant has no plan assigned (plan_id NULL), apply FREE plan limits
+  const FREE: Record<string, number> = {
+    max_users: 2, max_contacts: 500, max_inboxes: 1,
+    max_ai_chatbots: 0, max_call_bots: 0, max_call_minutes: 0,
+  };
+  const lim = (col: string, fallback: number) =>
+    row[col] != null ? Number(row[col]) : (FREE[col] ?? fallback);
+
   const checks: Record<Resource, { limit: number; count: number; label: string }> = {
-    users:        { limit: row.max_users        ?? 0, count: row.users_count,                        label: 'usuarios' },
-    contacts:     { limit: row.max_contacts      ?? 0, count: row.contacts_count,                     label: 'contactos' },
-    inboxes:      { limit: row.max_inboxes       ?? 0, count: row.inboxes_count,                      label: 'inboxes' },
-    ai_chatbots:  { limit: row.max_ai_chatbots   ?? 0, count: row.ai_chatbots_count,                  label: 'AI chatbots' },
-    call_bots:    { limit: row.max_call_bots     ?? 0, count: row.call_bots_count,                    label: 'call bots' },
-    call_minutes: { limit: row.max_call_minutes  ?? 0, count: Math.ceil(row.call_seconds_count / 60), label: 'minutos de llamada este mes' },
+    users:        { limit: lim('max_users', 2),         count: row.users_count,                        label: 'usuarios' },
+    contacts:     { limit: lim('max_contacts', 500),    count: row.contacts_count,                     label: 'contactos' },
+    inboxes:      { limit: lim('max_inboxes', 1),       count: row.inboxes_count,                      label: 'inboxes' },
+    ai_chatbots:  { limit: lim('max_ai_chatbots', 0),   count: row.ai_chatbots_count,                  label: 'AI chatbots' },
+    call_bots:    { limit: lim('max_call_bots', 0),     count: row.call_bots_count,                    label: 'call bots' },
+    call_minutes: { limit: lim('max_call_minutes', 0),  count: Math.ceil(row.call_seconds_count / 60), label: 'minutos de llamada este mes' },
   };
 
   const { limit, count, label } = checks[resource];

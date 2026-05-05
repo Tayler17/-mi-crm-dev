@@ -6,6 +6,7 @@ import { CreateCallBotDto, UpdateCallBotDto } from './dto/call-bot.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantId } from '../../common/decorators/tenant.decorator';
 import { checkPlanLimit } from '../../common/utils/limits';
+import { PlatformSettingsService } from '../settings/platform-settings.service';
 
 @Controller('call-bots')
 @UseGuards(JwtAuthGuard)
@@ -13,7 +14,13 @@ export class CallBotsController {
   constructor(
     private readonly svc: CallBotsService,
     @InjectDataSource() private readonly db: DataSource,
+    private readonly platformSettings: PlatformSettingsService,
   ) {}
+
+  @Get('available-phone-numbers')
+  getAvailablePhoneNumbers() {
+    return this.platformSettings.getAvailablePhoneNumbers(this.db);
+  }
 
   @Get('stats')
   getStats(@TenantId() tenantId: string) {

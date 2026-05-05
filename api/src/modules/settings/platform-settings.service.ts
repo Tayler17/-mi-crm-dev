@@ -9,6 +9,7 @@ export const PLATFORM_KEYS = [
   'voice.provider',
   'voice.account_sid',
   'voice.auth_token',
+  'voice.phone_numbers',
   'meta.app_id',
   'meta.app_secret',
   'meta.verify_token',
@@ -36,9 +37,10 @@ const ENV_FALLBACKS: Record<PlatformKey, string> = {
   'ai.provider':       'PLATFORM_AI_PROVIDER',
   'ai.api_key':        'PLATFORM_AI_API_KEY',
   'ai.model':          'PLATFORM_AI_MODEL',
-  'voice.provider':    'VOICE_PROVIDER',
-  'voice.account_sid': 'TWILIO_ACCOUNT_SID',
-  'voice.auth_token':  'TWILIO_AUTH_TOKEN',
+  'voice.provider':       'VOICE_PROVIDER',
+  'voice.account_sid':    'TWILIO_ACCOUNT_SID',
+  'voice.auth_token':     'TWILIO_AUTH_TOKEN',
+  'voice.phone_numbers':  'TWILIO_PHONE_NUMBERS',
   'meta.app_id':          'META_APP_ID',
   'meta.app_secret':      'META_APP_SECRET',
   'meta.verify_token':    'META_WEBHOOK_VERIFY_TOKEN',
@@ -129,6 +131,24 @@ export class PlatformSettingsService {
       accountSid: await this.get('voice.account_sid'),
       authToken:  await this.get('voice.auth_token'),
     };
+  }
+
+  /** Returns the list of Twilio phone numbers owned by the platform. */
+  async getPhoneNumbers(): Promise<string[]> {
+    const raw = await this.get('voice.phone_numbers');
+    if (!raw) return [];
+    return raw.split(',').map((n) => n.trim()).filter(Boolean);
+  }
+
+  /** Returns phone numbers not yet assigned to any active call bot. */
+  async getAvailablePhoneNumbers(db: DataSource): Promise<string[]> {
+    const all = await this.getPhoneNumbers();
+    if (!all.length) return [];
+    const used: Array<{ phone_number: string }> = await db.query(
+      `SELECT phone_number FROM call_bots WHERE phone_number IS NOT NULL AND status != 'deleted'`,
+    );
+    const usedSet = new Set(used.map((r) => r.phone_number));
+    return all.filter((n) => !usedSet.has(n));
   }
 
   /**

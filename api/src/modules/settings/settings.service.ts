@@ -9,7 +9,10 @@ export class SettingsService {
   async getSettings(tenantId: string) {
     const rows = await this.db.query(
       `SELECT t.id, t.name, t.slug, t.plan, t.is_active, t.logo_url, t.timezone, t.language, t.currency, t.settings, t.created_at,
-              COALESCE(p.allow_own_api_keys, false) AS allow_own_api_keys
+              COALESCE(p.allow_own_api_keys, false) AS allow_own_api_keys,
+              p.name  AS plan_name,
+              p.slug  AS plan_slug,
+              p.color AS plan_color
        FROM tenants t
        LEFT JOIN plans p ON p.id = t.plan_id
        WHERE t.id = $1`,

@@ -810,7 +810,7 @@ export default function SettingsPage() {
   const [platformCfg, setPlatformCfg] = useState<PlatformSettings>({});
   const [platformForm, setPlatformForm] = useState({
     'ai.provider': 'openai', 'ai.api_key': '', 'ai.model': '',
-    'voice.provider': 'twilio', 'voice.account_sid': '', 'voice.auth_token': '',
+    'voice.provider': 'twilio', 'voice.account_sid': '', 'voice.auth_token': '', 'voice.phone_numbers': '',
     'meta.app_id': '', 'meta.app_secret': '', 'meta.verify_token': '',
     'elevenlabs.api_key': '',
     'stripe.secret_key': '', 'stripe.webhook_secret': '', 'stripe.publishable_key': '',
@@ -871,9 +871,10 @@ export default function SettingsPage() {
         'ai.provider':       p['ai.provider']?.value       || 'openai',
         'ai.api_key':        p['ai.api_key']?.masked       ? '••••••••' : (p['ai.api_key']?.value || ''),
         'ai.model':          p['ai.model']?.value          || '',
-        'voice.provider':    p['voice.provider']?.value    || 'twilio',
-        'voice.account_sid': p['voice.account_sid']?.value || '',
-        'voice.auth_token':  p['voice.auth_token']?.masked ? '••••••••' : (p['voice.auth_token']?.value || ''),
+        'voice.provider':       p['voice.provider']?.value    || 'twilio',
+        'voice.account_sid':    p['voice.account_sid']?.value || '',
+        'voice.auth_token':     p['voice.auth_token']?.masked ? '••••••••' : (p['voice.auth_token']?.value || ''),
+        'voice.phone_numbers':  p['voice.phone_numbers']?.value || '',
         'meta.app_id':          p['meta.app_id']?.value       || '',
         'meta.app_secret':      p['meta.app_secret']?.masked       ? '••••••••' : (p['meta.app_secret']?.value || ''),
         'meta.verify_token':    p['meta.verify_token']?.masked     ? '••••••••' : (p['meta.verify_token']?.value || ''),
@@ -997,12 +998,12 @@ export default function SettingsPage() {
             <Row label="Plan">
               <span style={{
                 display: 'inline-block', padding: '4px 12px', borderRadius: 12, fontSize: 12, fontWeight: 700,
-                background: settings?.plan === 'pro' ? '#eff6ff' : '#f8fafc',
-                color: settings?.plan === 'pro' ? '#3b82f6' : '#64748b',
-                border: `1px solid ${settings?.plan === 'pro' ? '#bfdbfe' : 'var(--border)'}`,
+                background: settings?.plan_color ? `${settings.plan_color}18` : '#f8fafc',
+                color: settings?.plan_color ?? '#64748b',
+                border: `1px solid ${settings?.plan_color ? `${settings.plan_color}44` : 'var(--border)'}`,
                 textTransform: 'uppercase',
               }}>
-                {settings?.plan ?? 'free'}
+                {settings?.plan_name ?? settings?.plan ?? 'Free'}
               </span>
             </Row>
           </Section>
@@ -1502,6 +1503,15 @@ export default function SettingsPage() {
                 {platformCfg['voice.auth_token']?.masked && platformForm['voice.auth_token'] === '••••••••' && (
                   <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
                 )}
+              </div>
+            </Row>
+            <Row label="Phone Numbers" hint="Números Twilio que posees, separados por coma. Los tenants los seleccionan al crear un call bot.">
+              <input className="form-input" style={{ maxWidth: 500 }}
+                value={platformForm['voice.phone_numbers']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'voice.phone_numbers': e.target.value }))}
+                placeholder="+14155552671, +14155552672" />
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                Añade aquí cada número que hayas comprado en Twilio en formato E.164 (+1XXXXXXXXXX).
               </div>
             </Row>
             <Row label="Webhook URLs" hint="Una sola URL global para todos los bots — enrutado automáticamente por número de teléfono">
