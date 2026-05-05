@@ -140,15 +140,36 @@ export class PlatformSettingsService {
     return raw.split(',').map((n) => n.trim()).filter(Boolean);
   }
 
-  /** Returns phone numbers not yet assigned to any active call bot. */
-  async getAvailablePhoneNumbers(db: DataSource): Promise<string[]> {
+  /**
+   * Returns numbers available for a tenant:
+   * - Numbers not used by any other tenant are available
+   * - If the tenant already has a number assigned, only that number is shown (reuse within tenant)
+   */
+  async getAvailablePhoneNumbers(db: DataSource, tenantId?: string): Promise<string[]> {
     const all = await this.getPhoneNumbers();
     if (!all.length) return [];
-    const used: Array<{ phone_number: string }> = await db.query(
-      `SELECT phone_number FROM call_bots WHERE phone_number IS NOT NULL AND status != 'deleted'`,
+
+    // Numbers assigned to OTHER tenants are taken
+    const usedByOthers: Array<{ phone_number: string }> = await db.query(
+      `SELECT DISTINCT phone_number FROM call_bots
+       WHERE phone_number IS NOT NULL AND status != 'deleted'
+       ${tenantId ? `AND tenant_id::text != $1` : ''}`,
+      tenantId ? [tenantId] : [],
     );
-    const usedSet = new Set(used.map((r) => r.phone_number));
-    return all.filter((n) => !usedSet.has(n));
+    const takenSet = new Set(usedByOthers.map((r) => r.phone_number));
+
+    // If this tenant already has a number, only show that one
+    if (tenantId) {
+      const [existing] = await db.query(
+        `SELECT phone_number FROM call_bots
+         WHERE tenant_id::text = $1 AND phone_number IS NOT NULL AND status != 'deleted'
+         LIMIT 1`,
+        [tenantId],
+      );
+      if (existing?.phone_number) return [existing.phone_number];
+    }
+
+    return all.filter((n) => !takenSet.has(n));
   }
 
   /**

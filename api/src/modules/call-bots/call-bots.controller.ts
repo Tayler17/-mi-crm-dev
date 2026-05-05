@@ -18,8 +18,8 @@ export class CallBotsController {
   ) {}
 
   @Get('available-phone-numbers')
-  getAvailablePhoneNumbers() {
-    return this.platformSettings.getAvailablePhoneNumbers(this.db);
+  getAvailablePhoneNumbers(@TenantId() tenantId: string) {
+    return this.platformSettings.getAvailablePhoneNumbers(this.db, tenantId);
   }
 
   @Get('stats')
