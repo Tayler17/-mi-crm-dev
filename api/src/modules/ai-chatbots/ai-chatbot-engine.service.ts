@@ -869,9 +869,13 @@ export class AiChatbotEngineService {
     if (!bot) return { reply: null, error: 'Bot no encontrado' };
 
     const [tenant] = await this.db.query(`SELECT settings FROM tenants WHERE id=$1`, [tenantId]);
-    const apiKey = tenant?.settings?.aiKeys?.[bot.provider];
+    let apiKey = tenant?.settings?.aiKeys?.[bot.provider];
     if (!apiKey) {
-      return { reply: null, error: `No hay API key configurada para "${bot.provider}".` };
+      const platformAI = await this.platformSettings.getAI();
+      if (platformAI.provider === bot.provider && platformAI.apiKey) apiKey = platformAI.apiKey;
+    }
+    if (!apiKey) {
+      return { reply: null, error: `No hay API key configurada para "${bot.provider}". Configúrala en Configuración → Integraciones de IA o pide al administrador que configure la key de plataforma.` };
     }
     try {
       const result = await this.callAi(bot, apiKey, [], { text: message });
@@ -900,7 +904,11 @@ export class AiChatbotEngineService {
     if (!bot) return null;
 
     const [tenant] = await this.db.query(`SELECT settings FROM tenants WHERE id=$1`, [tenantId]);
-    const apiKey = tenant?.settings?.aiKeys?.[bot.provider];
+    let apiKey = tenant?.settings?.aiKeys?.[bot.provider];
+    if (!apiKey) {
+      const platformAI = await this.platformSettings.getAI();
+      if (platformAI.provider === bot.provider && platformAI.apiKey) apiKey = platformAI.apiKey;
+    }
     if (!apiKey) return bot.fallback_message ?? null;
 
     const history = await this.db.query(
