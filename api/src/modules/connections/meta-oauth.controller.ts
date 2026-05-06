@@ -39,14 +39,16 @@ export class MetaOAuthController {
       JSON.stringify({ type: type || 'facebook', tenantId, inboxId, ts: Date.now() }),
     ).toString('base64url');
 
-    // Scopes needed for Messenger + Instagram messaging
+    // Scopes needed for Messenger + Instagram messaging (new API)
     const scope = [
+      'public_profile',
+      'business_management',
       'pages_show_list',
       'pages_messaging',
       'pages_read_engagement',
       'pages_manage_metadata',
-      'instagram_basic',
-      'instagram_manage_messages',
+      'instagram_business_basic',
+      'instagram_business_manage_messages',
     ].join(',');
 
     const url =
