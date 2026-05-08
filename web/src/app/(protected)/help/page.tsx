@@ -20,15 +20,45 @@ function renderMarkdown(raw: string): string {
   const lines = esc.split('\n');
   const out: string[] = [];
   let inList = false;
+  let inTable = false;
+  let tableHeaderDone = false;
+
+  const closeOpenBlocks = () => {
+    if (inList)  { out.push('</ul>'); inList = false; }
+    if (inTable) { out.push('</tbody></table>'); inTable = false; tableHeaderDone = false; }
+  };
+
+  const isTableRow = (l: string) => l.trim().startsWith('|') && l.trim().endsWith('|');
+  const isSeparator = (l: string) => /^\|[\s|:-]+\|$/.test(l.trim());
+
+  const parseRow = (l: string, tag: 'th' | 'td') => {
+    const cells = l.trim().slice(1, -1).split('|');
+    return '<tr>' + cells.map(c => `<${tag} style="padding:6px 12px;border:1px solid var(--border);text-align:left">${inlineFormat(c.trim())}</${tag}>`).join('') + '</tr>';
+  };
 
   for (let idx = 0; idx < lines.length; idx++) {
-    let line = lines[idx];
+    const line = lines[idx];
 
-    if (line.startsWith('### ')) { if (inList) { out.push('</ul>'); inList = false; } out.push(`<h3 style="margin:16px 0 6px">${line.slice(4)}</h3>`); continue; }
-    if (line.startsWith('## '))  { if (inList) { out.push('</ul>'); inList = false; } out.push(`<h2 style="margin:20px 0 8px">${line.slice(3)}</h2>`); continue; }
-    if (line.startsWith('# '))   { if (inList) { out.push('</ul>'); inList = false; } out.push(`<h1 style="margin:0 0 12px">${line.slice(2)}</h1>`); continue; }
+    if (line.startsWith('### ')) { closeOpenBlocks(); out.push(`<h3 style="margin:16px 0 6px">${line.slice(4)}</h3>`); continue; }
+    if (line.startsWith('## '))  { closeOpenBlocks(); out.push(`<h2 style="margin:20px 0 8px">${line.slice(3)}</h2>`); continue; }
+    if (line.startsWith('# '))   { closeOpenBlocks(); out.push(`<h1 style="margin:0 0 12px">${line.slice(2)}</h1>`); continue; }
 
-    if (/^---+$/.test(line.trim())) { if (inList) { out.push('</ul>'); inList = false; } out.push('<hr style="border:none;border-top:1px solid var(--border);margin:16px 0">'); continue; }
+    if (/^---+$/.test(line.trim()) && !isTableRow(line)) { closeOpenBlocks(); out.push('<hr style="border:none;border-top:1px solid var(--border);margin:16px 0">'); continue; }
+
+    if (isTableRow(line)) {
+      if (isSeparator(line)) { tableHeaderDone = true; continue; }
+      if (!inTable) {
+        if (inList) { out.push('</ul>'); inList = false; }
+        out.push('<table style="border-collapse:collapse;width:100%;margin:12px 0"><thead>');
+        inTable = true;
+        out.push(parseRow(line, 'th') + '</thead><tbody>');
+      } else {
+        out.push(parseRow(line, tableHeaderDone ? 'td' : 'th'));
+      }
+      continue;
+    }
+
+    if (inTable) { out.push('</tbody></table>'); inTable = false; tableHeaderDone = false; }
 
     if (line.startsWith('- ') || line.startsWith('* ')) {
       if (!inList) { out.push('<ul style="padding-left:20px;margin:8px 0">'); inList = true; }
@@ -41,7 +71,7 @@ function renderMarkdown(raw: string): string {
     out.push(`<p style="margin:0 0 8px">${inlineFormat(line)}</p>`);
   }
 
-  if (inList) out.push('</ul>');
+  closeOpenBlocks();
   return out.join('');
 }
 
