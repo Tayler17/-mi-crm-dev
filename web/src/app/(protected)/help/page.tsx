@@ -130,11 +130,11 @@ export default function HelpPage() {
 
   const load = useCallback(async () => {
     try {
-      setTree(await getHelpTree());
+      setTree(await getHelpTree(lang));
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
-  }, []);
+  }, [lang]);
 
   useEffect(() => {
     const user = getStoredUser();

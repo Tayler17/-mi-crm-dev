@@ -18,10 +18,10 @@ export class HelpController {
   // ── Read (all authenticated users) ───────────────────────────────────────
 
   @Get('tree')
-  getTree(@TenantId() tenantId: string, @Request() req: any) {
+  getTree(@TenantId() tenantId: string, @Request() req: any, @Query('lang') lang?: string) {
     const role = req.user?.role ?? 'agent';
     const isAdmin = role === 'admin' || role === 'owner';
-    return this.helpService.getTree(tenantId, isAdmin);
+    return this.helpService.getTree(tenantId, isAdmin, lang ?? 'es');
   }
 
   @Get('categories')
@@ -33,11 +33,12 @@ export class HelpController {
   getArticles(
     @TenantId() tenantId: string,
     @Query('categoryId') categoryId?: string,
+    @Query('lang') lang?: string,
     @Request() req?: any,
   ) {
     const role = req?.user?.role ?? 'agent';
     const isAdmin = role === 'admin' || role === 'owner';
-    return this.helpService.getArticles(tenantId, categoryId, isAdmin);
+    return this.helpService.getArticles(tenantId, categoryId, isAdmin, lang ?? 'es');
   }
 
   @Get('articles/:id')

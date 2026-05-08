@@ -71,8 +71,8 @@ export class HelpService {
 
   // ── Articles ──────────────────────────────────────────────────────────────
 
-  getArticles(tenantId: string, categoryId?: string, includeUnpublished = false) {
-    const baseWhere: any = includeUnpublished ? {} : { isPublished: true };
+  getArticles(tenantId: string, categoryId?: string, includeUnpublished = false, lang = 'es') {
+    const baseWhere: any = includeUnpublished ? { lang } : { isPublished: true, lang };
     const where = categoryId
       ? [
           { ...baseWhere, tenantId, categoryId },
@@ -104,6 +104,7 @@ export class HelpService {
       position: dto.position ?? 0,
       isPublished: dto.isPublished ?? true,
       isGlobal: dto.isGlobal ?? false,
+      lang: dto.lang ?? 'es',
     });
     return this.articleRepo.save(article);
   }
@@ -139,13 +140,24 @@ export class HelpService {
 
   // ── Full tree (categories + their articles) ───────────────────────────────
 
-  async getTree(tenantId: string, isAdmin = false) {
+  async getTree(tenantId: string, isAdmin = false, lang = 'es') {
     const categories = await this.getCategories(tenantId);
-    const articles = await this.getArticles(tenantId, undefined, isAdmin);
+
+    // Fetch articles for the requested lang
+    const preferred = await this.getArticles(tenantId, undefined, isAdmin, lang);
+
+    // For categories with no articles in the requested lang, fall back to Spanish
+    let combined = preferred;
+    if (lang !== 'es') {
+      const preferredCatIds = new Set(preferred.map((a) => a.categoryId));
+      const fallback = await this.getArticles(tenantId, undefined, isAdmin, 'es');
+      const missing = fallback.filter((a) => !preferredCatIds.has(a.categoryId));
+      combined = [...preferred, ...missing];
+    }
 
     return categories.map((cat) => ({
       ...cat,
-      articles: articles
+      articles: combined
         .filter((a) => a.categoryId === cat.id)
         .sort((a, b) => a.position - b.position),
     }));

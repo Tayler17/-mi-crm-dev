@@ -23,7 +23,7 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      await login(email, password, workspace);
+      await login(email.trim().toLowerCase(), password, workspace);
       router.push('/dashboard');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : AUTH[lang].errorCredentials);

@@ -29,6 +29,9 @@ export class HelpArticle {
   @Column({ name: 'is_global', default: false })
   isGlobal: boolean;
 
+  @Column({ nullable: false, default: 'es' })
+  lang: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

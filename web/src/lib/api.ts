@@ -1519,7 +1519,7 @@ export interface HelpCategoryTree extends HelpCategory {
   articles: HelpArticle[];
 }
 
-export const getHelpTree       = () => apiGet<HelpCategoryTree[]>('/help/tree');
+export const getHelpTree       = (lang = 'es') => apiGet<HelpCategoryTree[]>(`/help/tree?lang=${lang}`);
 export const getHelpCategories = () => apiGet<HelpCategory[]>('/help/categories');
 export const createHelpCategory = (data: Partial<HelpCategory>) =>
   apiPost<HelpCategory>('/help/categories', data);

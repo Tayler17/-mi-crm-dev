@@ -49,6 +49,9 @@ export class CreateArticleDto {
 
   @IsBoolean() @IsOptional()
   isGlobal?: boolean;
+
+  @IsString() @IsOptional()
+  lang?: string;
 }
 
 export class UpdateArticleDto {
@@ -72,4 +75,7 @@ export class UpdateArticleDto {
 
   @IsBoolean() @IsOptional()
   isGlobal?: boolean;
+
+  @IsString() @IsOptional()
+  lang?: string;
 }
