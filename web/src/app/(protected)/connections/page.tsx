@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   getConnections, createConnection, updateConnection, deleteConnection, testConnection,
-  getConnectionQr, disconnectConnectionQr,
+  getConnectionQr, startConnectionQr, disconnectConnectionQr,
   getInboxes,
   type ChannelConnection, type Inbox,
 } from '@/lib/api';
@@ -52,12 +52,16 @@ const CRED_FIELDS: Record<ChannelType, { key: string; label: string; placeholder
     { key: 'botUsername', label: 'Username del bot', placeholder: '@MiCRMBot' },
   ],
   email: [
-    { key: 'host', label: 'Servidor SMTP', placeholder: 'smtp.example.com' },
-    { key: 'port', label: 'Puerto', placeholder: '587', type: 'number' },
-    { key: 'user', label: 'Usuario', placeholder: 'hola@empresa.com' },
-    { key: 'password', label: 'Contraseña', placeholder: '••••••••', sensitive: true },
-    { key: 'fromName', label: 'Nombre del remitente', placeholder: 'Soporte Empresa' },
-    { key: 'encryption', label: 'Cifrado', placeholder: 'TLS' },
+    { key: 'host',         label: 'Servidor SMTP (saliente)',           placeholder: 'smtp.example.com' },
+    { key: 'port',         label: 'Puerto SMTP',                        placeholder: '587', type: 'number' },
+    { key: 'user',         label: 'Usuario',                            placeholder: 'hola@empresa.com' },
+    { key: 'password',     label: 'Contraseña',                         placeholder: '••••••••', sensitive: true },
+    { key: 'fromName',     label: 'Nombre del remitente',               placeholder: 'Soporte Empresa' },
+    { key: 'encryption',   label: 'Cifrado SMTP',                       placeholder: 'TLS' },
+    { key: 'imapHost',     label: 'Servidor IMAP (entrante)',           placeholder: 'imap.example.com' },
+    { key: 'imapPort',     label: 'Puerto IMAP',                        placeholder: '993', type: 'number' },
+    { key: 'imapUser',     label: 'Usuario IMAP (si distinto al SMTP)', placeholder: 'hola@empresa.com' },
+    { key: 'imapPassword', label: 'Contraseña IMAP (si distinta)',      placeholder: '••••••••', sensitive: true },
   ],
   sms: [
     { key: 'fromNumber', label: 'Número de origen (E.164)', placeholder: '+15005550006' },
@@ -84,8 +88,9 @@ function QrPanel({ conn, onStatusChange }: { conn: ChannelConnection; onStatusCh
     conn.status === 'connected' ? { qr: null, status: 'connected' } : null
   );
   const [loading, setLoading] = useState(false);
-  const pollRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef    = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryRef   = useRef(0);
 
   function stopPolling() {
     if (pollRef.current)    { clearInterval(pollRef.current);  pollRef.current   = null; }
@@ -103,24 +108,32 @@ function QrPanel({ conn, onStatusChange }: { conn: ChannelConnection; onStatusCh
     }
   }, [conn.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function startQr() {
+  async function startQr(isAutoRetry = false) {
+    if (!isAutoRetry) retryRef.current = 0;
     setLoading(true);
     stopPolling();
     try {
-      const data = await getConnectionQr(conn.id);
+      // POST to explicitly start the session (GET is now read-only and never starts a session)
+      const data = await startConnectionQr(conn.id);
       setState(data);
-      if (data.status === 'waiting_qr' || data.status === 'starting') {
+      if (data.status === 'waiting_qr' || data.status === 'starting' || data.status === 'pausing') {
         pollRef.current = setInterval(async () => {
           try {
             const fresh = await getConnectionQr(conn.id);
             setState(fresh);
             if (fresh.status === 'connected') { stopPolling(); onStatusChange(); }
-            if (fresh.status === 'error' || fresh.status === 'disconnected') { stopPolling(); }
+            // Only stop on hard error — keep polling through pausing/reconnecting states
+            if (fresh.status === 'error') { stopPolling(); }
           } catch { stopPolling(); }
         }, 3000);
         timeoutRef.current = setTimeout(() => {
           stopPolling();
-          setState({ qr: null, status: 'error' });
+          if (retryRef.current < 10) {
+            retryRef.current += 1;
+            startQr(true); // auto-refresh QR when expired
+          } else {
+            setState({ qr: null, status: 'error' });
+          }
         }, 60000);
       }
     } catch { setState({ qr: null, status: 'error' }); }
@@ -151,6 +164,31 @@ function QrPanel({ conn, onStatusChange }: { conn: ChannelConnection; onStatusCh
         <button className="btn btn-secondary" style={{ fontSize: 11, color: '#ef4444', borderColor: '#ef444444' }} onClick={handleDisconnect}>
           {i.disconnect}
         </button>
+      </div>
+    );
+  }
+
+  if (state.status === 'pausing') {
+    return (
+      <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '12px 14px', textAlign: 'center' }}>
+        <div style={{ fontSize: 20, marginBottom: 6 }}>⏸️</div>
+        <div style={{ fontSize: 13, color: '#92400e', fontWeight: 700, marginBottom: 4 }}>Auto-reconectando…</div>
+        <div style={{ fontSize: 11, color: '#78350f', marginBottom: 10, lineHeight: 1.5 }}>
+          WhatsApp limitó la conexión temporalmente.<br />El sistema reintentará automáticamente en ~15 min.
+        </div>
+        <button className="btn btn-secondary" style={{ fontSize: 11, color: '#92400e', borderColor: '#fde68a' }} onClick={handleDisconnect}>
+          🔑 Forzar reconexión (escanear QR)
+        </button>
+      </div>
+    );
+  }
+
+  if (state.status === 'reconnecting' || state.status === 'connecting') {
+    return (
+      <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '12px 14px', textAlign: 'center' }}>
+        <div style={{ fontSize: 20, marginBottom: 6 }}>🔄</div>
+        <div style={{ fontSize: 13, color: '#1d4ed8', fontWeight: 700, marginBottom: 4 }}>Reconectando…</div>
+        <div style={{ fontSize: 11, color: '#1e40af' }}>Restableciendo sesión con WhatsApp.</div>
       </div>
     );
   }
@@ -523,6 +561,8 @@ function ConnectionCard({ conn, onEdit, onDelete, onTest, onRefresh, testing }: 
     disconnected: { label: i.statusDisconnected, color: '#64748b', dot: '⚫' },
     error:        { label: i.error,              color: '#ef4444', dot: '🔴' },
     pending:      { label: i.connPending,        color: '#f59e0b', dot: '🟡' },
+    reconnecting: { label: 'Reconectando',       color: '#3b82f6', dot: '🔵' },
+    pausing:      { label: 'En pausa',           color: '#f59e0b', dot: '🟡' },
   };
 
   const ch = CHANNEL_MAP[conn.channelType as ChannelType];

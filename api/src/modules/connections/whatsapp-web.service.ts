@@ -16,6 +16,12 @@ export class WhatsappWebService implements OnModuleInit {
   private readonly intentionalDisconnects = new Set<string>();
   /** Maps LID digits → real phone digits for each connection, populated by contacts.upsert */
   private readonly lidToPhone = new Map<string, Map<string, string>>();
+  /** Guard: prevents concurrent startBaileysSession calls for the same connectionId */
+  private readonly sessionStarting = new Set<string>();
+  /** Cached WA Web version — fetched once per process to avoid repeated HTTP calls on every reconnect */
+  private cachedWaVersion: number[] | null = null;
+  /** Monotonic counter — each new Baileys socket gets a unique ID for log correlation */
+  private socketSeq = 0;
 
   constructor(
     @InjectDataSource() private readonly db: DataSource,
@@ -48,15 +54,27 @@ export class WhatsappWebService implements OnModuleInit {
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
-  async getQr(connectionId: string, _tenantId: string): Promise<{ qr: string | null; status: string }> {
+  /** Read-only: returns current session state without side effects. Never starts a session. */
+  async getQr(connectionId: string): Promise<{ qr: string | null; status: string }> {
     const existing = this.sessions.get(connectionId);
-    if (existing?.status === 'connected')  return { qr: null,          status: 'connected' };
-    if (existing?.status === 'waiting_qr') return { qr: existing.qr,   status: 'waiting_qr' };
-    if (existing?.status === 'starting')   return { qr: null,          status: 'starting' };
-    if (existing?.status === 'connecting') return { qr: null,          status: 'starting' };
+    if (existing?.status === 'connected')  return { qr: null,        status: 'connected' };
+    if (existing?.status === 'waiting_qr') return { qr: existing.qr, status: 'waiting_qr' };
+    if (existing?.status === 'starting')   return { qr: null,        status: 'starting' };
+    if (existing?.status === 'connecting') return { qr: null,        status: 'starting' };
+    if (existing?.status === 'pausing')    return { qr: null,        status: 'pausing' };
+    return { qr: null, status: 'disconnected' };
+  }
 
+  /** Explicitly start a Baileys session. Must only be called via explicit user action (POST /qr). */
+  async startSession(connectionId: string, tenantId: string): Promise<{ qr: string | null; status: string }> {
+    const existing = this.sessions.get(connectionId);
+    if (existing?.status === 'connected')  return { qr: null,        status: 'connected' };
+    if (existing?.status === 'waiting_qr') return { qr: existing.qr, status: 'waiting_qr' };
+    if (existing?.status === 'starting')   return { qr: null,        status: 'starting' };
+    if (existing?.status === 'connecting') return { qr: null,        status: 'starting' };
+    if (existing?.status === 'pausing')    return { qr: null,        status: 'pausing' };
     if (process.env.WHATSAPP_WEB_ENABLED === 'true') {
-      return this.startBaileysSession(connectionId, _tenantId);
+      return this.startBaileysSession(connectionId, tenantId);
     }
     return this.getPlaceholderQr(connectionId);
   }
@@ -159,6 +177,15 @@ export class WhatsappWebService implements OnModuleInit {
     tenantId: string,
     existingAuthState?: any,
   ): Promise<{ qr: string | null; status: string }> {
+    // Dedup guard: if a session start is already in progress for this connection,
+    // return the current status instead of creating a second Baileys socket.
+    if (this.sessionStarting.has(connectionId)) {
+      const s = this.sessions.get(connectionId);
+      return { qr: s?.qr ?? null, status: s?.status ?? 'starting' };
+    }
+    this.sessionStarting.add(connectionId);
+    const socketId = `sock-${String(++this.socketSeq).padStart(4, '0')}`;
+    this.logger.log(`[${socketId}] Starting Baileys session conn=${connectionId}`);
     try {
       // @ts-ignore — baileys is ESM-only
       const baileys = await import('@whiskeysockets/baileys');
@@ -171,7 +198,11 @@ export class WhatsappWebService implements OnModuleInit {
       // @ts-ignore
       const qrcode = await import('qrcode');
 
-      const { version } = await fetchLatestBaileysVersion();
+      if (!this.cachedWaVersion) {
+        const { version: v } = await fetchLatestBaileysVersion();
+        this.cachedWaVersion = v;
+      }
+      const version = this.cachedWaVersion;
 
       const silentLog = {
         level: 'silent' as const,
@@ -236,7 +267,9 @@ export class WhatsappWebService implements OnModuleInit {
         logger: silentLog,
         browser: Browsers.ubuntu('Chrome'),
         connectTimeoutMs: 60000,
+        keepAliveIntervalMs: 25000,
         markOnlineOnConnect: false,
+        syncFullHistory: false,
         retryRequestDelayMs: 500,
         getMessage: async () => undefined,
       });
@@ -260,7 +293,7 @@ export class WhatsappWebService implements OnModuleInit {
         if (connection === 'open') {
           this.sessions.set(connectionId, { status: 'connected', qr: null, sock });
           this.reconnectCount.set(connectionId, 0); // reset on successful connect
-          this.logger.log(`WhatsApp Web connected: ${connectionId}`);
+          this.logger.log(`[${socketId}] WhatsApp Web connected: conn=${connectionId}`);
           await this.db.query(
             `UPDATE channel_connections SET status='connected', last_tested_at=NOW(), updated_at=NOW() WHERE id=$1`,
             [connectionId],
@@ -268,21 +301,25 @@ export class WhatsappWebService implements OnModuleInit {
         }
 
         if (connection === 'close') {
-          this.logger.warn(`WhatsApp close code=${code} conn=${connectionId}`);
+          const reason = code === 401 ? 'loggedOut' : code === 403 ? 'forbidden' : code === 408 ? 'timeout/throttled' : code === 440 ? 'replacedByOtherDevice' : code === 500 ? 'streamError/badMAC' : `code=${code}`;
+          this.logger.warn(`[${socketId}] WhatsApp close conn=${connectionId} reason=${reason}`);
           // intentional disconnect — already cleaned up in disconnectSession, nothing to do
           if (this.intentionalDisconnects.has(connectionId)) {
             this.intentionalDisconnects.delete(connectionId);
             return;
           }
           // codes that mean the session is permanently gone — need re-scan
-          const permanent = code === 401 || code === 403 || code === 500 || code === 440;
-          if (!permanent) {
-            // transient disconnect — enforce a max-retry limit to avoid infinite loops
+          // 408 = connection timeout (stale/rejected creds) — treat as permanent after burst
+          const permanent = code === 401 || code === 403 || code === 440;
+          // code 500 = stream error (Bad MAC / key desync) — recoverable without re-scan
+          // clear signal keys so WhatsApp re-negotiates them, keep creds (no QR needed)
+          const badMac = code === 500;
+          if (badMac) {
             const retries = (this.reconnectCount.get(connectionId) ?? 0) + 1;
             this.reconnectCount.set(connectionId, retries);
-            const MAX_RETRIES = 10;
-            if (retries > MAX_RETRIES) {
-              this.logger.warn(`Max retries (${MAX_RETRIES}) reached for conn=${connectionId} — clearing session and requiring re-scan`);
+            const MAX_BAD_MAC = 5;
+            if (retries > MAX_BAD_MAC) {
+              this.logger.warn(`Bad MAC retries exhausted (${MAX_BAD_MAC}) conn=${connectionId} — requiring re-scan`);
               this.sessions.delete(connectionId);
               this.reconnectCount.delete(connectionId);
               try { sock.end(undefined); } catch {}
@@ -293,13 +330,55 @@ export class WhatsappWebService implements OnModuleInit {
               ]);
               return;
             }
-            // auto-reconnect with exponential backoff (5s, 10s, 20s, 40s … capped at 60s)
-            this.logger.log(`Auto-reconnecting (${retries}/${MAX_RETRIES}, code=${code}) conn=${connectionId}`);
+            this.logger.warn(`Bad MAC / stream error (code=500, attempt ${retries}/${MAX_BAD_MAC}) — clearing signal keys and reconnecting conn=${connectionId}`);
+            // clear only signal keys (creds stay valid — no QR needed)
+            await this.db.query(`DELETE FROM wa_session_keys WHERE connection_id=$1`, [connectionId]).catch(() => {});
+            this.sessions.set(connectionId, { status: 'connecting', qr: null });
+            try { sock.end(undefined); } catch {}
+            setTimeout(() => {
+              this.startBaileysSession(connectionId, tenantId).catch(() => {
+                this.sessions.delete(connectionId);
+              });
+            }, 3000 * retries);
+            return;
+          }
+          if (!permanent) {
+            // transient disconnect — retry with backoff, pause after burst
+            const retries = (this.reconnectCount.get(connectionId) ?? 0) + 1;
+            this.reconnectCount.set(connectionId, retries);
+            // 408 = WA throttle: limit retries aggressively to reduce re-sync notifications on phone
+            const MAX_BURST = code === 408 ? 2 : 5;
+            if (retries > MAX_BURST) {
+              // Burst exhausted — pause and retry later WITHOUT deleting creds.
+              // 408 = WA server throttling (too many reconnects from same IP).
+              // Deleting creds here forces a full QR re-scan which is never needed
+              // for throttle errors — just wait and WA will accept the session again.
+              const pause = code === 408 ? 15 * 60 * 1000 : 10 * 60 * 1000;
+              const pauseLabel = code === 408 ? '15 min' : '10 min';
+              this.logger.warn(`Burst retries (${MAX_BURST}) exhausted for conn=${connectionId} (code=${code}) — pausing ${pauseLabel}, creds preserved`);
+              // Keep 'pausing' in the map so getQr() won't start a duplicate session during wait
+              this.sessions.set(connectionId, { status: 'pausing', qr: null });
+              this.reconnectCount.delete(connectionId);
+              try { sock.end(undefined); } catch {}
+              await this.db.query(`UPDATE channel_connections SET status='disconnected', updated_at=NOW() WHERE id=$1`, [connectionId]).catch(() => {});
+              setTimeout(() => {
+                this.sessions.delete(connectionId); // clear pausing before fresh start
+                this.startBaileysSession(connectionId, tenantId).catch(() => {
+                  this.sessions.delete(connectionId);
+                });
+              }, pause);
+              return;
+            }
+            // auto-reconnect: 408 uses slow backoff (30s/60s/90s) to avoid WA throttle;
+            // other transient codes use fast exponential (5s, 10s, 20s, 40s, 60s)
+            this.logger.log(`Auto-reconnecting (${retries}/${MAX_BURST}, code=${code}) conn=${connectionId}`);
             this.sessions.set(connectionId, { status: 'connecting', qr: null });
             try { sock.end(undefined); } catch {}
             const backoff = code === DisconnectReason.restartRequired
               ? 1000
-              : Math.min(5000 * Math.pow(2, retries - 1), 60000);
+              : code === 408
+                ? Math.min(30000 * retries, 120000)
+                : Math.min(5000 * Math.pow(2, retries - 1), 60000);
             setTimeout(() => {
               this.startBaileysSession(connectionId, tenantId, authState).catch(() => {
                 this.sessions.delete(connectionId);
@@ -459,6 +538,8 @@ export class WhatsappWebService implements OnModuleInit {
       this.sessions.delete(connectionId);
       this.logger.error(`Baileys session failed: ${e.message}`);
       return { qr: null, status: 'error' };
+    } finally {
+      this.sessionStarting.delete(connectionId);
     }
   }
 
@@ -479,6 +560,7 @@ export class WhatsappWebService implements OnModuleInit {
     const remoteJid: string = msg.key?.remoteJid ?? '';
     if (isJidBroadcast(remoteJid))       return;
     if (isJidStatusBroadcast(remoteJid)) return;
+    if (remoteJid.endsWith('@newsletter')) return;
 
     const isGroup = isJidGroup(remoteJid);
 

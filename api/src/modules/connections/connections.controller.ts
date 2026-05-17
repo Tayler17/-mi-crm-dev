@@ -43,8 +43,13 @@ export class ConnectionsController {
   }
 
   @Get(':id/qr')
-  getQr(@Param('id') id: string, @TenantId() tenantId: string) {
-    return this.waSvc.getQr(id, tenantId);
+  getQr(@Param('id') id: string) {
+    return this.waSvc.getQr(id);
+  }
+
+  @Post(':id/qr')
+  startQr(@Param('id') id: string, @TenantId() tenantId: string) {
+    return this.waSvc.startSession(id, tenantId);
   }
 
   @Delete(':id/qr')

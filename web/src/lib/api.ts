@@ -982,6 +982,7 @@ export const updateConnection = (id: string, data: Partial<ChannelConnection>) =
 export const deleteConnection = (id: string) => apiDelete(`/connections/${id}`);
 export const testConnection = (id: string) => apiPost<{ ok: boolean; message: string }>(`/connections/${id}/test`, {});
 export const getConnectionQr = (id: string) => apiGet<{ qr: string | null; status: string }>(`/connections/${id}/qr`);
+export const startConnectionQr = (id: string) => apiPost<{ qr: string | null; status: string }>(`/connections/${id}/qr`, {});
 export const disconnectConnectionQr = (id: string) => apiDelete(`/connections/${id}/qr`);
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -1584,6 +1585,7 @@ export const updateAdminTenant = (id: string, data: {
   name?: string; plan?: string; isActive?: boolean;
   planId?: string | null; billingEmail?: string; billingNotes?: string; planExpiresAt?: string | null;
 }) => apiPatch<{ ok: boolean }>(`/auth/tenants/${id}`, data);
+export const deleteAdminTenant = (id: string) => apiDelete(`/auth/tenants/${id}`);
 
 // ── Templates por industria ───────────────────────────────────────────────────
 
