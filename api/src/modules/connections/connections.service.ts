@@ -93,7 +93,23 @@ export class ConnectionsService {
 
   async remove(id: string, tenantId: string) {
     const conn = await this.findOne(id, tenantId);
+    const inboxId = conn.inboxId;
     await this.repo.remove(conn);
+    if (inboxId) {
+      // Nullify FK references before deleting the inbox to avoid constraint errors
+      await this.db.query(
+        `UPDATE conversations SET inbox_id = NULL WHERE inbox_id = $1`,
+        [inboxId],
+      ).catch(() => {});
+      await this.db.query(
+        `DELETE FROM conversation_flows WHERE inbox_id = $1`,
+        [inboxId],
+      ).catch(() => {});
+      await this.db.query(
+        `DELETE FROM inboxes WHERE id = $1 AND tenant_id = $2`,
+        [inboxId, tenantId],
+      ).catch(() => {});
+    }
   }
 
   // ── Test connection ───────────────────────────────────────────────────────────
@@ -218,7 +234,7 @@ export class ConnectionsService {
         }
         try {
           const transport = nodemailer.createTransport({
-            host: creds.host,
+            host: String(creds.host).trim(),
             port: Number(creds.port),
             secure: Number(creds.port) === 465,
             auth: { user: creds.user, pass: creds.password },
@@ -251,7 +267,7 @@ export class ConnectionsService {
   // ── Helpers ───────────────────────────────────────────────────────────────────
 
   private maskCredentials(channelType: string, creds: Record<string, any>): Record<string, any> {
-    const SENSITIVE = ['accessToken', 'password', 'botToken', 'apiSecret', 'apiKey', 'appSecret', 'webhookVerifyToken', 'authToken'];
+    const SENSITIVE = ['accessToken', 'password', 'botToken', 'apiSecret', 'apiKey', 'appSecret', 'webhookVerifyToken', 'authToken', 'imapPassword'];
     const result: Record<string, any> = {};
     for (const [k, v] of Object.entries(creds)) {
       result[k] = SENSITIVE.includes(k) && v ? '••••••••' : v;
