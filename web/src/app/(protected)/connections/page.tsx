@@ -149,7 +149,7 @@ function QrPanel({ conn, onStatusChange }: { conn: ChannelConnection; onStatusCh
     return (
       <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, padding: '12px 14px', textAlign: 'center' }}>
         <div style={{ fontSize: 13, color: '#15803d', marginBottom: 8 }}>{i.qrScanHint}</div>
-        <button className="btn btn-secondary" style={{ fontSize: 12, color: '#15803d', borderColor: '#86efac' }} onClick={startQr} disabled={loading}>
+        <button className="btn btn-secondary" style={{ fontSize: 12, color: '#15803d', borderColor: '#86efac' }} onClick={() => startQr()} disabled={loading}>
           {loading ? `⏳ ${i.startingSession}` : `📷 ${i.scanQr}`}
         </button>
       </div>
