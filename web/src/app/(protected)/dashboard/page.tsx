@@ -159,14 +159,10 @@ function usageEmoji(pct: number) {
 function PlanUsageWidget({ plan }: {
   plan: { tenant: any; usage: Record<string, number>; overage?: { totalOverageCost: number; allowOverage: boolean } | null }
 }) {
+  const [dismissed, setDismissed] = useState(false);
   const { tenant, usage, overage } = plan;
   if (!tenant) return null;
 
-  const planColor = tenant.color ?? '#6366f1';
-  const planName  = tenant.plan_name ?? tenant.plan ?? 'Plan';
-  const planPrice = Number(tenant.price ?? 0);
-
-  // Items with a limit → show bar. Call minutes always shown.
   const limitedItems = [
     { label: 'Usuarios',    used: usage.users            ?? 0, max: tenant.max_users           ?? 0 },
     { label: 'Contactos',   used: usage.contacts          ?? 0, max: tenant.max_contacts         ?? 0 },
@@ -175,113 +171,50 @@ function PlanUsageWidget({ plan }: {
     { label: 'Min tel/mes', used: usage.callMinutesMonth  ?? 0, max: tenant.max_call_minutes     ?? 0 },
   ].filter((item) => item.max > 0);
 
-  // Call minutes always displayed even without a plan limit
-  const callMinutes = usage.callMinutesMonth ?? 0;
-  const callMinLimit = tenant.max_call_minutes ?? 0;
-
-  // Worst usage % for alert logic
-  const worstPct = limitedItems.length > 0
-    ? Math.max(...limitedItems.map((i) => Math.round((i.used / i.max) * 100)))
-    : 0;
-
-  const isOver   = worstPct >= 100;
-  const isWarn   = !isOver && worstPct >= 70;
+  const worstPct  = limitedItems.length > 0 ? Math.max(...limitedItems.map((i) => Math.round((i.used / i.max) * 100))) : 0;
+  const isOver    = worstPct >= 100;
+  const isWarn    = !isOver && worstPct >= 80;
   const extraCost = overage?.totalOverageCost ?? 0;
+  const planName  = tenant.plan_name ?? tenant.plan ?? 'Plan';
+  const planPrice = Number(tenant.price ?? 0);
 
-  if (limitedItems.length === 0 && callMinutes === 0) return null;
+  // Only show when approaching or over limit, and not dismissed by admin
+  if ((!isOver && !isWarn) || dismissed) return null;
+
+  const worstItem = limitedItems.reduce((a, b) =>
+    Math.round((a.used / a.max) * 100) >= Math.round((b.used / b.max) * 100) ? a : b
+  );
+  const worstItemPct = Math.round((worstItem.used / worstItem.max) * 100);
 
   return (
-    <div style={{ marginBottom: 20 }}>
-      {/* Upgrade pressure alert */}
-      {(isOver || isWarn) && (
-        <div style={{
-          padding: '10px 16px', borderRadius: 10, marginBottom: 10,
-          background: isOver ? '#fef2f2' : '#fffbeb',
-          border: `1px solid ${isOver ? '#fca5a5' : '#fcd34d'}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-        }}>
-          <div style={{ fontSize: 13 }}>
-            <span style={{ fontWeight: 700, color: isOver ? '#dc2626' : '#92400e' }}>
-              {isOver ? '🚨 Has superado el límite de tu plan' : '⚠️ Estás cerca del límite de tu plan'}
-            </span>
-            {isOver && extraCost > 0 && (
-              <span style={{ marginLeft: 8, color: '#dc2626' }}>— Coste extra acumulado: <strong>${extraCost.toFixed(2)}</strong></span>
-            )}
-          </div>
-          <a href="/billing" style={{
-            fontSize: 12, fontWeight: 700, padding: '4px 12px', borderRadius: 6,
-            background: isOver ? '#dc2626' : '#f59e0b', color: '#fff', textDecoration: 'none', flexShrink: 0,
-          }}>
-            {isOver ? 'Ver detalles' : 'Upgrade ahora'}
-          </a>
-        </div>
-      )}
-
-      {/* Usage bars card */}
-      <div className="card" style={{ padding: '14px 18px', borderLeft: `4px solid ${planColor}` }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: planColor }} />
-            <span style={{ fontSize: 13, fontWeight: 700 }}>Plan: {planName}</span>
-            {planPrice > 0 && (
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>${planPrice}/mes</span>
-            )}
-          </div>
-          <a href="/billing" style={{ fontSize: 12, color: 'var(--primary)', textDecoration: 'none' }}>Ver detalles →</a>
-        </div>
-
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-          {/* Limited resources with progress bars */}
-          {limitedItems.map(({ label, used, max }) => {
-            const pct = Math.min(100, Math.round((used / max) * 100));
-            const col = usageColor(pct);
-            return (
-              <div key={label} style={{ flex: '1 1 120px', minWidth: 100 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
-                  <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>{usageEmoji(pct)} {label}</span>
-                  <span style={{ color: col, fontWeight: 600 }}>{used.toLocaleString()} / {max.toLocaleString()}</span>
-                </div>
-                <div style={{ height: 5, background: 'var(--bg-secondary)', borderRadius: 3, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${pct}%`, background: col, borderRadius: 3, transition: 'width 0.4s' }} />
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Call minutes always shown — with bar if limit set, raw count if not */}
-          {callMinLimit === 0 && (
-            <div style={{ flex: '1 1 120px', minWidth: 100 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
-                <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>📞 Min tel/mes</span>
-                <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{callMinutes.toLocaleString()} min</span>
-              </div>
-              <div style={{ height: 5, background: 'var(--bg-secondary)', borderRadius: 3 }} />
-            </div>
-          )}
-        </div>
-
-        {/* Estimated cost this month */}
-        {(planPrice > 0 || extraCost > 0) && (
-          <div style={{
-            marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border)',
-            display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center',
-          }}>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
-              💰 Coste estimado este mes
-            </span>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              Plan: <strong>${planPrice.toFixed(2)}</strong>
-            </span>
-            {extraCost > 0 && (
-              <span style={{ fontSize: 12, color: '#f59e0b' }}>
-                Uso extra: <strong>${extraCost.toFixed(2)}</strong>
-              </span>
-            )}
-            <span style={{ fontSize: 13, fontWeight: 700, color: isOver ? '#ef4444' : 'var(--text)', marginLeft: 'auto' }}>
-              Total: ${(planPrice + extraCost).toFixed(2)}
-            </span>
-          </div>
+    <div style={{
+      marginBottom: 20, padding: '12px 16px', borderRadius: 10,
+      background: isOver ? '#fef2f2' : '#fffbeb',
+      border: `1px solid ${isOver ? '#fca5a5' : '#fcd34d'}`,
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    }}>
+      <div style={{ fontSize: 13, flex: 1 }}>
+        <span style={{ fontWeight: 700, color: isOver ? '#dc2626' : '#92400e' }}>
+          {isOver ? '🚨 Has superado el límite de tu plan' : `⚠️ ${worstItem.label} al ${worstItemPct}% — cerca del límite`}
+        </span>
+        <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+          Plan {planName} · {worstItem.used.toLocaleString()} / {worstItem.max.toLocaleString()} {worstItem.label.toLowerCase()}
+        </span>
+        {isOver && extraCost > 0 && (
+          <span style={{ marginLeft: 8, color: '#dc2626', fontWeight: 600 }}>— Coste extra: ${extraCost.toFixed(2)}</span>
         )}
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+        <a href="/billing" style={{
+          fontSize: 12, fontWeight: 700, padding: '5px 14px', borderRadius: 6,
+          background: isOver ? '#dc2626' : '#f59e0b', color: '#fff', textDecoration: 'none',
+        }}>
+          {isOver ? 'Ver detalles' : 'Upgrade'}
+        </a>
+        <button onClick={() => setDismissed(true)} style={{
+          border: 'none', background: 'transparent', cursor: 'pointer',
+          fontSize: 16, color: 'var(--text-muted)', lineHeight: 1, padding: '2px 4px',
+        }} title="Cerrar">✕</button>
       </div>
     </div>
   );
