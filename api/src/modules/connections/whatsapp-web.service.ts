@@ -199,8 +199,16 @@ export class WhatsappWebService implements OnModuleInit {
       const qrcode = await import('qrcode');
 
       if (!this.cachedWaVersion) {
-        const { version: v } = await fetchLatestBaileysVersion();
-        this.cachedWaVersion = v;
+        try {
+          const { version: v } = await Promise.race([
+            fetchLatestBaileysVersion(),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000)),
+          ]);
+          this.cachedWaVersion = v;
+        } catch {
+          this.cachedWaVersion = [2, 3000, 1023141924]; // known-good fallback
+          this.logger.warn('fetchLatestBaileysVersion timed out — using fallback WA version');
+        }
       }
       const version = this.cachedWaVersion;
 

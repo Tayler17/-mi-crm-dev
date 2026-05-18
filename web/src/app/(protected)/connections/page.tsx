@@ -134,7 +134,7 @@ function QrPanel({ conn, onStatusChange }: { conn: ChannelConnection; onStatusCh
           } else {
             setState({ qr: null, status: 'error' });
           }
-        }, 60000);
+        }, 120000);
       }
     } catch { setState({ qr: null, status: 'error' }); }
     finally { setLoading(false); }
