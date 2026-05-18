@@ -316,6 +316,21 @@ export class WhatsappWebService implements OnModuleInit {
             this.intentionalDisconnects.delete(connectionId);
             return;
           }
+          // If the QR was never scanned (qr still in session), don't auto-reconnect —
+          // just reset to disconnected so the user can click "Scan QR" again cleanly.
+          // Auto-reconnecting from an unscanned QR state burns the retry budget for no benefit.
+          const currentSession = this.sessions.get(connectionId);
+          if (currentSession?.qr !== null) {
+            this.logger.log(`[${socketId}] QR expired unscanned — resetting to disconnected conn=${connectionId}`);
+            this.sessions.delete(connectionId);
+            this.reconnectCount.delete(connectionId);
+            try { sock.end(undefined); } catch {}
+            await this.db.query(
+              `UPDATE channel_connections SET status='disconnected', updated_at=NOW() WHERE id=$1`,
+              [connectionId],
+            ).catch(() => {});
+            return;
+          }
           // codes that mean the session is permanently gone — need re-scan
           // 408 = connection timeout (stale/rejected creds) — treat as permanent after burst
           const permanent = code === 401 || code === 403 || code === 440;
