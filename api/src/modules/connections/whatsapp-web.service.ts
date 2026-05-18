@@ -291,6 +291,16 @@ export class WhatsappWebService implements OnModuleInit {
         const { connection, qr, lastDisconnect } = update;
         const code: number = (lastDisconnect?.error as any)?.output?.statusCode;
 
+        // QR was scanned — phone is loading WhatsApp. Mark as connecting so the
+        // frontend timer resets and doesn't show "timed out" during phone loading.
+        if (connection === 'connecting') {
+          const s = this.sessions.get(connectionId);
+          if (s && (s.status === 'waiting_qr' || s.status === 'starting')) {
+            this.logger.log(`[${socketId}] QR scanned — phone connecting conn=${connectionId}`);
+            this.sessions.set(connectionId, { ...s, status: 'connecting', qr: null });
+          }
+        }
+
         if (qr) {
           try {
             const dataUrl = await qrcode.toDataURL(qr, { width: 256, margin: 1 });
