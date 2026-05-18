@@ -123,6 +123,7 @@ export default function LandingPage() {
   const [plans, setPlans]     = useState<Plan[]>([]);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [scrolled, setScrolled] = useState(false);
+  const [mobileMenu, setMobileMenu] = useState(false);
   const isRtl = lang === 'ar';
 
   useEffect(() => {
@@ -153,16 +154,16 @@ export default function LandingPage() {
           AutoMarkIQ
         </span>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          {/* Text links — hidden on mobile via .land-nav-links CSS rule */}
+          {/* Desktop links — hidden on mobile */}
           <div className="land-nav-links" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             <a href="#features" className="land-nav-link">{t.nav_features}</a>
             <a href="#pricing"  className="land-nav-link">{t.nav_pricing}</a>
+            <a href="https://app.automarkiq.com/login" className="land-nav-link">{t.nav_login}</a>
           </div>
-          {/* Login — always visible, compact on mobile */}
-          <a href="https://app.automarkiq.com/login" className="land-nav-link land-nav-login">{t.nav_login}</a>
           {/* LangPicker — always visible */}
           <LangPicker lang={lang} setLang={setLang} />
-          <a href="https://app.automarkiq.com/register" className="land-nav-cta" style={{
+          {/* CTA — hidden on mobile (inside hamburger menu) */}
+          <a href="https://app.automarkiq.com/register" className="land-nav-cta land-nav-cta-desktop" style={{
             background: '#6366f1', color: '#fff',
             textDecoration: 'none', fontWeight: 700,
             borderRadius: 8, transition: 'opacity 0.15s', whiteSpace: 'nowrap',
@@ -171,9 +172,27 @@ export default function LandingPage() {
             onMouseLeave={e => (e.currentTarget.style.opacity='1')}>
             {t.nav_cta}
           </a>
+          {/* Hamburger — visible only on mobile */}
+          <button
+            className="land-hamburger"
+            onClick={() => setMobileMenu(o => !o)}
+            aria-label="Menu"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px 4px', color: '#374151' }}
+          >
+            {mobileMenu ? '✕' : '☰'}
+          </button>
         </div>
       </nav>
 
+      {/* Mobile dropdown menu */}
+      {mobileMenu && (
+        <div className="land-mobile-menu" onClick={() => setMobileMenu(false)}>
+          <a href="#features" className="land-mobile-link" onClick={() => setMobileMenu(false)}>{t.nav_features}</a>
+          <a href="#pricing"  className="land-mobile-link" onClick={() => setMobileMenu(false)}>{t.nav_pricing}</a>
+          <a href="https://app.automarkiq.com/login"    className="land-mobile-link">{t.nav_login}</a>
+          <a href="https://app.automarkiq.com/register" className="land-mobile-cta">{t.nav_cta}</a>
+        </div>
+      )}
       {/* ── HERO ── */}
       <section style={{
         minHeight: '100vh', display: 'flex', flexDirection: 'column',

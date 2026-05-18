@@ -59,11 +59,62 @@ body { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
   .land-stats > div { min-width: 120px; }
 }
 
+/* Hamburger button — hidden on desktop, visible on mobile */
+.land-hamburger { display: none; font-size: 22px; line-height: 1; }
+
+/* Mobile dropdown menu — hidden on desktop */
+.land-mobile-menu {
+  display: none;
+}
+
 @media (max-width: 640px) {
+  /* Hide desktop-only nav items */
   .land-nav-links { display: none !important; }
+  .land-nav-cta-desktop { display: none !important; }
+
+  /* Show hamburger */
+  .land-hamburger { display: block; }
+
+  /* Mobile dropdown */
+  .land-mobile-menu {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 64px;
+    left: 0; right: 0;
+    background: #fff;
+    border-bottom: 1px solid #e2e8f0;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    z-index: 99;
+    padding: 8px 0 16px;
+  }
+
+  .land-mobile-link {
+    display: block;
+    padding: 14px 24px;
+    font-size: 15px;
+    font-weight: 500;
+    color: #374151;
+    text-decoration: none;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .land-mobile-link:hover { background: #f8fafc; }
+
+  .land-mobile-cta {
+    display: block;
+    margin: 12px 24px 0;
+    padding: 12px 20px;
+    background: #6366f1;
+    color: #fff;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 15px;
+    border-radius: 10px;
+    text-align: center;
+  }
+
+  /* Adjust remaining nav items */
   .land-nav { padding: 0 16px; }
   .land-logo { font-size: 16px; }
-  .land-nav-login { font-size: 12px; padding: 6px 8px; }
-  .land-nav-cta { padding: 8px 14px; font-size: 13px; white-space: nowrap; }
   .land-lang-btn { padding: 5px 8px; font-size: 12px; }
 }
