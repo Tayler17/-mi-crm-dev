@@ -199,7 +199,9 @@ export class WhatsappWebService implements OnModuleInit {
       const qrcode = await import('qrcode');
 
       if (!this.cachedWaVersion) {
-        const { version: v } = await fetchLatestBaileysVersion();
+        // Pass a short timeout so Baileys falls back to its own bundled version
+        // if GitHub is slow (common on VPS). The bundled version is always valid.
+        const { version: v } = await fetchLatestBaileysVersion({ timeout: 5000 });
         this.cachedWaVersion = v;
       }
       const version = this.cachedWaVersion;
