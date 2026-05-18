@@ -61,6 +61,7 @@ export async function register(payload: {
   email: string;
   password: string;
   acceptedTerms: boolean;
+  lang?: string;
 }) {
   const res = await fetch(`${API_URL}/auth/register`, {
     method: 'POST',
@@ -432,6 +433,7 @@ export interface Tag {
   color?: string;
   createdAt: string;
   contactCount?: number;
+  conversationCount?: number;
 }
 
 export const getTags = () => apiGet<Tag[]>('/tags');
@@ -1000,6 +1002,8 @@ export interface TenantSettings {
   is_active: boolean;
   created_at: string;
   allow_own_api_keys?: boolean;
+  plan_color?: string;
+  plan_name?: string;
 }
 
 export interface Announcement {
