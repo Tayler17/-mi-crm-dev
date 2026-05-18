@@ -7,6 +7,60 @@ import { login } from '@/lib/api';
 import { useLang, LANGS } from '@/lib/useLang';
 import { AUTH } from '@/lib/i18n/auth';
 
+const LANG_COLORS: Record<string, string> = {
+  es: '#c60b1e', en: '#012169', pt: '#009c3b', tr: '#e30a17', ar: '#006c35',
+};
+function LangBadge({ code }: { code: string }) {
+  return (
+    <span style={{
+      display: 'inline-block', background: LANG_COLORS[code] || '#64748b', color: '#fff',
+      padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 800,
+      letterSpacing: '0.04em', minWidth: 24, textAlign: 'center',
+    }}>{code.toUpperCase()}</span>
+  );
+}
+function LangPicker({ lang, setLang }: { lang: string; setLang: (c: any) => void }) {
+  const [open, setOpen] = useState(false);
+  const current = LANGS.find(l => l.code === lang) ?? LANGS[0];
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '5px 10px', borderRadius: 8, border: '1px solid #e2e8f0',
+        background: '#fff', cursor: 'pointer', fontWeight: 600,
+        color: '#475569', fontSize: 12,
+      }}>
+        <LangBadge code={current.code} />
+        <span style={{ fontSize: 9 }}>▾</span>
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 10 }} />
+          <div style={{
+            position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 20,
+            background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.12)', overflow: 'hidden', minWidth: 148,
+          }}>
+            {LANGS.map(l => (
+              <button key={l.code} onClick={() => { setLang(l.code); setOpen(false); }} style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                padding: '10px 16px', border: 'none',
+                background: l.code === lang ? '#f0f4ff' : '#fff',
+                cursor: 'pointer', fontSize: 13,
+                fontWeight: l.code === lang ? 700 : 500,
+                color: l.code === lang ? '#6366f1' : '#374151', textAlign: 'left',
+              }}>
+                <LangBadge code={l.code} /> {l.label}
+                {l.code === lang && <span style={{ marginLeft: 'auto', color: '#6366f1' }}>✓</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { lang, setLang } = useLang();
@@ -51,9 +105,8 @@ export default function LoginPage() {
         <div style={{ position: 'absolute', top: -120, right: -80, width: 400, height: 400, borderRadius: '50%', background: 'radial-gradient(circle, #6366f133 0%, transparent 70%)', pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', bottom: -100, left: -60, width: 360, height: 360, borderRadius: '50%', background: 'radial-gradient(circle, #818cf833 0%, transparent 70%)', pointerEvents: 'none' }} />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 64 }}>
-          <div style={{ width: 42, height: 42, borderRadius: 10, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>⚡</div>
-          <span style={{ fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: '-0.5px' }}>CRM SaaS</span>
+        <div style={{ marginBottom: 64 }}>
+          <div style={{ fontWeight: 800, fontSize: 22, letterSpacing: '-0.5px', color: '#fff' }}>AutoMarkIQ</div>
         </div>
 
         <h1 style={{ fontSize: 42, fontWeight: 800, color: '#fff', lineHeight: 1.15, margin: '0 0 16px', letterSpacing: '-1px' }}>
@@ -95,21 +148,9 @@ export default function LoginPage() {
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: '40px 48px', position: 'relative',
       }}>
-        {/* Language selector (top right) */}
+        {/* Language selector (top right) — custom dropdown with colored badges */}
         <div style={{ position: 'absolute', top: 20, right: 24 }}>
-          <select
-            value={lang}
-            onChange={(e) => setLang(e.target.value as any)}
-            style={{
-              padding: '4px 8px', borderRadius: 6, fontSize: 12,
-              border: '1.5px solid #e5e7eb', background: '#fff',
-              color: '#64748b', cursor: 'pointer',
-            }}
-          >
-            {LANGS.map((l) => (
-              <option key={l.code} value={l.code}>{l.flag} {l.label}</option>
-            ))}
-          </select>
+          <LangPicker lang={lang} setLang={setLang} />
         </div>
 
         <div style={{ width: '100%', maxWidth: 400 }}>
@@ -213,17 +254,13 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div style={{ marginTop: 28, padding: '12px 16px', borderRadius: 10, background: '#f0f9ff', border: '1px solid #bae6fd', fontSize: 12, color: '#0369a1', lineHeight: 1.6 }}>
-            <strong>Demo:</strong> {AUTH[lang].workspace} <code style={{ background: '#e0f2fe', padding: '1px 5px', borderRadius: 4 }}>demo</code> · admin@demo.com · password123
-          </div>
-
           <div style={{ marginTop: 20, textAlign: 'center', fontSize: 13, color: '#64748b' }}>
             {AUTH[lang].noAccount}{' '}
             <Link href="/register" style={{ color: '#6366f1', fontWeight: 600, textDecoration: 'none' }}>{AUTH[lang].createFree}</Link>
           </div>
 
           <div style={{ marginTop: 20, textAlign: 'center', fontSize: 12, color: '#94a3b8' }}>
-            © 2026 CRM SaaS ·{' '}
+            © 2026 AutoMarkIQ ·{' '}
             <Link href="/privacy" style={{ color: '#94a3b8', textDecoration: 'none' }}>{AUTH[lang].privacyPolicy}</Link>
             {' · '}
             <Link href="/terms" style={{ color: '#94a3b8', textDecoration: 'none' }}>{AUTH[lang].terms}</Link>
