@@ -122,15 +122,6 @@ function QrPanel({ conn, onStatusChange }: { conn: ChannelConnection; onStatusCh
             const fresh = await getConnectionQr(conn.id);
             setState(fresh);
             if (fresh.status === 'connected') { stopPolling(); onStatusChange(); }
-            // QR scanned — phone is loading. Reset the timeout so we don't
-            // show "timed out" while the phone is still establishing the session.
-            if (fresh.status === 'connecting') {
-              if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
-              timeoutRef.current = setTimeout(() => {
-                stopPolling();
-                setState({ qr: null, status: 'error' });
-              }, 120000);
-            }
             // Only stop on hard error — keep polling through pausing/reconnecting states
             if (fresh.status === 'error') { stopPolling(); }
           } catch { stopPolling(); }
