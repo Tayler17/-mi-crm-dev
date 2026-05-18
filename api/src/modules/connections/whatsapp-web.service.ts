@@ -304,7 +304,8 @@ export class WhatsappWebService implements OnModuleInit {
 
         if (connection === 'close') {
           const reason = code === 401 ? 'loggedOut' : code === 403 ? 'forbidden' : code === 408 ? 'timeout/throttled' : code === 440 ? 'replacedByOtherDevice' : code === 500 ? 'streamError/badMAC' : `code=${code}`;
-          this.logger.warn(`[${socketId}] WhatsApp close conn=${connectionId} reason=${reason}`);
+          const rawErr = (lastDisconnect?.error as any)?.message ?? '';
+          this.logger.warn(`[${socketId}] WhatsApp close conn=${connectionId} reason=${reason}${rawErr ? ` err="${rawErr}"` : ''}`);
           // intentional disconnect — already cleaned up in disconnectSession, nothing to do
           if (this.intentionalDisconnects.has(connectionId)) {
             this.intentionalDisconnects.delete(connectionId);
@@ -363,19 +364,24 @@ export class WhatsappWebService implements OnModuleInit {
             // transient disconnect — retry with backoff, pause after burst
             const retries = (this.reconnectCount.get(connectionId) ?? 0) + 1;
             this.reconnectCount.set(connectionId, retries);
-            // 408 = WA throttle: limit retries aggressively to reduce re-sync notifications on phone
-            const MAX_BURST = code === 408 ? 2 : 5;
+            // code=undefined means the WebSocket was dropped at the TCP/IP level with no WA
+            // protocol close frame — this is IP-level throttling, same as 408.
+            const isUndefinedCode = code == null || isNaN(code as number);
+            const isThrottle = code === 408 || isUndefinedCode;
+            const MAX_BURST = isThrottle ? 2 : 5;
             if (retries > MAX_BURST) {
               // Burst exhausted — pause and retry later WITHOUT deleting creds.
-              // 408 = WA server throttling (too many reconnects from same IP).
+              // 408 / undefined = WA server throttling (too many reconnects from same IP).
               // Deleting creds here forces a full QR re-scan which is never needed
               // for throttle errors — just wait and WA will accept the session again.
-              const pause = code === 408 ? 15 * 60 * 1000 : 10 * 60 * 1000;
-              const pauseLabel = code === 408 ? '15 min' : '10 min';
+              const pause = isThrottle ? 15 * 60 * 1000 : 10 * 60 * 1000;
+              const pauseLabel = isThrottle ? '15 min' : '10 min';
               this.logger.warn(`Burst retries (${MAX_BURST}) exhausted for conn=${connectionId} (code=${code}) — pausing ${pauseLabel}, creds preserved`);
               // Keep 'pausing' in the map so getQr() won't start a duplicate session during wait
               this.sessions.set(connectionId, { status: 'pausing', qr: null });
               this.reconnectCount.delete(connectionId);
+              // Reset version cache so the next attempt fetches the latest from GitHub
+              this.cachedWaVersion = null;
               try { sock.end(undefined); } catch {}
               await this.db.query(`UPDATE channel_connections SET status='disconnected', updated_at=NOW() WHERE id=$1`, [connectionId]).catch(() => {});
               setTimeout(() => {
@@ -386,14 +392,14 @@ export class WhatsappWebService implements OnModuleInit {
               }, pause);
               return;
             }
-            // auto-reconnect: 408 uses slow backoff (30s/60s/90s) to avoid WA throttle;
+            // auto-reconnect: 408/undefined uses slow backoff (30s/60s) to avoid WA throttle;
             // other transient codes use fast exponential (5s, 10s, 20s, 40s, 60s)
             this.logger.log(`Auto-reconnecting (${retries}/${MAX_BURST}, code=${code}) conn=${connectionId}`);
             this.sessions.set(connectionId, { status: 'connecting', qr: null });
             try { sock.end(undefined); } catch {}
             const backoff = code === DisconnectReason.restartRequired
               ? 1000
-              : code === 408
+              : isThrottle
                 ? Math.min(30000 * retries, 120000)
                 : Math.min(5000 * Math.pow(2, retries - 1), 60000);
             setTimeout(() => {
