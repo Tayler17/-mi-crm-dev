@@ -218,12 +218,39 @@ export class WhatsappWebService implements OnModuleInit {
       if (existingAuthState) {
         authState = existingAuthState;
       } else {
+        // Check if this connection has ever successfully connected.
+        // If last_tested_at IS NULL the session never reached 'open' — any saved creds
+        // are partial noise-handshake keys written by creds.update before the QR stage.
+        // Loading those partial keys causes WhatsApp to reject the connection immediately.
+        // For never-connected sessions we always start fresh with initAuthCreds() and
+        // discard the stale partial data from the DB.
+        const [connMeta] = await this.db.query(
+          `SELECT last_tested_at FROM channel_connections WHERE id=$1`,
+          [connectionId],
+        ).catch(() => [null]);
+        const neverConnected = !connMeta?.last_tested_at;
+
         // Load persisted creds from DB (survives container restarts)
         const [savedCreds] = await this.db.query(
           `SELECT creds FROM wa_session_creds WHERE connection_id = $1`,
           [connectionId],
         ).catch(() => [null]);
-        const creds = savedCreds?.creds ?? initAuthCreds();
+
+        let creds: any;
+        if (savedCreds?.creds && !neverConnected) {
+          // Previously-connected session — resume with saved creds (no QR re-scan needed)
+          creds = savedCreds.creds;
+        } else {
+          // New or never-connected session — start fresh; discard any partial creds
+          creds = initAuthCreds();
+          if (savedCreds?.creds && neverConnected) {
+            this.logger.log(`[${socketId}] Discarding partial creds for never-connected session conn=${connectionId}`);
+            await Promise.all([
+              this.db.query(`DELETE FROM wa_session_creds WHERE connection_id=$1`, [connectionId]).catch(() => {}),
+              this.db.query(`DELETE FROM wa_session_keys  WHERE connection_id=$1`, [connectionId]).catch(() => {}),
+            ]);
+          }
+        }
 
         authState = {
           creds,
