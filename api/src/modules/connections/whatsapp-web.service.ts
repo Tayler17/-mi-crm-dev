@@ -236,15 +236,21 @@ export class WhatsappWebService implements OnModuleInit {
           [connectionId],
         ).catch(() => [null]);
 
+        // After QR scan Baileys populates creds.me.id with the account JID.
+        // Partial pre-QR creds (from a failed noise handshake) never have me.id set.
+        // Use this to distinguish "real paired creds" from "partial/corrupted creds".
+        const savedCredsData = savedCreds?.creds;
+        const credsArePaired = !!(savedCredsData?.me?.id);
+
         let creds: any;
-        if (savedCreds?.creds && !neverConnected) {
-          // Previously-connected session — resume with saved creds (no QR re-scan needed)
-          creds = savedCreds.creds;
+        if (savedCredsData && (!neverConnected || credsArePaired)) {
+          // Resume: either previously connected OR QR was scanned (me.id is populated)
+          creds = savedCredsData;
         } else {
-          // New or never-connected session — start fresh; discard any partial creds
+          // Fresh start: discard partial pre-QR creds and start clean
           creds = initAuthCreds();
-          if (savedCreds?.creds && neverConnected) {
-            this.logger.log(`[${socketId}] Discarding partial creds for never-connected session conn=${connectionId}`);
+          if (savedCredsData && neverConnected && !credsArePaired) {
+            this.logger.log(`[${socketId}] Discarding partial pre-QR creds for never-connected session conn=${connectionId}`);
             await Promise.all([
               this.db.query(`DELETE FROM wa_session_creds WHERE connection_id=$1`, [connectionId]).catch(() => {}),
               this.db.query(`DELETE FROM wa_session_keys  WHERE connection_id=$1`, [connectionId]).catch(() => {}),
@@ -450,6 +456,15 @@ export class WhatsappWebService implements OnModuleInit {
       sock.ev.on('creds.update', async (u: any) => {
         try {
           Object.assign(authState.creds, u);
+          // When creds update fires while the session is waiting for QR scan,
+          // it means the user just scanned the QR — the pairing response arrived.
+          // Clear qr from the session so the close handler won't treat a pairing
+          // failure as "QR expired unscanned" and incorrectly reset the session.
+          const s = this.sessions.get(connectionId);
+          if (s?.status === 'waiting_qr') {
+            this.logger.log(`[${socketId}] QR scanned — pairing in progress conn=${connectionId}`);
+            this.sessions.set(connectionId, { ...s, qr: null, status: 'connecting' });
+          }
           await this.db.query(
             `INSERT INTO wa_session_creds (connection_id, creds, updated_at) VALUES ($1,$2,NOW())
              ON CONFLICT (connection_id) DO UPDATE SET creds=$2, updated_at=NOW()`,
