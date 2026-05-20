@@ -158,6 +158,27 @@ export class WhatsappWebService implements OnModuleInit {
 
   // ── Private helpers ─────────────────────────────────────────────────────────
 
+  /**
+   * PostgreSQL JSONB silently converts Uint8Array/Buffer to { type:'Buffer', data:[...] }.
+   * When Baileys loads these back they're plain objects — the noise protocol then fails
+   * trying to do crypto with them. This reviver reconstructs proper Buffer instances.
+   */
+  private static reviveBuffers(obj: any): any {
+    if (obj === null || obj === undefined) return obj;
+    if (Array.isArray(obj)) return obj.map(WhatsappWebService.reviveBuffers);
+    if (typeof obj === 'object') {
+      if (obj.type === 'Buffer' && Array.isArray(obj.data)) {
+        return Buffer.from(obj.data);
+      }
+      const out: Record<string, any> = {};
+      for (const [k, v] of Object.entries(obj)) {
+        out[k] = WhatsappWebService.reviveBuffers(v);
+      }
+      return out;
+    }
+    return obj;
+  }
+
   private async getPlaceholderQr(connectionId: string): Promise<{ qr: string | null; status: string }> {
     try {
       // @ts-ignore
@@ -239,7 +260,11 @@ export class WhatsappWebService implements OnModuleInit {
         // After QR scan Baileys populates creds.me.id with the account JID.
         // Partial pre-QR creds (from a failed noise handshake) never have me.id set.
         // Use this to distinguish "real paired creds" from "partial/corrupted creds".
-        const savedCredsData = savedCreds?.creds;
+        // reviveBuffers: JSONB deserialization turns Uint8Array into { type:'Buffer', data:[...] }
+        // which breaks the noise protocol — reconstruct proper Buffers before using.
+        const savedCredsData = savedCreds?.creds
+          ? WhatsappWebService.reviveBuffers(savedCreds.creds)
+          : null;
         const credsArePaired = !!(savedCredsData?.me?.id);
 
         let creds: any;
@@ -267,7 +292,9 @@ export class WhatsappWebService implements OnModuleInit {
                 [connectionId, type, ids],
               ).catch(() => []);
               const r: Record<string, any> = {};
-              for (const row of rows) r[row.key_id] = row.key_data;
+              for (const row of rows) {
+                r[row.key_id] = WhatsappWebService.reviveBuffers(row.key_data);
+              }
               return r;
             },
             set: async (data: Record<string, Record<string, any>>) => {
