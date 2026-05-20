@@ -893,8 +893,9 @@ export class AiChatbotEngineService {
   // ── Test endpoint ─────────────────────────────────────────────────────────────
 
   async testBotMessage(botId: string, tenantId: string, message: string): Promise<{ reply: string | null; error?: string }> {
-    const [bot] = await this.db.query(`SELECT * FROM ai_chatbots WHERE id=$1 AND tenant_id=$2`, [botId, tenantId]);
-    if (!bot) return { reply: null, error: 'Bot no encontrado' };
+    const [rawBot] = await this.db.query(`SELECT * FROM ai_chatbots WHERE id=$1 AND tenant_id=$2`, [botId, tenantId]);
+    if (!rawBot) return { reply: null, error: 'Bot no encontrado' };
+    let bot = rawBot;
 
     const [tenant] = await this.db.query(`SELECT settings FROM tenants WHERE id=$1`, [tenantId]);
     let apiKey = tenant?.settings?.aiKeys?.[bot.provider];
@@ -930,11 +931,12 @@ export class AiChatbotEngineService {
     conversationId: string,
     userMessage: string,
   ): Promise<string | null> {
-    const [bot] = await this.db.query(
+    const [rawBot2] = await this.db.query(
       `SELECT * FROM ai_chatbots WHERE id=$1 AND tenant_id=$2 AND status='active'`,
       [botId, tenantId],
     );
-    if (!bot) return null;
+    if (!rawBot2) return null;
+    let bot = rawBot2;
 
     const [tenant] = await this.db.query(`SELECT settings FROM tenants WHERE id=$1`, [tenantId]);
     let apiKey = tenant?.settings?.aiKeys?.[bot.provider];
