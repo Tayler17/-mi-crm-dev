@@ -783,7 +783,7 @@ export default function SettingsPage() {
   const { lang } = useLangCtx();
   const i = APP[lang];
 
-  const [tab, setTab] = useState<'general' | 'announcements' | 'schedules' | 'ai' | 'platform'>('general');
+  const [tab, setTab] = useState<'general' | 'announcements' | 'schedules' | 'ai' | 'twilio' | 'platform'>('general');
   const [settings, setSettings] = useState<TenantSettings | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
