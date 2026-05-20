@@ -802,6 +802,11 @@ export default function SettingsPage() {
   const [aiKeys, setAiKeys] = useState({ openai: '', anthropic: '', gemini: '' });
   const [aiSaving, setAiSaving] = useState(false);
   const [aiSaved, setAiSaved] = useState(false);
+  const [allowOwnApiKeys, setAllowOwnApiKeys] = useState(false);
+  const [allowOwnTwilio, setAllowOwnTwilio] = useState(false);
+  const [twilioConfig, setTwilioConfig] = useState({ accountSid: '', authToken: '', phoneNumbers: '' });
+  const [twilioSaving, setTwilioSaving] = useState(false);
+  const [twilioSaved, setTwilioSaved] = useState(false);
 
   const [domains, setDomains] = useState<AllowedDomain[]>([]);
   const [newDomain, setNewDomain] = useState('');
@@ -863,6 +868,14 @@ export default function SettingsPage() {
         openai:    keys.openai    ? '••••••••' + (keys.openai    as string).slice(-4) : '',
         anthropic: keys.anthropic ? '••••••••' + (keys.anthropic as string).slice(-4) : '',
         gemini:    keys.gemini    ? '••••••••' + (keys.gemini    as string).slice(-4) : '',
+      });
+      setAllowOwnApiKeys(s.allow_own_api_keys ?? false);
+      setAllowOwnTwilio(s.allow_own_twilio ?? false);
+      const tc = s.settings?.twilioConfig ?? {};
+      setTwilioConfig({
+        accountSid:   tc.accountSid   ? '••••••••' + String(tc.accountSid).slice(-4)   : '',
+        authToken:    tc.authToken    ? '••••••••' + String(tc.authToken).slice(-4)    : '',
+        phoneNumbers: tc.phoneNumbers ? String(tc.phoneNumbers) : '',
       });
     }
     if (p) {
@@ -956,7 +969,8 @@ export default function SettingsPage() {
           { key: 'general',       label: i.tabGeneral,                                       show: true },
           { key: 'announcements', label: `${i.tabAnnouncements} (${announcements.length})`,  show: true },
           { key: 'schedules',     label: i.tabSchedules,                                     show: true },
-          { key: 'ai',            label: i.tabAI,                                            show: isOwner },
+          { key: 'ai',            label: i.tabAI,                                            show: isOwner || allowOwnApiKeys },
+          { key: 'twilio',        label: '📞 Twilio',                                        show: allowOwnTwilio && !isOwner },
           { key: 'platform',      label: i.tabPlatform,                                      show: isOwner },
         ] as const).filter((t) => t.show).map((t) => (
           <button
@@ -1365,6 +1379,72 @@ export default function SettingsPage() {
               {aiSaving ? i.saving : i.aiSaveKeys}
             </button>
           </div>
+        </>
+      )}
+
+      {/* ── Twilio Tab (tenants with allow_own_twilio) ───────────────────── */}
+      {tab === 'twilio' && allowOwnTwilio && !isOwner && (
+        <>
+          {twilioSaved && (
+            <div style={{ padding: '10px 16px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, marginBottom: 16, color: '#15803d', fontWeight: 600, fontSize: 13 }}>
+              Configuración de Twilio guardada correctamente.
+            </div>
+          )}
+          <div style={{ padding: '12px 16px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, marginBottom: 20, fontSize: 13, color: '#1e40af' }}>
+            <strong>📞 Tu cuenta de Twilio</strong>
+            <p style={{ margin: '4px 0 0', lineHeight: 1.6 }}>
+              Configura tus credenciales de Twilio para usar tus propios números en los Call Bots. Los números añadidos aquí estarán disponibles al crear o editar un bot de llamada.
+            </p>
+            <p style={{ margin: '4px 0 0', lineHeight: 1.6, fontSize: 12, color: '#3b82f6' }}>
+              Asegúrate de configurar el webhook de voz de cada número a: <code style={{ background: '#dbeafe', padding: '1px 4px', borderRadius: 3 }}>https://api.automarkiq.com/call-bots/twilio/voice</code>
+            </p>
+          </div>
+          <Section title="Twilio Account SID">
+            <Row label="Account SID" hint="Empieza con 'AC...'">
+              <input
+                className="form-input" type="password"
+                value={twilioConfig.accountSid}
+                onChange={(e) => setTwilioConfig((p) => ({ ...p, accountSid: e.target.value }))}
+                placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              />
+            </Row>
+            <Row label="Auth Token" hint="Token de autenticación Twilio">
+              <input
+                className="form-input" type="password"
+                value={twilioConfig.authToken}
+                onChange={(e) => setTwilioConfig((p) => ({ ...p, authToken: e.target.value }))}
+                placeholder="••••••••••••••••••••••••••••••••"
+              />
+            </Row>
+            <Row label="Números de teléfono" hint="Separados por coma, formato E.164 (+1XXXXXXXXXX)">
+              <input
+                className="form-input" type="text"
+                value={twilioConfig.phoneNumbers}
+                onChange={(e) => setTwilioConfig((p) => ({ ...p, phoneNumbers: e.target.value }))}
+                placeholder="+18001234567, +18009876543"
+              />
+            </Row>
+            <button
+              className="btn btn-primary" style={{ marginTop: 8 }} disabled={twilioSaving}
+              onClick={async () => {
+                setTwilioSaving(true); setTwilioSaved(false);
+                try {
+                  const patch: Record<string, string> = {};
+                  if (twilioConfig.accountSid   && !twilioConfig.accountSid.startsWith('••••'))   patch.accountSid   = twilioConfig.accountSid;
+                  if (twilioConfig.authToken     && !twilioConfig.authToken.startsWith('••••'))     patch.authToken     = twilioConfig.authToken;
+                  if (twilioConfig.phoneNumbers) patch.phoneNumbers = twilioConfig.phoneNumbers;
+                  if (Object.keys(patch).length > 0) {
+                    await updateSettings({ settings: { twilioConfig: patch } });
+                    await load();
+                  }
+                  setTwilioSaved(true);
+                  setTimeout(() => setTwilioSaved(false), 3000);
+                } finally { setTwilioSaving(false); }
+              }}
+            >
+              {twilioSaving ? 'Guardando...' : 'Guardar configuración de Twilio'}
+            </button>
+          </Section>
         </>
       )}
 

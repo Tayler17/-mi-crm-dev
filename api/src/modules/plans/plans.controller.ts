@@ -36,7 +36,7 @@ export class PlansController {
               p.extra_message_price, p.extra_call_minute_price,
               p.has_call_bots, p.has_ai_chatbots,
               p.has_automations, p.has_flows, p.has_reports, p.has_api_access,
-              p.has_webhooks, p.price, p.billing_period, p.color
+              p.has_webhooks, p.allow_own_twilio, p.price, p.billing_period, p.color
        FROM tenants t
        LEFT JOIN plans p ON p.id = t.plan_id
        WHERE t.id = $1`,
@@ -107,10 +107,10 @@ export class PlansController {
          max_users, max_contacts, max_inboxes, max_campaigns, max_automations, max_flows,
          max_call_bots, max_ai_chatbots, max_messages_month, max_call_minutes,
          has_call_bots, has_ai_chatbots, has_automations, has_flows, has_reports,
-         has_api_access, has_webhooks, allow_own_api_keys, allow_overage,
+         has_api_access, has_webhooks, allow_own_api_keys, allow_own_twilio, allow_overage,
          extra_message_price, extra_call_minute_price,
          is_active, is_public, stripe_price_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)
        RETURNING *`,
       [
         dto.name, dto.slug, dto.description ?? null, dto.price ?? 0, dto.currency ?? 'USD',
@@ -122,7 +122,7 @@ export class PlansController {
         dto.hasCallBots ?? false, dto.hasAiChatbots ?? false,
         dto.hasAutomations ?? true, dto.hasFlows ?? true, dto.hasReports ?? false,
         dto.hasApiAccess ?? false, dto.hasWebhooks ?? false,
-        dto.allowOwnApiKeys ?? false, dto.allowOverage ?? false,
+        dto.allowOwnApiKeys ?? false, dto.allowOwnTwilio ?? false, dto.allowOverage ?? false,
         dto.extraMessagePrice ?? 0, dto.extraCallMinutePrice ?? 0,
         dto.isActive ?? true, dto.isPublic ?? true,
         dto.stripePriceId ?? null,
@@ -145,7 +145,7 @@ export class PlansController {
       hasCallBots: 'has_call_bots', hasAiChatbots: 'has_ai_chatbots',
       hasAutomations: 'has_automations', hasFlows: 'has_flows', hasReports: 'has_reports',
       hasApiAccess: 'has_api_access', hasWebhooks: 'has_webhooks',
-      allowOwnApiKeys: 'allow_own_api_keys', allowOverage: 'allow_overage',
+      allowOwnApiKeys: 'allow_own_api_keys', allowOwnTwilio: 'allow_own_twilio', allowOverage: 'allow_overage',
       extraMessagePrice: 'extra_message_price', extraCallMinutePrice: 'extra_call_minute_price',
       isActive: 'is_active', isPublic: 'is_public', stripePriceId: 'stripe_price_id',
     };

@@ -146,6 +146,22 @@ export class PlatformSettingsService {
    * - If the tenant already has a number assigned, only that number is shown (reuse within tenant)
    */
   async getAvailablePhoneNumbers(db: DataSource, tenantId?: string): Promise<string[]> {
+    // Check if tenant has their own Twilio configured
+    if (tenantId) {
+      const [tenantRow] = await db.query(
+        `SELECT t.settings, COALESCE(p.allow_own_twilio, false) AS allow_own_twilio
+         FROM tenants t LEFT JOIN plans p ON p.id = t.plan_id
+         WHERE t.id = $1`,
+        [tenantId],
+      ).catch(() => [null]);
+      if (tenantRow?.allow_own_twilio) {
+        const ownNumbers: string[] = tenantRow.settings?.twilioConfig?.phoneNumbers
+          ? String(tenantRow.settings.twilioConfig.phoneNumbers).split(',').map((n: string) => n.trim()).filter(Boolean)
+          : [];
+        if (ownNumbers.length) return ownNumbers;
+      }
+    }
+
     const all = await this.getPhoneNumbers();
     if (!all.length) return [];
 

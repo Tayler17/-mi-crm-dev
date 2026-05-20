@@ -869,7 +869,7 @@ export default function CallBotsPage() {
       {platformPhoneNumbers.length === 0 && !isOwner && (
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '12px 16px', background: '#fef9c3', border: '1px solid #fde047', borderRadius: 10, marginBottom: 20, fontSize: 13, color: '#92400e' }}>
           <span style={{ fontSize: 18 }}>📞</span>
-          <span>Los bots de llamada no están disponibles aún. El administrador de la plataforma debe configurar Twilio para activar esta función.</span>
+          <span>No hay números de teléfono disponibles aún para los bots de llamada. El administrador debe añadir un número en la configuración de la plataforma para activar esta función.</span>
         </div>
       )}
 

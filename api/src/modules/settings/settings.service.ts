@@ -10,6 +10,7 @@ export class SettingsService {
     const rows = await this.db.query(
       `SELECT t.id, t.name, t.slug, t.plan, t.is_active, t.logo_url, t.timezone, t.language, t.currency, t.settings, t.created_at,
               COALESCE(p.allow_own_api_keys, false) AS allow_own_api_keys,
+              COALESCE(p.allow_own_twilio,   false) AS allow_own_twilio,
               p.name  AS plan_name,
               p.slug  AS plan_slug,
               p.color AS plan_color
@@ -34,9 +35,9 @@ export class SettingsService {
       }
     }
 
-    // merge JSONB settings — deep-merge aiKeys so individual keys aren't wiped
+    // merge JSONB settings — deep-merge aiKeys and twilioConfig so individual keys aren't wiped
     if (dto.settings && typeof dto.settings === 'object') {
-      const { aiKeys, ...rest } = dto.settings;
+      const { aiKeys, twilioConfig, ...rest } = dto.settings;
       if (Object.keys(rest).length > 0) {
         sets.push(`settings = settings || $${i++}`);
         values.push(JSON.stringify(rest));
@@ -52,6 +53,12 @@ export class SettingsService {
           );
           values.push(JSON.stringify(aiKeysPatch));
         }
+      }
+      if (twilioConfig && typeof twilioConfig === 'object') {
+        sets.push(
+          `settings = jsonb_set(settings, '{twilioConfig}', COALESCE(settings->'twilioConfig', '{}'::jsonb) || $${i++}::jsonb, true)`,
+        );
+        values.push(JSON.stringify(twilioConfig));
       }
     }
 
