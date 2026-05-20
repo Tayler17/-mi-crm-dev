@@ -1002,6 +1002,7 @@ export interface TenantSettings {
   is_active: boolean;
   created_at: string;
   allow_own_api_keys?: boolean;
+  allow_own_twilio?: boolean;
   plan_color?: string;
   plan_name?: string;
 }
