@@ -854,17 +854,22 @@ export default function CallBotsPage() {
         </button>
       </div>
 
-      {/* Twilio setup guide */}
-      {platformPhoneNumbers.length === 0 && (
+      {/* Twilio setup guide — full instructions only for owner, simple notice for tenants */}
+      {platformPhoneNumbers.length === 0 && isOwner && (
         <div style={{ padding: '14px 16px', background: '#fef9c3', border: '1px solid #fde047', borderRadius: 10, marginBottom: 20, fontSize: 13 }}>
           <div style={{ fontWeight: 700, color: '#854d0e', marginBottom: 6 }}>⚙️ Configuración de Twilio requerida</div>
-          <ol style={{ margin: '0 0 8px', paddingLeft: 20, color: '#713f12', lineHeight: 1.8 }}>
+          <ol style={{ margin: '0 0 0', paddingLeft: 20, color: '#713f12', lineHeight: 1.8 }}>
             <li>Compra un número de teléfono en <strong>console.twilio.com</strong></li>
             <li>Ve a <a href="/settings" style={{ color: '#6366f1', fontWeight: 600, textDecoration: 'none' }}>Ajustes → Plataforma → Voice</a> y añade el Account SID, Auth Token y el número</li>
             <li>En Twilio, configura el webhook de voz del número con esta URL: <code style={{ background: '#fff', padding: '1px 5px', borderRadius: 4 }}>{typeof window !== 'undefined' ? window.location.origin.replace(':3000', ':4000') : ''}/call-bots/twilio/voice</code></li>
             <li>Crea un Call Bot aquí y selecciona ese número</li>
           </ol>
-          {!isOwner && <div style={{ color: '#92400e', fontSize: 12 }}>Pide al administrador de la plataforma que complete este paso.</div>}
+        </div>
+      )}
+      {platformPhoneNumbers.length === 0 && !isOwner && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '12px 16px', background: '#fef9c3', border: '1px solid #fde047', borderRadius: 10, marginBottom: 20, fontSize: 13, color: '#92400e' }}>
+          <span style={{ fontSize: 18 }}>📞</span>
+          <span>Los bots de llamada no están disponibles aún. El administrador de la plataforma debe configurar Twilio para activar esta función.</span>
         </div>
       )}
 

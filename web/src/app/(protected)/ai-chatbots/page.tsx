@@ -959,13 +959,13 @@ export default function AiChatbotsPage() {
         </button>
       </div>
 
-      {/* No AI key warning */}
-      {!hasAiKey && (
+      {/* No AI key warning — only for tenants whose plan allows own keys but haven't set one */}
+      {allowOwnApiKeys && !hasAiKey && (
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '12px 16px', background: '#fefce8', border: '1px solid #fde047', borderRadius: 10, marginBottom: 20, fontSize: 13 }}>
           <span style={{ fontSize: 20 }}>⚠️</span>
           <div>
             <strong style={{ color: '#854d0e' }}>No hay API key de IA configurada.</strong>
-            {' '}Los chatbots usarán la clave de plataforma si está disponible, o no podrán responder.{' '}
+            {' '}Configura tu clave de proveedor para usar tus propios créditos de IA.{' '}
             <a href="/settings" style={{ color: '#6366f1', fontWeight: 600, textDecoration: 'none' }}>
               Configurar en Ajustes → Integraciones de IA →
             </a>
