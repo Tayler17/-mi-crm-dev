@@ -1,7 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 
-type Resource = 'users' | 'contacts' | 'inboxes' | 'call_minutes' | 'ai_chatbots' | 'call_bots';
+type Resource = 'users' | 'contacts' | 'inboxes' | 'call_minutes' | 'ai_chatbots' | 'call_bots' | 'campaigns' | 'automations' | 'flows';
 
 export async function checkPlanLimit(
   db: DataSource,
@@ -11,12 +11,16 @@ export async function checkPlanLimit(
   const [row] = await db.query(
     `SELECT
        p.max_users, p.max_contacts, p.max_inboxes, p.max_call_minutes,
-       p.max_ai_chatbots, p.max_call_bots, p.allow_overage,
-       (SELECT COUNT(*)::int FROM users       WHERE tenant_id=$1 AND is_active=true)  AS users_count,
-       (SELECT COUNT(*)::int FROM contacts    WHERE tenant_id=$1)                     AS contacts_count,
-       (SELECT COUNT(*)::int FROM inboxes     WHERE tenant_id=$1)                     AS inboxes_count,
-       (SELECT COUNT(*)::int FROM ai_chatbots WHERE tenant_id::text=$1::text)           AS ai_chatbots_count,
-       (SELECT COUNT(*)::int FROM call_bots   WHERE tenant_id::text=$1::text)           AS call_bots_count,
+       p.max_ai_chatbots, p.max_call_bots, p.max_campaigns, p.max_automations, p.max_flows,
+       p.allow_overage,
+       (SELECT COUNT(*)::int FROM users            WHERE tenant_id=$1 AND is_active=true)  AS users_count,
+       (SELECT COUNT(*)::int FROM contacts         WHERE tenant_id=$1)                     AS contacts_count,
+       (SELECT COUNT(*)::int FROM inboxes          WHERE tenant_id=$1)                     AS inboxes_count,
+       (SELECT COUNT(*)::int FROM ai_chatbots      WHERE tenant_id::text=$1::text)         AS ai_chatbots_count,
+       (SELECT COUNT(*)::int FROM call_bots        WHERE tenant_id::text=$1::text)         AS call_bots_count,
+       (SELECT COUNT(*)::int FROM campaigns        WHERE tenant_id=$1)                     AS campaigns_count,
+       (SELECT COUNT(*)::int FROM automation_rules WHERE tenant_id=$1)                     AS automations_count,
+       (SELECT COUNT(*)::int FROM conversation_flows WHERE tenant_id=$1)                   AS flows_count,
        COALESCE((
          SELECT SUM(duration)::int FROM call_logs
          WHERE tenant_id::text=$1::text AND created_at >= date_trunc('month', NOW())
@@ -36,6 +40,7 @@ export async function checkPlanLimit(
   const FREE: Record<string, number> = {
     max_users: 2, max_contacts: 500, max_inboxes: 1,
     max_ai_chatbots: 0, max_call_bots: 0, max_call_minutes: 0,
+    max_campaigns: 2, max_automations: 5, max_flows: 2,
   };
   const lim = (col: string, fallback: number) =>
     row[col] != null ? Number(row[col]) : (FREE[col] ?? fallback);
@@ -46,6 +51,9 @@ export async function checkPlanLimit(
     inboxes:      { limit: lim('max_inboxes', 1),       count: row.inboxes_count,                      label: 'inboxes' },
     ai_chatbots:  { limit: lim('max_ai_chatbots', 0),   count: row.ai_chatbots_count,                  label: 'AI chatbots' },
     call_bots:    { limit: lim('max_call_bots', 0),     count: row.call_bots_count,                    label: 'call bots' },
+    campaigns:    { limit: lim('max_campaigns', 2),     count: row.campaigns_count,                    label: 'campañas' },
+    automations:  { limit: lim('max_automations', 5),   count: row.automations_count,                  label: 'automatizaciones' },
+    flows:        { limit: lim('max_flows', 2),         count: row.flows_count,                        label: 'flujos de conversación' },
     call_minutes: { limit: lim('max_call_minutes', 0),  count: Math.ceil(row.call_seconds_count / 60), label: 'minutos de llamada este mes' },
   };
 

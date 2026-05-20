@@ -690,7 +690,7 @@ export default function InboxPage() {
   const activeFiltersCount = [filterTag, filterInbox, filterStatus, filterAgent, filterQueue].filter(Boolean).length;
 
   // ── Actions ──────────────────────────────────────────────────────────────────
-  const [mobilePanel, setMobilePanel] = useState<'list' | 'chat'>('list');
+  const [mobilePanel, setMobilePanel] = useState<'list' | 'chat' | 'detail'>('list');
 
   function selectConv(id: string) {
     setActiveId(id); setBody(''); setShowCanned(false); setComposerTab('message');
@@ -1360,6 +1360,12 @@ export default function InboxPage() {
             </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
               <button
+                className="btn btn-secondary mobile-detail-btn"
+                style={{ fontSize: 16, padding: '4px 8px', display: 'none' }}
+                title="Ver detalles"
+                onClick={() => setMobilePanel('detail')}
+              >ℹ️</button>
+              <button
                 className="btn btn-secondary"
                 style={{ fontSize: 11, padding: '4px 10px' }}
                 title={i.inbxExportPdf}
@@ -1687,6 +1693,12 @@ export default function InboxPage() {
       {/* ── RIGHT: Detail panel ──────────────────────────────────────────── */}
       {activeId && conv && listConv && (
         <div className="inbox-detail">
+
+          {/* Mobile back button */}
+          <div className="mobile-detail-back" style={{ display: 'none', alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid var(--border)', gap: 8 }}>
+            <button onClick={() => setMobilePanel('chat')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: 'var(--text)', padding: 0 }}>←</button>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>Detalles</span>
+          </div>
 
           {/* Contact */}
           <div className="inbox-detail-section">

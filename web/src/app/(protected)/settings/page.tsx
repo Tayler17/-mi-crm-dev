@@ -956,7 +956,7 @@ export default function SettingsPage() {
           { key: 'general',       label: i.tabGeneral,                                       show: true },
           { key: 'announcements', label: `${i.tabAnnouncements} (${announcements.length})`,  show: true },
           { key: 'schedules',     label: i.tabSchedules,                                     show: true },
-          { key: 'ai',            label: i.tabAI,                                            show: isOwner || !!settings?.allow_own_api_keys },
+          { key: 'ai',            label: i.tabAI,                                            show: isOwner },
           { key: 'platform',      label: i.tabPlatform,                                      show: isOwner },
         ] as const).filter((t) => t.show).map((t) => (
           <button

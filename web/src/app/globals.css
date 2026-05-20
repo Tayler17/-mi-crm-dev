@@ -227,15 +227,17 @@ tr:hover td { background: var(--bg); }
   .chat-layout { left: 0 !important; top: var(--header-h) !important; }
 
   /* ── Inbox mobile panel switching via data-panel attribute ── */
-  /* List panel hidden when viewing chat */
-  .inbox-layout[data-panel="chat"] .inbox-sidebar { display: none; }
-  .inbox-layout[data-panel="chat"] .inbox-detail  { display: none; }
-  /* Chat panel hidden when viewing list */
-  .inbox-layout[data-panel="list"] .inbox-chat    { display: none; }
-  .inbox-layout[data-panel="list"] .inbox-detail  { display: none; }
-  /* Chat fills full width on mobile */
-  .inbox-layout[data-panel="chat"] .inbox-chat    { width: 100%; }
-  .inbox-layout[data-panel="list"] .inbox-sidebar { width: 100%; min-width: 0; }
+  .inbox-layout[data-panel="chat"]   .inbox-sidebar { display: none; }
+  .inbox-layout[data-panel="chat"]   .inbox-detail  { display: none; }
+  .inbox-layout[data-panel="list"]   .inbox-chat    { display: none; }
+  .inbox-layout[data-panel="list"]   .inbox-detail  { display: none; }
+  .inbox-layout[data-panel="detail"] .inbox-sidebar { display: none; }
+  .inbox-layout[data-panel="detail"] .inbox-chat    { display: none; }
+  .inbox-layout[data-panel="chat"]   .inbox-chat    { width: 100%; }
+  .inbox-layout[data-panel="list"]   .inbox-sidebar { width: 100%; min-width: 0; }
+  .inbox-layout[data-panel="detail"] .inbox-detail  { width: 100%; min-width: 0; }
+  .mobile-detail-btn { display: inline-flex !important; }
+  .mobile-detail-back { display: flex !important; }
 
   /* ── Chat Interno mobile panel switching ── */
   .chat-layout[data-panel="chat"]  .chat-list-panel { display: none; }

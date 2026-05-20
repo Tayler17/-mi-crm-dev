@@ -1,12 +1,18 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Request } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { FlowsService } from './flows.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantId } from '../../common/decorators/tenant.decorator';
+import { checkPlanLimit } from '../../common/utils/limits';
 
 @Controller('flows')
 @UseGuards(JwtAuthGuard)
 export class FlowsController {
-  constructor(private readonly svc: FlowsService) {}
+  constructor(
+    private readonly svc: FlowsService,
+    @InjectDataSource() private readonly db: DataSource,
+  ) {}
 
   @Get()
   findAll(@TenantId() tenantId: string) { return this.svc.findAll(tenantId); }
@@ -18,7 +24,8 @@ export class FlowsController {
   getSessions(@Param('id') id: string, @TenantId() tenantId: string) { return this.svc.getSessions(id, tenantId); }
 
   @Post()
-  create(@Body() dto: any, @TenantId() tenantId: string, @Request() req: any) {
+  async create(@Body() dto: any, @TenantId() tenantId: string, @Request() req: any) {
+    await checkPlanLimit(this.db, tenantId, 'flows');
     return this.svc.create(dto, tenantId, req.user?.sub ?? req.user?.id);
   }
 
@@ -32,7 +39,8 @@ export class FlowsController {
   toggle(@Param('id') id: string, @TenantId() tenantId: string) { return this.svc.toggle(id, tenantId); }
 
   @Post(':id/duplicate')
-  duplicate(@Param('id') id: string, @TenantId() tenantId: string, @Request() req: any) {
+  async duplicate(@Param('id') id: string, @TenantId() tenantId: string, @Request() req: any) {
+    await checkPlanLimit(this.db, tenantId, 'flows');
     return this.svc.duplicate(id, tenantId, req.user?.sub ?? req.user?.id);
   }
 }

@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="0 0 500 500">
+  <!-- Background -->
+  <rect width="500" height="500" rx="80" fill="#1a1f2e"/>
+
+  <!-- Subtle glow behind icon -->
+  <circle cx="258" cy="245" r="160" fill="rgba(29,171,217,0.07)"/>
+
+  <!-- ── HEAD SILHOUETTE (right-facing profile) ── -->
+  <path fill="#1dabd9" d="
+    M 260,88
+    C 310,80 398,132 400,210
+    C 402,280 374,325 345,348
+    L 340,375 L 340,408
+    L 305,408 L 305,375
+    C 284,362 264,340 251,314
+    C 234,282 230,252 233,226
+    C 237,202 243,178 249,158
+    C 253,138 258,112 260,88 Z"/>
+
+  <!-- Ear -->
+  <path fill="#1dabd9" d="
+    M 233,226
+    C 210,228 196,246 193,265
+    C 190,283 200,298 217,304
+    C 228,308 240,302 242,293"/>
+
+  <!-- ── CIRCUIT NODES ── -->
+
+  <!-- Extra small top node -->
+  <circle cx="100" cy="100" r="10" fill="none" stroke="#1dabd9" stroke-width="3.5"/>
+  <circle cx="100" cy="100" r="4"  fill="#1dabd9"/>
+  <!-- Arm: extra node → Node A -->
+  <line x1="108" y1="108" x2="130" y2="132" stroke="#1dabd9" stroke-width="3.5" stroke-linecap="round"/>
+
+  <!-- Node A (top, largest) -->
+  <circle cx="142" cy="148" r="24" fill="none" stroke="#1dabd9" stroke-width="5"/>
+  <circle cx="142" cy="148" r="9"  fill="#1dabd9"/>
+
+  <!-- Node B -->
+  <circle cx="97"  cy="228" r="18" fill="none" stroke="#1dabd9" stroke-width="4"/>
+  <circle cx="97"  cy="228" r="7"  fill="#1dabd9"/>
+
+  <!-- Node C -->
+  <circle cx="144" cy="290" r="18" fill="none" stroke="#1dabd9" stroke-width="4"/>
+  <circle cx="144" cy="290" r="7"  fill="#1dabd9"/>
+
+  <!-- Node D (bottom) -->
+  <circle cx="192" cy="345" r="14" fill="none" stroke="#1dabd9" stroke-width="3.5"/>
+  <circle cx="192" cy="345" r="5"  fill="#1dabd9"/>
+
+  <!-- ── CONNECTIONS ── -->
+  <!-- A → B -->
+  <line x1="142" y1="172" x2="112" y2="211" stroke="#1dabd9" stroke-width="3.5" stroke-linecap="round"/>
+  <!-- B → C -->
+  <line x1="103" y1="245" x2="130" y2="273" stroke="#1dabd9" stroke-width="3.5" stroke-linecap="round"/>
+  <!-- C → D -->
+  <line x1="152" y1="307" x2="182" y2="332" stroke="#1dabd9" stroke-width="3.5" stroke-linecap="round"/>
+  <!-- A → head (inner connection) -->
+  <line x1="163" y1="158" x2="233" y2="218" stroke="#1dabd9" stroke-width="3" stroke-linecap="round"/>
+</svg>

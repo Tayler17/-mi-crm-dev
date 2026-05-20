@@ -1,0 +1,417 @@
+import type { LangCode } from '@/lib/useLang';
+
+export interface LandingT {
+  // Navbar
+  nav_features: string; nav_pricing: string; nav_help: string;
+  nav_login: string; nav_cta: string;
+  // Hero
+  hero_badge: string;
+  hero_h1a: string; hero_h1b: string; hero_h1c: string;
+  hero_p: string;
+  hero_btn_start: string; hero_btn_demo: string; hero_btn_features: string;
+  hero_note: string;
+  // Channels
+  channels_label: string;
+  // Features section
+  feat_h2: string; feat_p: string;
+  f1_title: string; f1_desc: string;
+  f2_title: string; f2_desc: string;
+  f3_title: string; f3_desc: string;
+  f4_title: string; f4_desc: string;
+  // How it works
+  how_h2: string; how_p: string;
+  step1_title: string; step1_desc: string;
+  step2_title: string; step2_desc: string;
+  step3_title: string; step3_desc: string;
+  // Pricing
+  price_h2: string; price_p: string;
+  plan_free: string; plan_month: string;
+  plan_popular: string;
+  plan_btn_free: string; plan_btn_paid: string;
+  p_unlimited: string;
+  p_agent: string; p_agents: string;
+  p_contacts: string;
+  p_inbox: string; p_inboxes: string;
+  p_ai_chatbot: string; p_ai_chatbots: string;
+  p_no_ai: string;
+  p_call_min: string; p_no_call: string;
+  p_reports_adv: string; p_reports_basic: string;
+  p_api: string;
+  // FAQ
+  faq_h2: string;
+  faq: { q: string; a: string }[];
+  // CTA
+  cta_h2a: string; cta_h2b: string;
+  cta_p: string; cta_btn: string; cta_note: string;
+  // Footer
+  footer_tag: string;
+  // Stats bar
+  stats_h: string;
+  stat1_val: string; stat1_lbl: string;
+  stat2_val: string; stat2_lbl: string;
+  stat3_val: string; stat3_lbl: string;
+  stat4_val: string; stat4_lbl: string;
+  // Pain point
+  pain_h2: string; pain_p: string;
+  pain1_title: string; pain1_desc: string;
+  pain2_title: string; pain2_desc: string;
+  pain3_title: string; pain3_desc: string;
+  pain_solution: string;
+  // Testimonials
+  test_h2: string;
+  test1_name: string; test1_role: string; test1_quote: string;
+  test2_name: string; test2_role: string; test2_quote: string;
+  test3_name: string; test3_role: string; test3_quote: string;
+}
+
+export const LANDING: Record<LangCode, LandingT> = {
+  es: {
+    nav_features: 'Funciones', nav_pricing: 'Precios', nav_help: 'Ayuda',
+    nav_login: 'Iniciar sesión', nav_cta: 'Empezar gratis',
+    hero_badge: 'CRM omnicanal impulsado por IA',
+    hero_h1a: 'Todas las', hero_h1b: 'conversaciones', hero_h1c: 'de tus clientes, en un solo lugar',
+    hero_p: 'AutoMarkIQ centraliza WhatsApp, Instagram, Messenger, Telegram, Email, SMS y Webchat en una sola bandeja — automatiza con IA, cierra más negocios.',
+    hero_btn_start: 'Empieza gratis →', hero_btn_demo: 'Ver demo en vivo', hero_btn_features: 'Ver funciones',
+    hero_note: 'Sin tarjeta de crédito · Plan gratuito sin límite de tiempo',
+    channels_label: 'Todos los canales, una sola plataforma',
+    feat_h2: 'Todo lo que tu equipo necesita',
+    feat_p: 'Una plataforma para gestionar conversaciones, automatizar soporte y cerrar más negocios.',
+    f1_title: 'Una bandeja unificada',
+    f1_desc: 'WhatsApp, Instagram, Messenger, Telegram, Email, SMS y Webchat — todo en un solo lugar. Sin cambiar de app.',
+    f2_title: 'Chatbots con IA 24/7',
+    f2_desc: 'Despliega bots inteligentes que atienden consultas, califican leads y escalan a tu equipo solo cuando es necesario.',
+    f3_title: 'Bots de voz con IA',
+    f3_desc: 'Realiza y recibe llamadas con agentes de IA de voz natural para seguimientos, confirmaciones y encuestas.',
+    f4_title: 'CRM y Pipeline de ventas',
+    f4_desc: 'Gestiona deals, administra contactos y mueve oportunidades por etapas Kanban personalizadas.',
+    how_h2: 'En marcha en minutos', how_p: 'Sin configuración compleja. Sin necesidad de técnicos.',
+    step1_title: 'Crea tu cuenta', step1_desc: 'Regístrate gratis en 30 segundos. Sin tarjeta de crédito.',
+    step2_title: 'Conecta tus canales', step2_desc: 'Vincula WhatsApp, Instagram, Email o el chat de tu sitio web.',
+    step3_title: 'Empieza a responder', step3_desc: 'Tu equipo gestiona todos los mensajes desde una única bandeja.',
+    price_h2: 'Precios simples y transparentes', price_p: 'Empieza gratis. Crece sin límites.',
+    plan_free: 'Gratis', plan_month: '/mes', plan_popular: '⭐ Más popular',
+    plan_btn_free: 'Empezar gratis', plan_btn_paid: 'Comenzar',
+    p_unlimited: 'Ilimitado',
+    p_agent: 'agente', p_agents: 'agentes',
+    p_contacts: 'contactos',
+    p_inbox: 'bandeja', p_inboxes: 'bandejas',
+    p_ai_chatbot: 'chatbot IA', p_ai_chatbots: 'chatbots IA',
+    p_no_ai: 'Sin chatbots IA',
+    p_call_min: 'min llamadas/mes', p_no_call: 'Sin bots de voz',
+    p_reports_adv: 'Reportes avanzados', p_reports_basic: 'Reportes básicos',
+    p_api: 'Acceso a API',
+    faq_h2: 'Preguntas frecuentes',
+    faq: [
+      { q: '¿Qué canales soporta AutoMarkIQ?', a: 'WhatsApp Business, Instagram Direct, Facebook Messenger, Telegram, Email (SMTP/IMAP), SMS, Webchat y llamadas de voz con IA. Todos en una sola bandeja.' },
+      { q: '¿Puedo probarlo gratis?', a: 'Sí. El plan Free está disponible sin límite de tiempo y sin tarjeta de crédito. Actualiza cuando quieras.' },
+      { q: '¿Necesito conocimientos técnicos?', a: 'No. Configurar tu primera bandeja tarda menos de 10 minutos. Nuestro Centro de ayuda te guía paso a paso.' },
+      { q: '¿Puedo usar mi propia clave de API de IA?', a: 'Sí. En los planes Pro y Business puedes conectar tus credenciales de OpenAI, Anthropic u Ollama.' },
+      { q: '¿Mis datos están seguros?', a: 'Todos los datos están cifrados en tránsito (HTTPS) y en reposo. Nunca compartimos datos de clientes con terceros.' },
+    ],
+    cta_h2a: 'Listo para transformar tu', cta_h2b: 'experiencia con el cliente?',
+    cta_p: 'Únete a los negocios que ya usan AutoMarkIQ para crecer más rápido.',
+    cta_btn: 'Empieza gratis →', cta_note: 'Sin tarjeta de crédito',
+    footer_tag: 'CRM omnicanal impulsado por IA',
+    stats_h: 'Negocios que ya confían en AutoMarkIQ',
+    stat1_val: '500+', stat1_lbl: 'negocios activos',
+    stat2_val: '1M+', stat2_lbl: 'mensajes al mes',
+    stat3_val: '8',   stat3_lbl: 'canales integrados',
+    stat4_val: '99.9%', stat4_lbl: 'uptime garantizado',
+    pain_h2: '¿Cuántas apps usas para atender a tus clientes?',
+    pain_p: 'La mayoría de los equipos de ventas y soporte saltan entre WhatsApp, email, Instagram y el CRM — perdiendo tiempo, perdiendo mensajes y perdiendo ventas.',
+    pain1_title: 'Mensajes perdidos = ventas perdidas',
+    pain1_desc: 'Cuando cada canal vive en una app diferente, los mensajes se pierden y los clientes esperan demasiado.',
+    pain2_title: 'Tu equipo pierde horas cada día',
+    pain2_desc: 'Cambiar entre apps, copiar datos manualmente y buscar conversaciones pasadas destruye la productividad.',
+    pain3_title: 'Sin IA, trabajas el doble',
+    pain3_desc: 'Respondes las mismas preguntas una y otra vez cuando los bots de IA podrían hacerlo 24/7 por ti.',
+    pain_solution: 'AutoMarkIQ resuelve todo esto en una sola plataforma.',
+    test_h2: 'Lo que dicen nuestros clientes',
+    test1_name: 'Carlos Ruiz', test1_role: 'Director comercial · E-commerce',
+    test1_quote: '"Antes usábamos WhatsApp, email y un CRM separado. Con AutoMarkIQ todo está en un lugar. Nuestros tiempos de respuesta bajaron de 4 horas a 12 minutos."',
+    test2_name: 'María González', test2_role: 'Directora de soporte · Agencia digital',
+    test2_quote: '"El chatbot IA responde el 70% de las consultas sin intervención humana. Mi equipo ahora se enfoca en los clientes que realmente necesitan ayuda."',
+    test3_name: 'Ahmed Al-Rashid', test3_role: 'CEO · Clínica dental',
+    test3_quote: '"Configuramos el bot de citas en una tarde. Ahora los pacientes reservan solos por WhatsApp, 24/7. Increíble para un negocio de nuestro tamaño."',
+  },
+
+  en: {
+    nav_features: 'Features', nav_pricing: 'Pricing', nav_help: 'Help',
+    nav_login: 'Log in', nav_cta: 'Start free',
+    hero_badge: 'Omnichannel CRM powered by AI',
+    hero_h1a: 'All your', hero_h1b: 'customer conversations,', hero_h1c: 'in one place',
+    hero_p: 'AutoMarkIQ centralizes WhatsApp, Instagram, Messenger, Telegram, Email, SMS and Webchat in a single inbox — automate with AI, close deals faster.',
+    hero_btn_start: 'Get started free →', hero_btn_demo: 'Try live demo', hero_btn_features: 'See features',
+    hero_note: 'No credit card required · Free plan, no time limit',
+    channels_label: 'All channels, one platform',
+    feat_h2: 'Everything your team needs',
+    feat_p: 'One platform to manage conversations, automate support and close more deals.',
+    f1_title: 'One unified inbox',
+    f1_desc: 'WhatsApp, Instagram, Messenger, Telegram, Email, SMS and Webchat — all in one place. No more switching between apps.',
+    f2_title: 'AI Chatbots 24/7',
+    f2_desc: 'Deploy intelligent bots that handle queries, qualify leads and escalate to your team only when needed.',
+    f3_title: 'AI Voice Bots',
+    f3_desc: 'Make and receive calls with natural-sounding AI agents for follow-ups, confirmations and surveys.',
+    f4_title: 'CRM & Sales Pipeline',
+    f4_desc: 'Track deals, manage contacts and move opportunities through custom Kanban stages.',
+    how_h2: 'Up and running in minutes', how_p: 'No complex setup. No engineers needed.',
+    step1_title: 'Create your account', step1_desc: 'Sign up free in 30 seconds. No credit card required.',
+    step2_title: 'Connect your channels', step2_desc: 'Link WhatsApp, Instagram, Email or your website chat.',
+    step3_title: 'Start responding', step3_desc: 'Your team manages all messages from one single inbox.',
+    price_h2: 'Simple, transparent pricing', price_p: 'Start free. Scale as you grow.',
+    plan_free: 'Free', plan_month: '/month', plan_popular: '⭐ Most popular',
+    plan_btn_free: 'Start free', plan_btn_paid: 'Get started',
+    p_unlimited: 'Unlimited',
+    p_agent: 'agent', p_agents: 'agents',
+    p_contacts: 'contacts',
+    p_inbox: 'inbox', p_inboxes: 'inboxes',
+    p_ai_chatbot: 'AI chatbot', p_ai_chatbots: 'AI chatbots',
+    p_no_ai: 'No AI chatbots',
+    p_call_min: 'call min/mo', p_no_call: 'No call bots',
+    p_reports_adv: 'Advanced reports', p_reports_basic: 'Basic reports',
+    p_api: 'API access',
+    faq_h2: 'Frequently asked questions',
+    faq: [
+      { q: 'What channels does AutoMarkIQ support?', a: 'WhatsApp Business, Instagram Direct, Facebook Messenger, Telegram, Email (SMTP/IMAP), SMS, Webchat and AI Voice calls — all in one inbox.' },
+      { q: 'Can I try it for free?', a: 'Yes. The Free plan is available with no time limit and no credit card required. Upgrade any time.' },
+      { q: 'Do I need technical skills to set it up?', a: 'No. Setting up your first inbox takes under 10 minutes. Our Help Center guides you through every step.' },
+      { q: 'Can I use my own AI API key?', a: 'Yes. On Pro and Business plans you can connect your own OpenAI, Anthropic or Ollama credentials.' },
+      { q: 'Is my data secure?', a: 'All data is encrypted in transit (HTTPS) and at rest. We never share customer data with third parties.' },
+    ],
+    cta_h2a: 'Ready to transform your', cta_h2b: 'customer experience?',
+    cta_p: 'Join businesses already using AutoMarkIQ to grow faster.',
+    cta_btn: 'Get started for free →', cta_note: 'No credit card required',
+    footer_tag: 'Omnichannel CRM powered by AI',
+    stats_h: 'Businesses already trusting AutoMarkIQ',
+    stat1_val: '500+', stat1_lbl: 'active businesses',
+    stat2_val: '1M+', stat2_lbl: 'messages per month',
+    stat3_val: '8',   stat3_lbl: 'integrated channels',
+    stat4_val: '99.9%', stat4_lbl: 'guaranteed uptime',
+    pain_h2: 'How many apps do you use to serve your customers?',
+    pain_p: 'Most sales and support teams jump between WhatsApp, email, Instagram and their CRM — wasting time, missing messages and losing sales.',
+    pain1_title: 'Missed messages = lost sales',
+    pain1_desc: 'When every channel lives in a different app, messages fall through the cracks and customers wait too long.',
+    pain2_title: 'Your team wastes hours every day',
+    pain2_desc: 'Switching between apps, copying data manually and hunting past conversations kills productivity.',
+    pain3_title: 'Without AI, you work twice as hard',
+    pain3_desc: 'Answering the same questions over and over when AI bots could handle them 24/7 for free.',
+    pain_solution: 'AutoMarkIQ solves all of this in one single platform.',
+    test_h2: 'What our customers say',
+    test1_name: 'Carlos Ruiz', test1_role: 'Commercial Director · E-commerce',
+    test1_quote: '"We used to juggle WhatsApp, email and a separate CRM. With AutoMarkIQ everything is in one place. Our response times dropped from 4 hours to 12 minutes."',
+    test2_name: 'María González', test2_role: 'Support Director · Digital Agency',
+    test2_quote: '"The AI chatbot handles 70% of inquiries without human input. My team now focuses on customers who actually need help."',
+    test3_name: 'Ahmed Al-Rashid', test3_role: 'CEO · Dental Clinic',
+    test3_quote: '"We set up the appointment bot in one afternoon. Now patients book themselves via WhatsApp, 24/7. Amazing for a business our size."',
+  },
+
+  pt: {
+    nav_features: 'Funcionalidades', nav_pricing: 'Preços', nav_help: 'Ajuda',
+    nav_login: 'Entrar', nav_cta: 'Começar grátis',
+    hero_badge: 'CRM omnicanal com IA',
+    hero_h1a: 'Todas as', hero_h1b: 'conversas dos seus clientes,', hero_h1c: 'num só lugar',
+    hero_p: 'AutoMarkIQ centraliza WhatsApp, Instagram, Messenger, Telegram, E-mail, SMS e Webchat numa única caixa de entrada — automatize com IA, feche mais negócios.',
+    hero_btn_start: 'Comece grátis →', hero_btn_demo: 'Ver demo ao vivo', hero_btn_features: 'Ver funcionalidades',
+    hero_note: 'Sem cartão de crédito · Plano gratuito sem limite de tempo',
+    channels_label: 'Todos os canais, uma única plataforma',
+    feat_h2: 'Tudo o que a sua equipa precisa',
+    feat_p: 'Uma plataforma para gerir conversas, automatizar suporte e fechar mais negócios.',
+    f1_title: 'Uma caixa de entrada unificada',
+    f1_desc: 'WhatsApp, Instagram, Messenger, Telegram, E-mail, SMS e Webchat — tudo num só lugar. Sem mudar de aplicação.',
+    f2_title: 'Chatbots com IA 24/7',
+    f2_desc: 'Implante bots inteligentes que atendem consultas, qualificam leads e escalam para a equipa apenas quando necessário.',
+    f3_title: 'Bots de voz com IA',
+    f3_desc: 'Faça e receba chamadas com agentes de IA de voz natural para acompanhamentos, confirmações e pesquisas.',
+    f4_title: 'CRM e Pipeline de Vendas',
+    f4_desc: 'Acompanhe negócios, gira contactos e mova oportunidades por etapas Kanban personalizadas.',
+    how_h2: 'Pronto em minutos', how_p: 'Sem configuração complexa. Sem necessidade de técnicos.',
+    step1_title: 'Crie a sua conta', step1_desc: 'Registe-se gratuitamente em 30 segundos. Sem cartão de crédito.',
+    step2_title: 'Conecte os seus canais', step2_desc: 'Ligue o WhatsApp, Instagram, E-mail ou o chat do seu site.',
+    step3_title: 'Comece a responder', step3_desc: 'A sua equipa gere todas as mensagens numa única caixa de entrada.',
+    price_h2: 'Preços simples e transparentes', price_p: 'Comece grátis. Escale conforme cresce.',
+    plan_free: 'Grátis', plan_month: '/mês', plan_popular: '⭐ Mais popular',
+    plan_btn_free: 'Começar grátis', plan_btn_paid: 'Começar',
+    p_unlimited: 'Ilimitado',
+    p_agent: 'agente', p_agents: 'agentes',
+    p_contacts: 'contactos',
+    p_inbox: 'caixa entrada', p_inboxes: 'caixas entrada',
+    p_ai_chatbot: 'chatbot IA', p_ai_chatbots: 'chatbots IA',
+    p_no_ai: 'Sem chatbots IA',
+    p_call_min: 'min chamadas/mês', p_no_call: 'Sem bots de voz',
+    p_reports_adv: 'Relatórios avançados', p_reports_basic: 'Relatórios básicos',
+    p_api: 'Acesso à API',
+    faq_h2: 'Perguntas frequentes',
+    faq: [
+      { q: 'Que canais o AutoMarkIQ suporta?', a: 'WhatsApp Business, Instagram Direct, Facebook Messenger, Telegram, E-mail (SMTP/IMAP), SMS, Webchat e chamadas de voz com IA — tudo numa única caixa de entrada.' },
+      { q: 'Posso experimentar gratuitamente?', a: 'Sim. O plano Free está disponível sem limite de tempo e sem cartão de crédito. Actualize quando quiser.' },
+      { q: 'Preciso de competências técnicas?', a: 'Não. Configurar a primeira caixa de entrada demora menos de 10 minutos. O nosso Centro de Ajuda guia-o passo a passo.' },
+      { q: 'Posso usar a minha própria chave de API de IA?', a: 'Sim. Nos planos Pro e Business pode conectar as suas credenciais OpenAI, Anthropic ou Ollama.' },
+      { q: 'Os meus dados estão seguros?', a: 'Todos os dados são cifrados em trânsito (HTTPS) e em repouso. Nunca partilhamos dados de clientes com terceiros.' },
+    ],
+    cta_h2a: 'Pronto para transformar a sua', cta_h2b: 'experiência com o cliente?',
+    cta_p: 'Junte-se às empresas que já usam AutoMarkIQ para crescer mais rápido.',
+    cta_btn: 'Comece gratuitamente →', cta_note: 'Sem cartão de crédito',
+    footer_tag: 'CRM omnicanal com IA',
+    stats_h: 'Empresas que já confiam no AutoMarkIQ',
+    stat1_val: '500+', stat1_lbl: 'empresas ativas',
+    stat2_val: '1M+', stat2_lbl: 'mensagens por mês',
+    stat3_val: '8',   stat3_lbl: 'canais integrados',
+    stat4_val: '99.9%', stat4_lbl: 'uptime garantido',
+    pain_h2: 'Quantas aplicações usa para atender os seus clientes?',
+    pain_p: 'A maioria das equipas de vendas e suporte saltam entre WhatsApp, e-mail, Instagram e o CRM — perdendo tempo, perdendo mensagens e perdendo vendas.',
+    pain1_title: 'Mensagens perdidas = vendas perdidas',
+    pain1_desc: 'Quando cada canal está numa aplicação diferente, as mensagens perdem-se e os clientes esperam demasiado.',
+    pain2_title: 'A sua equipa perde horas todos os dias',
+    pain2_desc: 'Mudar entre aplicações, copiar dados manualmente e procurar conversas antigas destrói a produtividade.',
+    pain3_title: 'Sem IA, trabalha o dobro',
+    pain3_desc: 'Responde às mesmas perguntas vezes sem conta quando os bots de IA poderiam fazê-lo 24/7 por si.',
+    pain_solution: 'AutoMarkIQ resolve tudo isto numa única plataforma.',
+    test_h2: 'O que dizem os nossos clientes',
+    test1_name: 'Carlos Ruiz', test1_role: 'Diretor comercial · E-commerce',
+    test1_quote: '"Usávamos o WhatsApp, e-mail e um CRM separado. Com o AutoMarkIQ tudo está num só lugar. Os nossos tempos de resposta baixaram de 4 horas para 12 minutos."',
+    test2_name: 'María González', test2_role: 'Diretora de suporte · Agência digital',
+    test2_quote: '"O chatbot IA responde a 70% das consultas sem intervenção humana. A minha equipa agora foca-se nos clientes que realmente precisam de ajuda."',
+    test3_name: 'Ahmed Al-Rashid', test3_role: 'CEO · Clínica dentária',
+    test3_quote: '"Configurámos o bot de marcações numa tarde. Agora os pacientes marcam sozinhos pelo WhatsApp, 24/7. Incrível para um negócio do nosso tamanho."',
+  },
+
+  tr: {
+    nav_features: 'Özellikler', nav_pricing: 'Fiyatlar', nav_help: 'Yardım',
+    nav_login: 'Giriş yap', nav_cta: 'Ücretsiz başla',
+    hero_badge: 'Yapay zeka destekli çok kanallı CRM',
+    hero_h1a: 'Tüm müşteri', hero_h1b: 'konuşmalarınız,', hero_h1c: 'tek bir yerde',
+    hero_p: "AutoMarkIQ, WhatsApp, Instagram, Messenger, Telegram, E-posta, SMS ve Webchat'i tek bir gelen kutusunda toplar — yapay zeka ile otomatikleştirin, daha hızlı satış yapın.",
+    hero_btn_start: 'Ücretsiz başla →', hero_btn_demo: 'Canlı demo', hero_btn_features: 'Özellikleri gör',
+    hero_note: 'Kredi kartı gerekmez · Sınırsız ücretsiz plan',
+    channels_label: 'Tüm kanallar, tek platform',
+    feat_h2: 'Ekibinizin ihtiyacı olan her şey',
+    feat_p: 'Konuşmaları yönetmek, desteği otomatize etmek ve daha fazla anlaşma yapmak için tek platform.',
+    f1_title: 'Birleşik gelen kutusu',
+    f1_desc: 'WhatsApp, Instagram, Messenger, Telegram, E-posta, SMS ve Webchat — hepsi tek bir yerde. Uygulamalar arası geçişe son.',
+    f2_title: 'Yapay zeka chatbotları 7/24',
+    f2_desc: 'Sorguları ele alan, potansiyel müşterileri nitelendiren ve yalnızca gerektiğinde ekibinize aktaran akıllı botlar dağıtın.',
+    f3_title: 'Yapay zeka sesli botları',
+    f3_desc: 'Takip, onay ve anketler için doğal sesli yapay zeka temsilcileriyle arama yapın ve alın.',
+    f4_title: 'CRM ve Satış Hattı',
+    f4_desc: 'Fırsatları takip edin, müşterileri yönetin ve fırsatları özel Kanban aşamalarında ilerletin.',
+    how_h2: 'Dakikalar içinde hazır', how_p: 'Karmaşık kurulum yok. Teknik ekip gerekmez.',
+    step1_title: 'Hesabınızı oluşturun', step1_desc: '30 saniyede ücretsiz kayıt olun. Kredi kartı gerekmez.',
+    step2_title: 'Kanallarınızı bağlayın', step2_desc: 'WhatsApp, Instagram, E-posta veya web sitenizin sohbet aracını bağlayın.',
+    step3_title: 'Yanıt vermeye başlayın', step3_desc: 'Ekibiniz tüm mesajları tek bir gelen kutusundan yönetir.',
+    price_h2: 'Basit, şeffaf fiyatlandırma', price_p: 'Ücretsiz başlayın. Büyüdükçe ölçeklendirin.',
+    plan_free: 'Ücretsiz', plan_month: '/ay', plan_popular: '⭐ En popüler',
+    plan_btn_free: 'Ücretsiz başla', plan_btn_paid: 'Başla',
+    p_unlimited: 'Sınırsız',
+    p_agent: 'temsilci', p_agents: 'temsilci',
+    p_contacts: 'kişi',
+    p_inbox: 'gelen kutusu', p_inboxes: 'gelen kutusu',
+    p_ai_chatbot: 'yapay zeka chatbotu', p_ai_chatbots: 'yapay zeka chatbotu',
+    p_no_ai: 'Yapay zeka chatbotu yok',
+    p_call_min: 'arama dak/ay', p_no_call: 'Sesli bot yok',
+    p_reports_adv: 'Gelişmiş raporlar', p_reports_basic: 'Temel raporlar',
+    p_api: 'API erişimi',
+    faq_h2: 'Sık sorulan sorular',
+    faq: [
+      { q: 'AutoMarkIQ hangi kanalları destekliyor?', a: 'WhatsApp Business, Instagram Direct, Facebook Messenger, Telegram, E-posta (SMTP/IMAP), SMS, Webchat ve yapay zeka sesli aramalar — hepsi tek bir gelen kutusunda.' },
+      { q: 'Ücretsiz deneyebilir miyim?', a: 'Evet. Ücretsiz plan, süre sınırı ve kredi kartı olmadan mevcuttur. İstediğiniz zaman yükseltebilirsiniz.' },
+      { q: 'Kurulum için teknik bilgi gerekiyor mu?', a: 'Hayır. İlk gelen kutunuzu kurmak 10 dakikadan az sürer. Yardım Merkezimiz her adımda sizi yönlendirir.' },
+      { q: 'Kendi yapay zeka API anahtarımı kullanabilir miyim?', a: 'Evet. Pro ve Business planlarda kendi OpenAI, Anthropic veya Ollama kimlik bilgilerinizi bağlayabilirsiniz.' },
+      { q: 'Verilerim güvende mi?', a: 'Tüm veriler iletim sırasında (HTTPS) ve depolamada şifrelenir. Müşteri verilerini asla üçüncü taraflarla paylaşmayız.' },
+    ],
+    cta_h2a: 'Müşteri deneyiminizi', cta_h2b: 'dönüştürmeye hazır mısınız?',
+    cta_p: "AutoMarkIQ'u kullanarak daha hızlı büyüyen işletmelere katılın.",
+    cta_btn: 'Ücretsiz başla →', cta_note: 'Kredi kartı gerekmez',
+    footer_tag: 'Yapay zeka destekli çok kanallı CRM',
+    stats_h: "AutoMarkIQ'a güvenen işletmeler",
+    stat1_val: '500+', stat1_lbl: 'aktif işletme',
+    stat2_val: '1M+', stat2_lbl: 'mesaj/ay',
+    stat3_val: '8',   stat3_lbl: 'entegre kanal',
+    stat4_val: '99.9%', stat4_lbl: 'garantili çalışma süresi',
+    pain_h2: 'Müşterilerinize hizmet vermek için kaç uygulama kullanıyorsunuz?',
+    pain_p: "Çoğu satış ve destek ekibi WhatsApp, e-posta, Instagram ve CRM arasında atlıyor — zaman kaybediyor, mesajları kaçırıyor ve satışları yitiriyor.",
+    pain1_title: 'Kaçırılan mesajlar = kaybedilen satışlar',
+    pain1_desc: 'Her kanal farklı bir uygulamada olduğunda mesajlar kaybolur ve müşteriler çok uzun bekler.',
+    pain2_title: 'Ekibiniz her gün saatler kaybediyor',
+    pain2_desc: 'Uygulamalar arasında geçiş yapmak, verileri manuel kopyalamak ve eski konuşmaları aramak verimliliği yok eder.',
+    pain3_title: 'Yapay zeka olmadan iki kat çalışırsınız',
+    pain3_desc: "Yapay zeka botları bunları sizin için 7/24 ücretsiz yapabilecekken aynı soruları tekrar tekrar yanıtlarsınız.",
+    pain_solution: 'AutoMarkIQ tüm bunları tek bir platformda çözer.',
+    test_h2: 'Müşterilerimiz ne diyor',
+    test1_name: 'Carlos Ruiz', test1_role: 'Ticari Direktör · E-ticaret',
+    test1_quote: '"Daha önce WhatsApp, e-posta ve ayrı bir CRM kullanıyorduk. AutoMarkIQ ile her şey tek bir yerde. Yanıt sürelerimiz 4 saatten 12 dakikaya düştü."',
+    test2_name: 'María González', test2_role: 'Destek Direktörü · Dijital Ajans',
+    test2_quote: '"Yapay zeka chatbotu soruların %70\'ini insan müdahalesi olmadan yanıtlıyor. Ekibim artık gerçekten yardıma ihtiyacı olan müşterilere odaklanıyor."',
+    test3_name: 'Ahmed Al-Rashid', test3_role: 'CEO · Diş Kliniği',
+    test3_quote: '"Randevu botunu bir öğleden sonrada kurduk. Artık hastalar WhatsApp üzerinden 7/24 kendi kendine randevu alıyor. Büyüklüğümüzdeki bir işletme için inanılmaz."',
+  },
+
+  ar: {
+    nav_features: 'المميزات', nav_pricing: 'الأسعار', nav_help: 'المساعدة',
+    nav_login: 'تسجيل الدخول', nav_cta: 'ابدأ مجاناً',
+    hero_badge: 'نظام CRM متعدد القنوات مدعوم بالذكاء الاصطناعي',
+    hero_h1a: 'جميع محادثات', hero_h1b: 'عملائك،', hero_h1c: 'في مكان واحد',
+    hero_p: 'يوحّد AutoMarkIQ واتساب وإنستغرام وماسنجر وتيليغرام والبريد الإلكتروني والرسائل القصيرة والدردشة على الويب في صندوق بريد واحد — أتمته مع الذكاء الاصطناعي وأغلق صفقات أسرع.',
+    hero_btn_start: 'ابدأ مجاناً →', hero_btn_demo: 'جرّب العرض', hero_btn_features: 'استعرض المميزات',
+    hero_note: 'لا يلزم بطاقة ائتمان · خطة مجانية بدون حد زمني',
+    channels_label: 'جميع القنوات، منصة واحدة',
+    feat_h2: 'كل ما يحتاجه فريقك',
+    feat_p: 'منصة واحدة لإدارة المحادثات وأتمتة الدعم وإتمام المزيد من الصفقات.',
+    f1_title: 'صندوق بريد واحد موحّد',
+    f1_desc: 'واتساب وإنستغرام وماسنجر وتيليغرام والبريد الإلكتروني والرسائل القصيرة والدردشة على الويب — كلها في مكان واحد. لا مزيد من التنقل بين التطبيقات.',
+    f2_title: 'روبوتات دردشة بالذكاء الاصطناعي 24/7',
+    f2_desc: 'انشر روبوتات ذكية تتعامل مع الاستفسارات وتصفّي العملاء المحتملين وترفع الأمر لفريقك فقط عند الحاجة.',
+    f3_title: 'روبوتات صوتية بالذكاء الاصطناعي',
+    f3_desc: 'أجرِ واستقبل المكالمات مع وكلاء ذكاء اصطناعي بأصوات طبيعية للمتابعات والتأكيدات والاستطلاعات.',
+    f4_title: 'CRM وخط أنابيب المبيعات',
+    f4_desc: 'تتبّع الصفقات وأدِر جهات الاتصال وانقل الفرص عبر مراحل كانبان مخصصة.',
+    how_h2: 'جاهز للعمل في دقائق', how_p: 'لا إعداد معقد. لا حاجة لمهندسين.',
+    step1_title: 'أنشئ حسابك', step1_desc: 'سجّل مجاناً في 30 ثانية. لا يلزم بطاقة ائتمان.',
+    step2_title: 'اربط قنواتك', step2_desc: 'اربط واتساب أو إنستغرام أو البريد الإلكتروني أو دردشة موقعك.',
+    step3_title: 'ابدأ الرد', step3_desc: 'يدير فريقك جميع الرسائل من صندوق بريد واحد.',
+    price_h2: 'أسعار بسيطة وشفافة', price_p: 'ابدأ مجاناً. توسّع مع نموك.',
+    plan_free: 'مجاني', plan_month: '/شهر', plan_popular: '⭐ الأكثر شعبية',
+    plan_btn_free: 'ابدأ مجاناً', plan_btn_paid: 'ابدأ الآن',
+    p_unlimited: 'غير محدود',
+    p_agent: 'وكيل', p_agents: 'وكلاء',
+    p_contacts: 'جهة اتصال',
+    p_inbox: 'صندوق بريد', p_inboxes: 'صناديق بريد',
+    p_ai_chatbot: 'روبوت دردشة ذكي', p_ai_chatbots: 'روبوتات دردشة ذكية',
+    p_no_ai: 'لا روبوتات دردشة',
+    p_call_min: 'دقيقة مكالمة/شهر', p_no_call: 'لا روبوتات صوتية',
+    p_reports_adv: 'تقارير متقدمة', p_reports_basic: 'تقارير أساسية',
+    p_api: 'الوصول إلى API',
+    faq_h2: 'الأسئلة الشائعة',
+    faq: [
+      { q: 'ما القنوات التي يدعمها AutoMarkIQ؟', a: 'واتساب بيزنس وإنستغرام وماسنجر وتيليغرام والبريد الإلكتروني والرسائل القصيرة والدردشة على الويب والمكالمات الصوتية بالذكاء الاصطناعي — كلها في صندوق بريد واحد.' },
+      { q: 'هل يمكنني تجربته مجاناً؟', a: 'نعم. الخطة المجانية متاحة بدون حد زمني وبدون بطاقة ائتمان. قم بالترقية في أي وقت.' },
+      { q: 'هل أحتاج مهارات تقنية للإعداد؟', a: 'لا. يستغرق إعداد صندوق بريدك الأول أقل من 10 دقائق. يرشدك مركز المساعدة لدينا خطوة بخطوة.' },
+      { q: 'هل يمكنني استخدام مفتاح API الخاص بي؟', a: 'نعم. في الخطتين Pro وBusiness يمكنك ربط بيانات اعتماد OpenAI أو Anthropic أو Ollama الخاصة بك.' },
+      { q: 'هل بياناتي آمنة؟', a: 'جميع البيانات مشفّرة أثناء النقل (HTTPS) وفي حالة الراحة. لا نشارك أبداً بيانات العملاء مع أطراف ثالثة.' },
+    ],
+    cta_h2a: 'هل أنت مستعد لتحويل', cta_h2b: 'تجربة عملائك؟',
+    cta_p: 'انضم إلى الشركات التي تستخدم AutoMarkIQ بالفعل للنمو بشكل أسرع.',
+    cta_btn: 'ابدأ مجاناً →', cta_note: 'لا يلزم بطاقة ائتمان',
+    footer_tag: 'نظام CRM متعدد القنوات مدعوم بالذكاء الاصطناعي',
+    stats_h: 'الشركات التي تثق بـ AutoMarkIQ',
+    stat1_val: '+500', stat1_lbl: 'شركة نشطة',
+    stat2_val: '+1M',  stat2_lbl: 'رسالة شهرياً',
+    stat3_val: '8',    stat3_lbl: 'قناة متكاملة',
+    stat4_val: '99.9%', stat4_lbl: 'وقت تشغيل مضمون',
+    pain_h2: 'كم تطبيقاً تستخدم لخدمة عملائك؟',
+    pain_p: 'تقفز معظم فرق المبيعات والدعم بين واتساب والبريد الإلكتروني وإنستغرام ونظام CRM — مما يضيع الوقت ويُفوّت الرسائل ويُضيع المبيعات.',
+    pain1_title: 'الرسائل الفائتة = مبيعات ضائعة',
+    pain1_desc: 'عندما تكون كل قناة في تطبيق مختلف، تضيع الرسائل ويظل العملاء ينتظرون طويلاً.',
+    pain2_title: 'فريقك يضيع ساعات كل يوم',
+    pain2_desc: 'التنقل بين التطبيقات ونسخ البيانات يدوياً والبحث في المحادثات القديمة يدمر الإنتاجية.',
+    pain3_title: 'بدون الذكاء الاصطناعي تعمل ضعف الجهد',
+    pain3_desc: 'تُجيب على الأسئلة ذاتها مراراً وتكراراً في حين يمكن لروبوتات الذكاء الاصطناعي فعل ذلك 24/7 مجاناً.',
+    pain_solution: 'AutoMarkIQ يحل كل هذا في منصة واحدة.',
+    test_h2: 'ماذا يقول عملاؤنا',
+    test1_name: 'Carlos Ruiz', test1_role: 'مدير تجاري · التجارة الإلكترونية',
+    test1_quote: '"كنا نستخدم واتساب والبريد الإلكتروني ونظام CRM منفصلاً. مع AutoMarkIQ أصبح كل شيء في مكان واحد. انخفضت أوقات استجابتنا من 4 ساعات إلى 12 دقيقة."',
+    test2_name: 'María González', test2_role: 'مديرة الدعم · وكالة رقمية',
+    test2_quote: '"يتعامل روبوت الدردشة الذكي مع 70% من الاستفسارات دون تدخل بشري. يركز فريقي الآن على العملاء الذين يحتاجون فعلاً إلى المساعدة."',
+    test3_name: 'Ahmed Al-Rashid', test3_role: 'الرئيس التنفيذي · عيادة أسنان',
+    test3_quote: '"قمنا بإعداد روبوت المواعيد في فترة بعد الظهر. الآن يحجز المرضى بأنفسهم عبر واتساب، 24/7. مذهل لعمل بحجمنا."',
+  },
+};

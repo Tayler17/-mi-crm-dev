@@ -39,10 +39,17 @@ async function bootstrap() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-  // Ensure uploads directory exists and serve it as static files at /uploads
+  // Serve public upload directories (conversation media, content images)
+  // kb-pdfs are NOT served publicly — accessed only via protected API
   const uploadsDir = join(process.cwd(), 'uploads');
-  if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
-  app.useStaticAssets(uploadsDir, { prefix: '/uploads' });
+  const subDirs = ['content', 'messages'];
+  for (const sub of subDirs) {
+    const dir = join(uploadsDir, sub);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    app.useStaticAssets(dir, { prefix: `/uploads/${sub}` });
+  }
+  const kbDir = join(uploadsDir, 'kb-pdfs');
+  if (!existsSync(kbDir)) mkdirSync(kbDir, { recursive: true });
 
   const config = new DocumentBuilder()
     .setTitle('CRM SaaS API')

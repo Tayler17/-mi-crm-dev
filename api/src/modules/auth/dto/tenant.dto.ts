@@ -41,6 +41,9 @@ export class RegisterDto {
   @IsBoolean()
   @Equals(true, { message: 'Debes aceptar los Términos de uso y la Política de privacidad' })
   acceptedTerms: boolean;
+
+  @IsString() @IsOptional()
+  lang?: string;
 }
 
 export class UpdateTenantDto {

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-export const metadata = { title: 'Términos de uso — CRM SaaS' };
+export const metadata = { title: 'Términos de uso — AutoMarkIQ' };
 
 const LAST_UPDATED = '24 de abril de 2026';
 
@@ -11,10 +11,7 @@ export default function TermsPage() {
       {/* Header */}
       <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '16px 0' }}>
         <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
-            <div style={{ width: 34, height: 34, borderRadius: 8, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>⚡</div>
-            <span style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.5px' }}>CRM SaaS</span>
-          </Link>
+          <Link href="/" style={{ fontWeight: 800, fontSize: 20, letterSpacing: '-0.5px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text', textDecoration: 'none' }}>AutoMarkIQ</Link>
           <Link href="/privacy" style={{ fontSize: 13, color: '#6366f1', textDecoration: 'none', fontWeight: 600 }}>Ver Política de privacidad →</Link>
         </div>
       </div>
@@ -29,12 +26,12 @@ export default function TermsPage() {
         <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', padding: '40px 48px', lineHeight: 1.8, color: '#374151', fontSize: 15 }}>
 
           <Section title="1. Aceptación de los términos">
-            <p>Al crear una cuenta o utilizar CRM SaaS (el "Servicio"), aceptas quedar vinculado por estos Términos de uso. Si no estás de acuerdo con alguno de estos términos, no podrás utilizar el Servicio.</p>
-            <p>Estos términos constituyen un acuerdo legalmente vinculante entre tú (el "Usuario") y CRM SaaS (el "Proveedor"). Si actúas en nombre de una empresa, declaras tener autoridad para comprometer a dicha organización.</p>
+            <p>Al crear una cuenta o utilizar AutoMarkIQ (el "Servicio"), aceptas quedar vinculado por estos Términos de uso. Si no estás de acuerdo con alguno de estos términos, no podrás utilizar el Servicio.</p>
+            <p>Estos términos constituyen un acuerdo legalmente vinculante entre tú (el "Usuario") y AutoMarkIQ (el "Proveedor"). Si actúas en nombre de una empresa, declaras tener autoridad para comprometer a dicha organización.</p>
           </Section>
 
           <Section title="2. Descripción del servicio">
-            <p>CRM SaaS es una plataforma de gestión de relaciones con clientes (CRM) que ofrece, entre otras funcionalidades:</p>
+            <p>AutoMarkIQ es una plataforma de gestión de relaciones con clientes (CRM) que ofrece, entre otras funcionalidades:</p>
             <ul>
               <li>Gestión de contactos, deals y pipelines de ventas.</li>
               <li>Bandeja de entrada unificada para canales de comunicación (WhatsApp, email, Telegram, etc.).</li>

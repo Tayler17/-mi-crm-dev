@@ -1,0 +1,151 @@
+{
+  "name": "AutoMarkIQ – Social Media Content Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1,4"
+            }
+          ]
+        }
+      },
+      "id": "node-0001",
+      "name": "Schedule Mon & Thu",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 200]
+    },
+    {
+      "parameters": {},
+      "id": "node-0002",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 380]
+    },
+    {
+      "parameters": {
+        "jsCode": "const topics = [\n  'How AI chatbots handle 80% of customer questions automatically',\n  'Managing WhatsApp, Instagram, Facebook and 5 more channels from one inbox',\n  'How to never miss a lead with automated follow-ups',\n  '24/7 appointment scheduling that works while you sleep',\n  'How small businesses compete with big brands using automation',\n  'Turn every customer conversation into data, insights, and sales',\n  'The CRM built for businesses that sell through messaging apps',\n  '5 ways AutoMarkIQ saves your team 10+ hours every week'\n];\n\nconst now = new Date();\nconst startOfYear = new Date(now.getFullYear(), 0, 1);\nconst week = Math.floor((now - startOfYear) / 604800000);\nconst isThursday = now.getDay() === 4;\nconst idx = (week * 2 + (isThursday ? 1 : 0)) % topics.length;\n\nreturn [{ json: {\n  topic: topics[idx],\n  date: now.toISOString().split('T')[0]\n} }];"
+      },
+      "id": "node-0003",
+      "name": "Pick Topic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 290]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { topic, date } = $input.first().json;\n\nconst prompt = `You are a social media content creator for AutoMarkIQ, a multi-channel CRM platform built for small and medium businesses.\n\nAbout AutoMarkIQ:\n- Unifies all customer conversations in one inbox: WhatsApp, Instagram, Facebook, Messenger, Telegram, SMS, Email, and Live Chat\n- AI-powered chatbots that handle customer queries automatically 24/7\n- Full CRM: contact management, deal pipeline, and automated follow-ups\n- Campaign builder for bulk messaging across all channels\n- Appointment scheduling integrated into the communication flow\n- Multi-agent team support with role-based access\n- Built for businesses in any industry: retail, clinics, restaurants, logistics, services\n\nTarget audience: Small and medium business owners who want to save time, respond faster to customers, never miss a lead, and grow sales through better communication automation.\n\nTone: Professional, clear, results-focused. Inspiring and relatable, never salesy or corporate. Use numbers and concrete benefits when possible.\nLanguage: English only.\n\nToday's topic: ${topic}\n\nCreate 4 platform-optimized posts based on this topic. Return ONLY valid JSON with no markdown, no code fences, no extra explanation. Just the raw JSON object:\n{\n  \"topic\": \"${topic}\",\n  \"facebook\": {\n    \"text\": \"<150-300 word post. Conversational and engaging. Tell a short story or ask a question. Include 3-5 relevant hashtags at the end separated by spaces.>\"\n  },\n  \"instagram\": {\n    \"caption\": \"<150-200 word caption. Start with a hook line. Use relevant emojis naturally throughout. End with 10-15 hashtags on a new line.>\"\n  },\n  \"google_business\": {\n    \"text\": \"<150-250 words. Informative and helpful. Focus on business value and local relevance. No hashtags. End with a soft call to action.>\"\n  },\n  \"youtube\": {\n    \"title\": \"<Engaging video title, under 70 characters, with a keyword people would search>\",\n    \"description\": \"<200-400 word video description. First 2 lines must hook the viewer. Include relevant keywords naturally. Add a call to action to visit automarkiq.com. End with relevant tags after a line break.>\"\n  }\n}`;\n\nreturn [{ json: {\n  body: {\n    model: 'claude-opus-4-7',\n    max_tokens: 4096,\n    messages: [{ role: 'user', content: prompt }]\n  },\n  topic,\n  date\n} }];"
+      },
+      "id": "node-0004",
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 290]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "YOUR_ANTHROPIC_API_KEY_HERE"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "id": "node-0005",
+      "name": "Claude API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 290]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content[0].text;\nconst topic = $('Build Prompt').first().json.topic;\nconst date = $('Build Prompt').first().json.date;\n\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch(e) {\n  const match = raw.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    try { parsed = JSON.parse(match[0]); }\n    catch(e2) { throw new Error('Unparseable Claude response: ' + raw.substring(0, 300)); }\n  } else {\n    throw new Error('No JSON found in Claude response: ' + raw.substring(0, 300));\n  }\n}\n\nreturn [{ json: { ...parsed, topic, date } }];"
+      },
+      "id": "node-0006",
+      "name": "Parse Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 290]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@automarkiq.com",
+        "toEmail": "teylor_357@hotmail.com",
+        "subject": "=📱 AutoMarkIQ Content Ready – {{ $json.date }}",
+        "emailFormat": "html",
+        "message": "=<!DOCTYPE html><html><body style='font-family:Arial,sans-serif;max-width:680px;margin:0 auto;padding:24px;background:#f4f4f8;color:#333'><div style='background:#fff;border-radius:10px;padding:28px;box-shadow:0 2px 8px rgba(0,0,0,.08)'><h2 style='margin:0 0 6px;color:#6366f1;font-size:20px'>📅 AutoMarkIQ — Content Ready</h2><p style='margin:0 0 24px;color:#888;font-size:13px'>{{ $json.date }} &nbsp;·&nbsp; Topic: <strong style='color:#555'>{{ $json.topic }}</strong></p><div style='background:#eff6ff;border-left:4px solid #4267B2;padding:16px 20px;margin-bottom:16px;border-radius:0 8px 8px 0'><h3 style='margin:0 0 10px;color:#4267B2;font-size:14px;text-transform:uppercase;letter-spacing:.5px'>📘 Facebook</h3><p style='margin:0;white-space:pre-wrap;line-height:1.7;font-size:14px'>{{ $json.facebook.text }}</p></div><div style='background:#fdf2f8;border-left:4px solid #E1306C;padding:16px 20px;margin-bottom:16px;border-radius:0 8px 8px 0'><h3 style='margin:0 0 10px;color:#E1306C;font-size:14px;text-transform:uppercase;letter-spacing:.5px'>📸 Instagram</h3><p style='margin:0;white-space:pre-wrap;line-height:1.7;font-size:14px'>{{ $json.instagram.caption }}</p></div><div style='background:#f0fdf4;border-left:4px solid #34A853;padding:16px 20px;margin-bottom:16px;border-radius:0 8px 8px 0'><h3 style='margin:0 0 10px;color:#1e8e3e;font-size:14px;text-transform:uppercase;letter-spacing:.5px'>🏢 Google Business</h3><p style='margin:0;white-space:pre-wrap;line-height:1.7;font-size:14px'>{{ $json.google_business.text }}</p></div><div style='background:#fff5f5;border-left:4px solid #FF0000;padding:16px 20px;margin-bottom:16px;border-radius:0 8px 8px 0'><h3 style='margin:0 0 10px;color:#cc0000;font-size:14px;text-transform:uppercase;letter-spacing:.5px'>▶️ YouTube</h3><p style='margin:0 0 10px;font-weight:700;font-size:15px;color:#222'>{{ $json.youtube.title }}</p><p style='margin:0;white-space:pre-wrap;line-height:1.7;font-size:14px'>{{ $json.youtube.description }}</p></div><hr style='margin:24px 0;border:none;border-top:1px solid #eee'><p style='margin:0;color:#bbb;font-size:12px;text-align:center'>Generated by AutoMarkIQ Content Bot · Runs every Monday &amp; Thursday</p></div></body></html>",
+        "options": {}
+      },
+      "id": "node-0007",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1340, 290],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-cred",
+          "name": "SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Mon & Thu": {
+      "main": [
+        [{ "node": "Pick Topic", "type": "main", "index": 0 }]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Pick Topic", "type": "main", "index": 0 }]
+      ]
+    },
+    "Pick Topic": {
+      "main": [
+        [{ "node": "Build Prompt", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Prompt": {
+      "main": [
+        [{ "node": "Claude API", "type": "main", "index": 0 }]
+      ]
+    },
+    "Claude API": {
+      "main": [
+        [{ "node": "Parse Posts", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Posts": {
+      "main": [
+        [{ "node": "Send Email", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

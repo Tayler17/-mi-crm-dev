@@ -255,9 +255,8 @@ export default function OnboardingPage() {
       <div style={{ position: 'absolute', bottom: -60, left: '5%',  width: 280, height: 280, borderRadius: '50%', background: 'radial-gradient(circle, #818cf811 0%, transparent 70%)', pointerEvents: 'none' }} />
 
       {/* Logo */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 32, alignSelf: 'flex-start', maxWidth: 600, width: '100%' }}>
-        <div style={{ width: 36, height: 36, borderRadius: 8, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>⚡</div>
-        <span style={{ fontWeight: 800, color: '#fff', fontSize: 18 }}>CRM SaaS</span>
+      <div style={{ marginBottom: 32, alignSelf: 'flex-start', fontWeight: 800, fontSize: 20, letterSpacing: '-0.5px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
+        AutoMarkIQ
       </div>
 
       {/* Progress */}

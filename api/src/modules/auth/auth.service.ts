@@ -14,6 +14,7 @@ import { Tenant } from './entities/tenant.entity';
 import { LoginDto } from './dto/login.dto';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
 import { CreateTenantDto, UpdateTenantDto, RegisterDto } from './dto/tenant.dto';
+import { OnboardingEmailService } from './onboarding-email.service';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -26,6 +27,7 @@ export class AuthService {
     private readonly tenantRepo: Repository<Tenant>,
     private readonly jwtService: JwtService,
     @InjectDataSource() private readonly db: DataSource,
+    private readonly onboardingEmail: OnboardingEmailService,
   ) {
     this.ensureResetColumns();
   }
@@ -38,23 +40,53 @@ export class AuthService {
         ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(255),
         ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ
     `).catch(() => {});
+    await this.db.query(`
+      ALTER TABLE tenants ADD COLUMN IF NOT EXISTS lang VARCHAR(10) DEFAULT 'es'
+    `).catch(() => {});
   }
 
-  private createTransporter() {
-    return nodemailer.createTransport({
-      host:   process.env.SMTP_HOST   || 'smtp.gmail.com',
-      port:   Number(process.env.SMTP_PORT) || 587,
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    });
+  private async createTransporter(): Promise<{ transport: nodemailer.Transporter; from: string }> {
+    const smtpHost = process.env.SMTP_HOST || '';
+    // If SMTP_HOST is mailhog (dev) or empty, fall back to first active email connection in DB
+    if (!smtpHost || smtpHost === 'mailhog') {
+      const rows = await this.db.query(
+        `SELECT credentials FROM channel_connections
+         WHERE channel_type = 'email' AND is_active = true
+           AND (credentials->>'host') IS NOT NULL AND (credentials->>'host') != ''
+         ORDER BY created_at ASC LIMIT 1`,
+      );
+      if (rows.length) {
+        const c = rows[0].credentials ?? {};
+        return {
+          transport: nodemailer.createTransport({
+            host:   String(c.host).trim(),
+            port:   Number(c.port) || 587,
+            secure: Number(c.port) === 465,
+            auth: { user: c.user, pass: c.password },
+            tls: { rejectUnauthorized: false },
+          }),
+          from: `AutoMarkIQ <${c.user}>`,
+        };
+      }
+    }
+    return {
+      transport: nodemailer.createTransport({
+        host:   smtpHost || 'smtp.gmail.com',
+        port:   Number(process.env.SMTP_PORT) || 587,
+        secure: process.env.SMTP_SECURE === 'true',
+        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      }),
+      from: process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@automarkiq.com',
+    };
   }
 
   private async sendVerificationEmail(to: string, token: string, fullName: string, frontendUrl: string) {
     const url = `${frontendUrl}/verify-email?token=${token}`;
-    await this.createTransporter().sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    const { transport, from } = await this.createTransporter();
+    await transport.sendMail({
+      from,
       to,
-      subject: 'Verifica tu email — CRM SaaS',
+      subject: 'Verifica tu email — AutoMarkIQ',
       html: `
         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
           <h2 style="color:#6366f1">¡Bienvenido, ${fullName}!</h2>
@@ -72,10 +104,11 @@ export class AuthService {
 
   private async sendResetEmail(to: string, token: string, frontendUrl: string) {
     const url = `${frontendUrl}/reset-password?token=${token}`;
-    await this.createTransporter().sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    const { transport, from } = await this.createTransporter();
+    await transport.sendMail({
+      from,
       to,
-      subject: 'Restablecer contraseña — CRM SaaS',
+      subject: 'Restablecer contraseña — AutoMarkIQ',
       html: `
         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
           <h2 style="color:#6366f1">Restablecer contraseña</h2>
@@ -101,7 +134,8 @@ export class AuthService {
     const expires = new Date(Date.now() + 60 * 60 * 1000); // 1h
     await this.userRepo.update(user.id, { resetToken: token, resetTokenExpiresAt: expires });
 
-    const frontend = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',')[0].trim();
+    const rawFrontend = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',')[0].trim();
+    const frontend = rawFrontend.includes('localhost') ? 'https://app.automarkiq.com' : rawFrontend;
     await this.sendResetEmail(user.email, token, frontend);
   }
 
@@ -154,6 +188,22 @@ export class AuthService {
         role: user.role,
         tenantId,
       },
+    };
+  }
+
+  async demoLogin() {
+    const tenant = await this.tenantRepo.findOne({ where: { slug: 'demo', isActive: true } });
+    if (!tenant) throw new NotFoundException('Demo workspace not available');
+    const user = await this.userRepo.findOne({
+      where: { tenantId: tenant.id, role: 'admin', isActive: true },
+      order: { createdAt: 'ASC' } as any,
+    });
+    if (!user) throw new NotFoundException('Demo user not found');
+    const payload = { sub: user.id, email: user.email, tenantId: tenant.id, role: user.role };
+    const accessToken = this.jwtService.sign(payload, { expiresIn: '2h' });
+    return {
+      accessToken,
+      user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role, tenantId: tenant.id },
     };
   }
 
@@ -239,6 +289,8 @@ export class AuthService {
     const slugExists = await this.tenantRepo.findOne({ where: { slug: dto.slug } });
     if (slugExists) throw new ConflictException('Ya existe un workspace con ese slug. Elige otro nombre.');
 
+    const VALID_LANGS = ['es', 'en', 'pt', 'tr', 'ar'];
+    const lang = VALID_LANGS.includes(dto.lang ?? '') ? dto.lang! : 'es';
     const tenant = this.tenantRepo.create({
       name: dto.workspaceName,
       slug: dto.slug,
@@ -246,6 +298,7 @@ export class AuthService {
       isActive: true,
     });
     const savedTenant = await this.tenantRepo.save(tenant);
+    await this.db.query(`UPDATE tenants SET lang=$1 WHERE id=$2`, [lang, savedTenant.id]).catch(() => {});
 
     // Assign the free plan so checkPlanLimit enforces limits from day 1
     const [freePlan] = await this.db.query(`SELECT id FROM plans WHERE slug = 'free' LIMIT 1`);
@@ -267,9 +320,15 @@ export class AuthService {
     const savedUser = await this.userRepo.save(user);
 
     // Send verification email fire-and-forget — don't block registration on SMTP errors
-    const frontend = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',')[0].trim();
+    const rawFrontend = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',')[0].trim();
+    const frontend = rawFrontend.includes('localhost') ? 'https://app.automarkiq.com' : rawFrontend;
     this.sendVerificationEmail(savedUser.email, verificationToken, savedUser.fullName, frontend)
       .catch((err) => console.error('Error sending verification email:', err?.message));
+
+    // Onboarding sequence — fire-and-forget
+    this.onboardingEmail
+      .sendWelcome(savedTenant.id, savedUser.email, savedUser.fullName, savedTenant.name, lang)
+      .catch(() => {});
 
     const payload = { sub: savedUser.id, email: savedUser.email, tenantId: savedTenant.id, role: 'admin' };
     const accessToken = this.jwtService.sign(payload);
@@ -369,6 +428,18 @@ export class AuthService {
     await this.userRepo.save(adminUser);
 
     return savedTenant;
+  }
+
+  async deleteTenant(id: string) {
+    // Delete all tenant data in dependency order
+    await this.db.query(`DELETE FROM messages WHERE tenant_id = $1`, [id]);
+    await this.db.query(`DELETE FROM conversations WHERE tenant_id = $1`, [id]);
+    await this.db.query(`DELETE FROM contacts WHERE tenant_id = $1`, [id]);
+    await this.db.query(`DELETE FROM channel_connections WHERE tenant_id = $1`, [id]);
+    await this.db.query(`DELETE FROM inboxes WHERE tenant_id = $1`, [id]);
+    await this.db.query(`DELETE FROM users WHERE tenant_id = $1`, [id]);
+    await this.db.query(`DELETE FROM tenants WHERE id = $1`, [id]);
+    return { ok: true };
   }
 
   async updateTenant(id: string, dto: UpdateTenantDto) {

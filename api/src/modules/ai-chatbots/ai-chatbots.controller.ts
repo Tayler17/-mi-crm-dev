@@ -31,12 +31,28 @@ export class AiChatbotsController {
   @Post()
   async create(@Body() dto: any, @TenantId() tenantId: string, @Request() req: any) {
     await checkPlanLimit(this.db, tenantId, 'ai_chatbots');
-    return this.svc.create(dto, tenantId, req.user?.sub ?? req.user?.id);
+    const safeDto = await this.stripModelIfNotAllowed(dto, tenantId);
+    return this.svc.create(safeDto, tenantId, req.user?.sub ?? req.user?.id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: any, @TenantId() tenantId: string) {
-    return this.svc.update(id, dto, tenantId);
+  async update(@Param('id') id: string, @Body() dto: any, @TenantId() tenantId: string) {
+    const safeDto = await this.stripModelIfNotAllowed(dto, tenantId);
+    return this.svc.update(id, safeDto, tenantId);
+  }
+
+  /** Remove provider/model from dto if the tenant's plan doesn't allow own API keys. */
+  private async stripModelIfNotAllowed(dto: any, tenantId: string): Promise<any> {
+    const [row] = await this.db.query(
+      `SELECT p.allow_own_api_keys
+       FROM tenants t
+       JOIN plans p ON p.id = t.plan_id
+       WHERE t.id = $1`,
+      [tenantId],
+    );
+    if (row?.allow_own_api_keys) return dto;
+    const { provider: _p, model: _m, ...rest } = dto;
+    return rest;
   }
 
   @Delete(':id')

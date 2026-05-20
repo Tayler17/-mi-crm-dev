@@ -217,8 +217,8 @@ function BotModal({
                 <input className="form-input" value={form.description} onChange={setField('description')} placeholder="Atiende consultas de ventas en WhatsApp 24/7" />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: allowOwnApiKeys ? '1fr 1fr' : '1fr', gap: 12 }}>
-                {allowOwnApiKeys && (
+              {allowOwnApiKeys ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div className="form-group" style={{ margin: 0 }}>
                     <label className="form-label">Proveedor de IA</label>
                     <select className="form-input" value={form.provider} onChange={(e) => {
@@ -229,14 +229,22 @@ function BotModal({
                       {PROVIDERS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
                     </select>
                   </div>
-                )}
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Modelo</label>
-                  <select className="form-input" value={form.model} onChange={setField('model')}>
-                    {providerModels.map((m) => <option key={m} value={m}>{m}</option>)}
-                  </select>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label">Modelo</label>
+                    <select className="form-input" value={form.model} onChange={setField('model')}>
+                      {providerModels.map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div style={{ padding: '12px 16px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, fontSize: 13, color: '#166534', display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <span style={{ fontSize: 20 }}>🤖</span>
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: 2 }}>Modelo de IA gestionado por la plataforma</div>
+                    <div style={{ opacity: 0.8 }}>El owner del workspace configura el proveedor y modelo. Actualiza al plan Business para usar tu propia API key.</div>
+                  </div>
+                </div>
+              )}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group" style={{ margin: 0 }}>
@@ -319,9 +327,11 @@ function BotModal({
                 </div>
               </div>
 
-              <div style={{ padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-                <strong>Nota:</strong> La API key del proveedor seleccionado ({PROVIDERS.find((p) => p.value === form.provider)?.label}) se configura en <strong>Configuración → Integraciones de IA</strong>.
-              </div>
+              {allowOwnApiKeys && (
+                <div style={{ padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+                  <strong>Nota:</strong> La API key del proveedor seleccionado ({PROVIDERS.find((p) => p.value === form.provider)?.label}) se configura en <strong>Configuración → Integraciones de IA</strong>.
+                </div>
+              )}
             </div>
           )}
 
@@ -882,6 +892,7 @@ export default function AiChatbotsPage() {
   const [queues, setQueues] = useState<Queue[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [allowOwnApiKeys, setAllowOwnApiKeys] = useState(false);
+  const [hasAiKey, setHasAiKey] = useState(true);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<AiChatbot | null>(null);
@@ -900,6 +911,8 @@ export default function AiChatbotsPage() {
       ]);
       setBots(b); setStats(s); setInboxes(ix); setQueues(q); setTeams(tm);
       setAllowOwnApiKeys(settings?.allow_own_api_keys ?? false);
+      const aiKeys = settings?.settings?.aiKeys ?? {};
+      setHasAiKey(Object.values(aiKeys).some((v) => !!v));
     } finally { setLoading(false); }
   }
 
@@ -945,6 +958,20 @@ export default function AiChatbotsPage() {
           {i.newBotBtn}
         </button>
       </div>
+
+      {/* No AI key warning */}
+      {!hasAiKey && (
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '12px 16px', background: '#fefce8', border: '1px solid #fde047', borderRadius: 10, marginBottom: 20, fontSize: 13 }}>
+          <span style={{ fontSize: 20 }}>⚠️</span>
+          <div>
+            <strong style={{ color: '#854d0e' }}>No hay API key de IA configurada.</strong>
+            {' '}Los chatbots usarán la clave de plataforma si está disponible, o no podrán responder.{' '}
+            <a href="/settings" style={{ color: '#6366f1', fontWeight: 600, textDecoration: 'none' }}>
+              Configurar en Ajustes → Integraciones de IA →
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Stats row */}
       {stats && (

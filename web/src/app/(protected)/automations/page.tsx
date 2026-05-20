@@ -249,6 +249,7 @@ function RuleModal({ rule, agents, tags, teams, queues, onClose, onSaved }: Rule
   const [conditions, setConditions] = useState<AutomationCondition[]>(rule?.conditions ?? []);
   const [actions, setActions] = useState<AutomationAction[]>(rule?.actions ?? []);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   function addCondition() { setConditions((p) => [...p, { field: '', operator: 'equals', value: '' }]); }
   function addAction() { setActions((p) => [...p, { type: '' }]); }
@@ -265,13 +266,14 @@ function RuleModal({ rule, agents, tags, teams, queues, onClose, onSaved }: Rule
 
   async function handleSave() {
     if (!name.trim() || !triggerEvent) return;
-    setSaving(true);
+    setSaving(true); setSaveError('');
     try {
       const payload = { name, triggerEvent, conditions, actions };
       if (rule) await updateAutomation(rule.id, payload);
       else await createAutomation(payload);
       onSaved();
-    } finally { setSaving(false); }
+    } catch (err: any) { setSaveError(err.message || 'Error al guardar'); }
+    finally { setSaving(false); }
   }
 
   return (
@@ -336,7 +338,8 @@ function RuleModal({ rule, agents, tags, teams, queues, onClose, onSaved }: Rule
           </div>
         </div>
 
-        <div className="modal-footer" style={{ marginTop: 20 }}>
+        {saveError && <div style={{ fontSize: 13, color: '#dc2626', padding: '8px 0 0' }}>{saveError}</div>}
+        <div className="modal-footer" style={{ marginTop: 12 }}>
           <button className="btn btn-secondary" onClick={onClose}>{i.cancel}</button>
           <button className="btn btn-primary" disabled={saving || !name.trim() || !triggerEvent || actions.length === 0} onClick={handleSave}>
             {saving ? i.saving : rule ? i.save : i.createAutomationBtn}

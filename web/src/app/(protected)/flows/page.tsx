@@ -525,6 +525,7 @@ function FlowBuilder({ flow, inboxes, agents, tags, teams, queues, onClose, onSa
   const [steps, setSteps] = useState<FlowStep[]>(flow?.steps ?? []);
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [mobileTab, setMobileTab] = useState<'config' | 'steps' | 'editor'>('steps');
 
   function addStep(type: FlowStep['type']) {
@@ -555,13 +556,14 @@ function FlowBuilder({ flow, inboxes, agents, tags, teams, queues, onClose, onSa
 
   async function handleSave() {
     if (!name.trim()) return;
-    setSaving(true);
+    setSaving(true); setSaveError('');
     try {
       const payload = { name, description, inboxId: inboxId || undefined, triggerType, triggerValue: triggerValue || undefined, steps };
       if (flow?.id) await updateFlow(flow.id, payload);
       else await createFlow(payload);
       onSaved();
-    } finally { setSaving(false); }
+    } catch (err: any) { setSaveError(err.message || 'Error al guardar'); }
+    finally { setSaving(false); }
   }
 
   const activeStep = steps.find((s) => s.id === selectedStep);
@@ -576,7 +578,8 @@ function FlowBuilder({ flow, inboxes, agents, tags, teams, queues, onClose, onSa
             <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>⚡ {builderTitle}</h2>
             <input className="form-input" style={{ fontSize: 14, fontWeight: 600, width: 280 }} value={name} onChange={(e) => setName(e.target.value)} placeholder={i.flowNewTitle + '...'} />
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {saveError && <span style={{ fontSize: 13, color: '#dc2626', maxWidth: 300 }}>{saveError}</span>}
             <button className="btn btn-secondary" onClick={onClose}>{i.cancel}</button>
             <button className="btn btn-primary" disabled={saving || !name.trim()} onClick={handleSave}>
               {saving ? i.saving : `💾 ${i.flowBuilderSave}`}

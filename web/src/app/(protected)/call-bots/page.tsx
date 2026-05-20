@@ -766,6 +766,7 @@ export default function CallBotsPage() {
   const [editingVoice, setEditingVoice] = useState<Voice | null>(null);
   const [voiceForm, setVoiceForm] = useState({ name: '', description: '', language: 'es-MX', gender: 'neutral', ttsProvider: 'twilio_basic', ttsVoiceId: '', isActive: true, sortOrder: 0 });
   const [voiceSaving, setVoiceSaving] = useState(false);
+  const [platformPhoneNumbers, setPlatformPhoneNumbers] = useState<string[]>([]);
 
   useEffect(() => {
     try { setIsOwner(JSON.parse(localStorage.getItem('user') ?? '{}').role === 'owner'); } catch {}
@@ -778,8 +779,12 @@ export default function CallBotsPage() {
   async function load() {
     setLoading(true);
     try {
-      const [b, s, q, ix, v] = await Promise.all([getCallBots(), getCallBotStats(), getQueues(), getInboxes(), getVoices()]);
+      const [b, s, q, ix, v, phoneNums] = await Promise.all([
+        getCallBots(), getCallBotStats(), getQueues(), getInboxes(), getVoices(),
+        apiGet<string[]>('/call-bots/available-phone-numbers').catch(() => [] as string[]),
+      ]);
       setBots(b); setStats(s); setQueues(q); setInboxes(ix); setVoices(v);
+      setPlatformPhoneNumbers(phoneNums ?? []);
     } finally { setLoading(false); }
   }
 
@@ -848,6 +853,20 @@ export default function CallBotsPage() {
           {i.newCallBot}
         </button>
       </div>
+
+      {/* Twilio setup guide */}
+      {platformPhoneNumbers.length === 0 && (
+        <div style={{ padding: '14px 16px', background: '#fef9c3', border: '1px solid #fde047', borderRadius: 10, marginBottom: 20, fontSize: 13 }}>
+          <div style={{ fontWeight: 700, color: '#854d0e', marginBottom: 6 }}>⚙️ Configuración de Twilio requerida</div>
+          <ol style={{ margin: '0 0 8px', paddingLeft: 20, color: '#713f12', lineHeight: 1.8 }}>
+            <li>Compra un número de teléfono en <strong>console.twilio.com</strong></li>
+            <li>Ve a <a href="/settings" style={{ color: '#6366f1', fontWeight: 600, textDecoration: 'none' }}>Ajustes → Plataforma → Voice</a> y añade el Account SID, Auth Token y el número</li>
+            <li>En Twilio, configura el webhook de voz del número con esta URL: <code style={{ background: '#fff', padding: '1px 5px', borderRadius: 4 }}>{typeof window !== 'undefined' ? window.location.origin.replace(':3000', ':4000') : ''}/call-bots/twilio/voice</code></li>
+            <li>Crea un Call Bot aquí y selecciona ese número</li>
+          </ol>
+          {!isOwner && <div style={{ color: '#92400e', fontSize: 12 }}>Pide al administrador de la plataforma que complete este paso.</div>}
+        </div>
+      )}
 
       {/* Stats row */}
       {stats && (

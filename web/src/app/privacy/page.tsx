@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-export const metadata = { title: 'Política de privacidad — CRM SaaS' };
+export const metadata = { title: 'Política de privacidad — AutoMarkIQ' };
 
 const LAST_UPDATED = '24 de abril de 2026';
 
@@ -11,10 +11,7 @@ export default function PrivacyPage() {
       {/* Header */}
       <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '16px 0' }}>
         <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
-            <div style={{ width: 34, height: 34, borderRadius: 8, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>⚡</div>
-            <span style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.5px' }}>CRM SaaS</span>
-          </Link>
+          <Link href="/" style={{ fontWeight: 800, fontSize: 20, letterSpacing: '-0.5px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text', textDecoration: 'none' }}>AutoMarkIQ</Link>
           <Link href="/terms" style={{ fontSize: 13, color: '#6366f1', textDecoration: 'none', fontWeight: 600 }}>Ver Términos de uso →</Link>
         </div>
       </div>
@@ -29,7 +26,7 @@ export default function PrivacyPage() {
         <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', padding: '40px 48px', lineHeight: 1.8, color: '#374151', fontSize: 15 }}>
 
           <Section title="1. Información que recopilamos">
-            <p>Recopilamos la siguiente información cuando utilizas CRM SaaS:</p>
+            <p>Recopilamos la siguiente información cuando utilizas AutoMarkIQ:</p>
             <ul>
               <li><strong>Datos de cuenta:</strong> nombre, dirección de correo electrónico y contraseña (almacenada con hash bcrypt).</li>
               <li><strong>Datos del workspace:</strong> nombre de la organización, slug y configuración.</li>
@@ -42,7 +39,7 @@ export default function PrivacyPage() {
           <Section title="2. Cómo utilizamos tu información">
             <p>Utilizamos la información recopilada para:</p>
             <ul>
-              <li>Proveer, mantener y mejorar los servicios de CRM SaaS.</li>
+              <li>Proveer, mantener y mejorar los servicios de AutoMarkIQ.</li>
               <li>Autenticarte y proteger tu cuenta frente a accesos no autorizados.</li>
               <li>Enviarte notificaciones operativas relevantes (alertas de seguridad, actualizaciones del servicio).</li>
               <li>Procesar pagos y gestionar tu suscripción.</li>
@@ -106,7 +103,7 @@ export default function PrivacyPage() {
           </Section>
 
           <Section title="8. Cookies">
-            <p>CRM SaaS utiliza las siguientes categorías de cookies:</p>
+            <p>AutoMarkIQ utiliza las siguientes categorías de cookies:</p>
             <ul>
               <li><strong>Esenciales:</strong> necesarias para el funcionamiento del servicio (autenticación, sesión). No pueden desactivarse.</li>
               <li><strong>Analíticas:</strong> nos ayudan a entender cómo se utiliza la plataforma. Puedes optar por no participar.</li>
@@ -115,7 +112,7 @@ export default function PrivacyPage() {
           </Section>
 
           <Section title="9. Menores de edad">
-            <p>CRM SaaS no está dirigido a personas menores de 16 años. No recopilamos conscientemente datos de menores. Si detectamos que hemos recibido datos de un menor sin consentimiento parental, los eliminaremos de inmediato.</p>
+            <p>AutoMarkIQ no está dirigido a personas menores de 16 años. No recopilamos conscientemente datos de menores. Si detectamos que hemos recibido datos de un menor sin consentimiento parental, los eliminaremos de inmediato.</p>
           </Section>
 
           <Section title="10. Cambios en esta política">

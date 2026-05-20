@@ -1,12 +1,18 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Request } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { AutomationsService } from './automations.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantId } from '../../common/decorators/tenant.decorator';
+import { checkPlanLimit } from '../../common/utils/limits';
 
 @Controller('automations')
 @UseGuards(JwtAuthGuard)
 export class AutomationsController {
-  constructor(private readonly svc: AutomationsService) {}
+  constructor(
+    private readonly svc: AutomationsService,
+    @InjectDataSource() private readonly db: DataSource,
+  ) {}
 
   @Get()
   findAll(@TenantId() tenantId: string) {
@@ -24,7 +30,8 @@ export class AutomationsController {
   }
 
   @Post()
-  create(@Body() dto: any, @TenantId() tenantId: string, @Request() req: any) {
+  async create(@Body() dto: any, @TenantId() tenantId: string, @Request() req: any) {
+    await checkPlanLimit(this.db, tenantId, 'automations');
     const userId = req.user?.sub ?? req.user?.id;
     return this.svc.create(dto, tenantId, userId);
   }

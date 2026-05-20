@@ -162,7 +162,7 @@ export default function TagsPage() {
               </div>
             ) : filtered.map((tag, idx) => {
               const color = tag.color ?? '#6366f1';
-              const count = tag.contactCount ?? 0;
+              const count = (tag.contactCount ?? 0) + (tag.conversationCount ?? 0);
               return (
                 <div
                   key={tag.id}

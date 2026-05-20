@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import {
-  getAdminTenants, getAdminTenantUsers, createAdminTenant, updateAdminTenant,
+  getAdminTenants, getAdminTenantUsers, createAdminTenant, updateAdminTenant, deleteAdminTenant,
   getPlans,
   TenantAdmin, TenantUser, Plan,
 } from '@/lib/api';
@@ -120,6 +120,14 @@ export default function TenantsPage() {
       setTenantUsers(await getAdminTenantUsers(t.id));
     } catch { setTenantUsers([]); }
     finally { setUsersLoading(false); }
+  }
+
+  async function handleDelete(t: TenantAdmin) {
+    if (!confirm(`¿Eliminar el workspace "${t.name}" (/${t.slug}) y TODOS sus datos? Esta acción no se puede deshacer.`)) return;
+    try {
+      await deleteAdminTenant(t.id);
+      load();
+    } catch (e: any) { alert(e.message); }
   }
 
   function openEdit(t: TenantAdmin) {
@@ -436,6 +444,14 @@ export default function TenantsPage() {
                       onClick={() => toggleActive(t)}
                     >
                       {t.isActive ? i.deactivate : i.activate}
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: 12, padding: '4px 10px', color: '#ef4444', borderColor: '#ef4444' }}
+                      onClick={() => handleDelete(t)}
+                      title="Eliminar workspace y todos sus datos"
+                    >
+                      Eliminar
                     </button>
                   </div>
                 </div>

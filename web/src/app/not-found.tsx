@@ -9,13 +9,8 @@ export default function NotFound() {
       <div style={{ textAlign: 'center', maxWidth: 460 }}>
 
         {/* Logo */}
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginBottom: 48 }}>
-          <div style={{
-            width: 44, height: 44, borderRadius: 12,
-            background: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
-          }}>⚡</div>
-          <span style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.5px' }}>CRM SaaS</span>
+        <div style={{ marginBottom: 48 }}>
+          <div style={{ fontWeight: 800, fontSize: 22, letterSpacing: '-0.5px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>AutoMarkIQ</div>
         </div>
 
         {/* 404 number */}
@@ -62,7 +57,7 @@ export default function NotFound() {
         </div>
 
         <p style={{ marginTop: 48, color: '#94a3b8', fontSize: 12 }}>
-          © 2026 CRM SaaS · Todos los derechos reservados
+          © 2026 AutoMarkIQ · Todos los derechos reservados
         </p>
       </div>
     </div>

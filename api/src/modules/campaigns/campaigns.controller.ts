@@ -1,13 +1,19 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Request } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { CampaignsService } from './campaigns.service';
 import { CreateCampaignDto, UpdateCampaignDto, AddContactsDto, AddContactsByFilterDto } from './dto/campaign.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantId } from '../../common/decorators/tenant.decorator';
+import { checkPlanLimit } from '../../common/utils/limits';
 
 @Controller('campaigns')
 @UseGuards(JwtAuthGuard)
 export class CampaignsController {
-  constructor(private readonly svc: CampaignsService) {}
+  constructor(
+    private readonly svc: CampaignsService,
+    @InjectDataSource() private readonly db: DataSource,
+  ) {}
 
   @Get()
   findAll(@TenantId() tenantId: string) {
@@ -20,7 +26,8 @@ export class CampaignsController {
   }
 
   @Post()
-  create(@Body() dto: CreateCampaignDto, @TenantId() tenantId: string, @Request() req: any) {
+  async create(@Body() dto: CreateCampaignDto, @TenantId() tenantId: string, @Request() req: any) {
+    await checkPlanLimit(this.db, tenantId, 'campaigns');
     return this.svc.create(dto, tenantId, req.user?.id);
   }
 

@@ -135,14 +135,23 @@ export class AiChatbotEngineService {
        ORDER BY created_at DESC LIMIT 1`,
       [bot.id, conversationId],
     );
+    // Track whether this is a brand-new session for an existing conversation.
+    // Used below to decide how far back to load history (if the session is new
+    // but the conversation already had messages, we must not lose that context).
+    let sessionIsNew = false;
+    let prevSessionCreatedAt: Date | null = session?.created_at ?? null;
     // Create a new session if none exists OR if the last session was ended by a queue-transfer
     if (!session || session.status === 'ended') {
+      sessionIsNew = !session; // true only when there was never a session (truly first contact)
       [session] = await this.db.query(
         `INSERT INTO ai_chatbot_sessions (tenant_id, chatbot_id, conversation_id, contact_id, status)
          VALUES ($1, $2, $3, $4, 'active') RETURNING *`,
         [tenantId, bot.id, conversationId, conv.contact_id],
       );
-      if (bot.welcome_message) {
+      // Only send welcome message on the very first session for this conversation.
+      // If the session was 'ended' (reconnect / queue-return), skip it — the user
+      // already saw it and the bot should continue the conversation silently.
+      if (sessionIsNew && bot.welcome_message) {
         await this.saveBotMessage(tenantId, conversationId, bot.welcome_message);
         await this.db.query(
           `UPDATE ai_chatbots SET total_conversations = total_conversations + 1 WHERE id = $1`,
@@ -168,17 +177,33 @@ export class AiChatbotEngineService {
       return;
     }
 
-    // 6. Get tenant AI keys — fall back to platform key if tenant has none
-    const [tenant] = await this.db.query(`SELECT settings FROM tenants WHERE id=$1`, [tenantId]);
-    const aiKeys: Record<string, string> = tenant?.settings?.aiKeys ?? {};
-    let apiKey = aiKeys[bot.provider];
-    if (!apiKey) {
-      const platformAI = await this.platformSettings.getAI();
-      if (platformAI.provider === bot.provider && platformAI.apiKey) {
+    // 6. Resolve AI provider, model and API key.
+    // If tenant's plan does not allow own API keys → always use platform config.
+    // If it does → try tenant key first, fall back to platform key.
+    const [tenantRow] = await this.db.query(
+      `SELECT t.settings, p.allow_own_api_keys
+       FROM tenants t LEFT JOIN plans p ON p.id = t.plan_id
+       WHERE t.id = $1`,
+      [tenantId],
+    );
+    const allowOwnApiKeys: boolean = tenantRow?.allow_own_api_keys ?? false;
+    const platformAI = await this.platformSettings.getAI();
+
+    let apiKey: string;
+    if (allowOwnApiKeys) {
+      const aiKeys: Record<string, string> = tenantRow?.settings?.aiKeys ?? {};
+      apiKey = aiKeys[bot.provider];
+      if (!apiKey && platformAI.provider === bot.provider && platformAI.apiKey) {
         apiKey = platformAI.apiKey;
         this.logger.log(`[engine] Using platform AI key for provider "${bot.provider}" (tenant ${tenantId})`);
       }
+    } else {
+      // Use platform provider + model + key regardless of what is stored on the bot
+      bot = { ...bot, provider: platformAI.provider, model: platformAI.model ?? bot.model };
+      apiKey = platformAI.apiKey;
+      this.logger.log(`[engine] Plan without own API keys — using platform AI (${platformAI.provider}/${bot.model}) for tenant ${tenantId}`);
     }
+
     if (!apiKey) {
       this.logger.warn(`[engine] No API key for provider "${bot.provider}" in tenant ${tenantId} or platform — bot "${bot.name}" cannot respond.`);
       await this.saveBotMessage(tenantId, conversationId,
@@ -264,13 +289,17 @@ export class AiChatbotEngineService {
     const memoryConvs = Math.min(parseInt(bot.memory_conversations ?? '5', 10) || 0, 50);
     const msgPerConv  = 20;
 
+    // When a session was recreated (e.g. after a reconnect or queue-return), use the
+    // previous session's start time so the bot retains context from before the break.
+    // For truly first-contact sessions there is no prior session, so session.created_at is correct.
+    const historyStart = (!sessionIsNew && prevSessionCreatedAt) ? prevSessionCreatedAt : session.created_at;
     const currentHistory = await this.db.query(
       `SELECT body, direction, sender_type, content_type
        FROM messages
        WHERE conversation_id=$1 AND is_private=false
          AND created_at >= $2
        ORDER BY created_at DESC LIMIT ${msgPerConv}`,
-      [conversationId, session.created_at],
+      [conversationId, historyStart],
     );
     currentHistory.reverse();
 
@@ -300,7 +329,7 @@ export class AiChatbotEngineService {
     // 8. Pre-process inbound media (transcription / vision)
     this.logger.log(`[engine] msg body="${inboundMsg.body?.slice(0,60)}" content_type="${inboundMsg.content_type}"`);
     const media = await this.preprocessMedia(
-      apiKey, bot.provider, aiKeys,
+      apiKey, bot.provider, tenantRow?.settings?.aiKeys ?? {},
       inboundMsg.body ?? '', inboundMsg.content_type ?? 'text',
     );
     this.logger.log(`[engine] preprocessMedia result text="${media.text?.slice(0,80)}" hasImage=${!!media.imageBase64}`);
@@ -494,8 +523,7 @@ export class AiChatbotEngineService {
             // so it generates a contextual opening (e.g. "Vi que quieres hacer una reserva, ¿para qué fecha?")
             this.logger.log(`[engine] Dest bot "${destBot.name}" has no welcome_message — triggering AI for contextual opener`);
             try {
-              const destTenant = tenant; // reuse already-loaded tenant settings
-              const destApiKey = destTenant?.settings?.aiKeys?.[destBot.provider];
+              const destApiKey = tenantRow?.settings?.aiKeys?.[destBot.provider];
               if (destApiKey) {
                 // Load full updated history (includes the transfer message just saved)
                 const updatedHistory = await this.db.query(
@@ -870,12 +898,17 @@ export class AiChatbotEngineService {
 
     const [tenant] = await this.db.query(`SELECT settings FROM tenants WHERE id=$1`, [tenantId]);
     let apiKey = tenant?.settings?.aiKeys?.[bot.provider];
+    let effectiveProvider = bot.provider;
     if (!apiKey) {
       const platformAI = await this.platformSettings.getAI();
-      if (platformAI.provider === bot.provider && platformAI.apiKey) apiKey = platformAI.apiKey;
+      if (platformAI.apiKey) {
+        apiKey = platformAI.apiKey;
+        effectiveProvider = platformAI.provider;
+        bot = { ...bot, provider: platformAI.provider as any, model: platformAI.model ?? bot.model };
+      }
     }
     if (!apiKey) {
-      return { reply: null, error: `No hay API key configurada para "${bot.provider}". Configúrala en Configuración → Integraciones de IA o pide al administrador que configure la key de plataforma.` };
+      return { reply: null, error: `No hay API key configurada para "${effectiveProvider}". Configúrala en Configuración → Integraciones de IA o pide al administrador que configure la key de plataforma.` };
     }
     try {
       const result = await this.callAi(bot, apiKey, [], { text: message });
@@ -907,7 +940,10 @@ export class AiChatbotEngineService {
     let apiKey = tenant?.settings?.aiKeys?.[bot.provider];
     if (!apiKey) {
       const platformAI = await this.platformSettings.getAI();
-      if (platformAI.provider === bot.provider && platformAI.apiKey) apiKey = platformAI.apiKey;
+      if (platformAI.apiKey) {
+        apiKey = platformAI.apiKey;
+        bot = { ...bot, provider: platformAI.provider as any, model: platformAI.model ?? bot.model };
+      }
     }
     if (!apiKey) return bot.fallback_message ?? null;
 

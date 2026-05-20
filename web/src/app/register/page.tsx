@@ -36,7 +36,8 @@ export default function RegisterPage() {
     setLoading(true);
     setError('');
     try {
-      await register({ ...form, acceptedTerms: true });
+      const lang = (typeof window !== 'undefined' ? localStorage.getItem('lang') : null) || 'es';
+      await register({ ...form, acceptedTerms: true, lang });
       router.push('/verify-email-sent');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error al crear el workspace');
@@ -68,9 +69,8 @@ export default function RegisterPage() {
         <div style={{ position: 'absolute', top: -120, right: -80, width: 400, height: 400, borderRadius: '50%', background: 'radial-gradient(circle, #6366f133 0%, transparent 70%)', pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', bottom: -100, left: -60, width: 360, height: 360, borderRadius: '50%', background: 'radial-gradient(circle, #818cf833 0%, transparent 70%)', pointerEvents: 'none' }} />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 56 }}>
-          <div style={{ width: 42, height: 42, borderRadius: 10, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>⚡</div>
-          <span style={{ fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: '-0.5px' }}>CRM SaaS</span>
+        <div style={{ marginBottom: 56 }}>
+          <div style={{ fontWeight: 800, fontSize: 22, letterSpacing: '-0.5px', color: '#fff' }}>AutoMarkIQ</div>
         </div>
 
         <h1 style={{ fontSize: 38, fontWeight: 800, color: '#fff', lineHeight: 1.2, margin: '0 0 16px', letterSpacing: '-1px' }}>
@@ -96,7 +96,7 @@ export default function RegisterPage() {
         ))}
 
         <div style={{ marginTop: 48, paddingTop: 24, borderTop: '1px solid #ffffff10', color: '#475569', fontSize: 12 }}>
-          Más de 500 equipos ya confían en CRM SaaS · Powered by AI
+          Más de 500 equipos ya confían en AutoMarkIQ · Powered by AI
         </div>
       </div>
 
@@ -243,7 +243,7 @@ export default function RegisterPage() {
                 <Link href="/terms" target="_blank" style={{ color: '#6366f1', textDecoration: 'none', fontWeight: 600 }}>Términos de uso</Link>
                 {' '}y la{' '}
                 <Link href="/privacy" target="_blank" style={{ color: '#6366f1', textDecoration: 'none', fontWeight: 600 }}>Política de privacidad</Link>
-                {' '}de CRM SaaS.
+                {' '}de AutoMarkIQ.
               </span>
             </label>
 
@@ -270,7 +270,7 @@ export default function RegisterPage() {
           </form>
 
           <div style={{ marginTop: 24, textAlign: 'center', fontSize: 12, color: '#94a3b8' }}>
-            © 2026 CRM SaaS ·{' '}
+            © 2026 AutoMarkIQ ·{' '}
             <Link href="/privacy" style={{ color: '#94a3b8', textDecoration: 'none' }}>Privacidad</Link>
             {' · '}
             <Link href="/terms" style={{ color: '#94a3b8', textDecoration: 'none' }}>Términos</Link>

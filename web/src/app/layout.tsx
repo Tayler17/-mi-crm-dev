@@ -2,13 +2,13 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'CRM SaaS',
+  title: 'AutoMarkIQ',
   description: 'Plataforma todo-en-uno para comunicación, automatización y ventas.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'CRM SaaS',
+    title: 'AutoMarkIQ',
   },
   icons: {
     apple: '/icons/icon-192.png',

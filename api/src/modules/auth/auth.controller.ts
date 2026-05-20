@@ -16,6 +16,12 @@ import { RolesGuard, hasRole } from '../../common/guards/roles.guard';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @Get('demo-token')
+  @Throttle({ short: { ttl: 60000, limit: 20 } })
+  demoToken() {
+    return this.authService.demoLogin();
+  }
+
   @Post('register')
   @HttpCode(201)
   @Throttle({ short: { ttl: 60000, limit: 3 } }) // max 3 registrations/min per IP
@@ -40,6 +46,7 @@ export class AuthController {
 
   @Post('reset-password')
   @HttpCode(200)
+  @Throttle({ short: { ttl: 60000, limit: 3 } })
   resetPassword(@Body() body: { token: string; password: string }) {
     return this.authService.resetPassword(body.token, body.password).then(() => ({
       message: 'Contraseña actualizada correctamente.',
@@ -146,5 +153,12 @@ export class AuthController {
   @Roles('owner')
   updateTenant(@Param('id') id: string, @Body() dto: UpdateTenantDto) {
     return this.authService.updateTenant(id, dto);
+  }
+
+  @Delete('tenants/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('owner')
+  deleteTenant(@Param('id') id: string) {
+    return this.authService.deleteTenant(id);
   }
 }
