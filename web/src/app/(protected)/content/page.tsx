@@ -249,6 +249,10 @@ function PostModal({
   const { lang } = useLangCtx();
   const i = APP[lang];
 
+  const isOwner = typeof window !== 'undefined'
+    ? (() => { try { return JSON.parse(localStorage.getItem('user') || '{}').role === 'owner'; } catch { return false; } })()
+    : false;
+
   const STATUSES = [
     { key: 'draft',          label: i.contentStatusDraft,     color: '#6b7280', bg: '#f3f4f6' },
     { key: 'pending_review', label: i.contentStatusPending,   color: '#d97706', bg: '#fffbeb' },
@@ -291,9 +295,10 @@ function PostModal({
   const [imgProvider,  setImgProvider]  = useState('');   // '' = auto
   const [imgSize,      setImgSize]      = useState('1024x1024');
   const [imgStyle,     setImgStyle]     = useState('vivid');
-  const [imgGenerating,setImgGenerating]= useState(false);
-  const [imgError,     setImgError]     = useState('');
-  const [imgPreview,   setImgPreview]   = useState('');
+  const [imgGenerating,    setImgGenerating]    = useState(false);
+  const [imgError,         setImgError]         = useState('');
+  const [imgPreview,       setImgPreview]       = useState('');
+  const [imgProviderUsed,  setImgProviderUsed]  = useState('');
   const [imgUsage,     setImgUsage]     = useState<{ used: number; limit: number; hasAccess: boolean; availableProviders: string[] } | null>(null);
   const [imgHistory,   setImgHistory]   = useState<AiImageGeneration[]>([]);
   const [imgHistOpen,  setImgHistOpen]  = useState(false);
@@ -322,10 +327,11 @@ function PostModal({
 
   async function handleGenerateImage() {
     if (!imgPrompt.trim()) { setImgError('Escribe una descripción para la imagen.'); return; }
-    setImgGenerating(true); setImgError(''); setImgPreview('');
+    setImgGenerating(true); setImgError(''); setImgPreview(''); setImgProviderUsed('');
     try {
-      const result = await generateContentImage({ prompt: imgPrompt, provider: imgProvider || undefined, size: imgSize, style: imgStyle });
+      const result = await generateContentImage({ prompt: imgPrompt, provider: isOwner ? (imgProvider || undefined) : undefined, size: imgSize, style: imgStyle });
       setImgPreview(`${API_URL}${result.url}`);
+      setImgProviderUsed(result.provider ?? '');
       // Refresh usage count
       try { setImgUsage(await getContentImageUsage()); } catch {}
     } catch (err: any) {
@@ -729,22 +735,24 @@ function PostModal({
 
                       {/* Controls row */}
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                        <div>
-                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>Proveedor</div>
-                          <select className="form-input" style={{ fontSize: 12, padding: '4px 8px' }}
-                            value={imgProvider} onChange={(e) => setImgProvider(e.target.value)}>
-                            <option value="">Auto (primer disponible)</option>
-                            {(!imgUsage || imgUsage.availableProviders.includes('openai')) && (
-                              <option value="openai">🟢 DALL-E 3 (OpenAI) — $0.04–$0.08</option>
-                            )}
-                            {(!imgUsage || imgUsage.availableProviders.includes('stability')) && (
-                              <option value="stability">🔵 Stable Diffusion XL — ~$0.003</option>
-                            )}
-                            {(!imgUsage || imgUsage.availableProviders.includes('fal')) && (
-                              <option value="fal">⚡ Flux Schnell (Fal.ai) — ~$0.003</option>
-                            )}
-                          </select>
-                        </div>
+                        {isOwner && (
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>Proveedor</div>
+                            <select className="form-input" style={{ fontSize: 12, padding: '4px 8px' }}
+                              value={imgProvider} onChange={(e) => setImgProvider(e.target.value)}>
+                              <option value="">Auto (primer disponible)</option>
+                              {(!imgUsage || imgUsage.availableProviders.includes('openai')) && (
+                                <option value="openai">🟢 DALL-E 3 (OpenAI) — $0.04–$0.08</option>
+                              )}
+                              {(!imgUsage || imgUsage.availableProviders.includes('stability')) && (
+                                <option value="stability">🔵 Stable Diffusion XL — ~$0.003</option>
+                              )}
+                              {(!imgUsage || imgUsage.availableProviders.includes('fal')) && (
+                                <option value="fal">⚡ Flux Schnell (Fal.ai) — ~$0.003</option>
+                              )}
+                            </select>
+                          </div>
+                        )}
                         <div>
                           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>Tamaño</div>
                           <select className="form-input" style={{ fontSize: 12, padding: '4px 8px' }}
@@ -791,7 +799,13 @@ function PostModal({
                             style={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 6, border: '1px solid #ddd6fe', flexShrink: 0 }}
                           />
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            <span style={{ fontSize: 12, fontWeight: 600, color: '#7c3aed' }}>✨ Imagen generada con DALL-E 3</span>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#7c3aed' }}>
+                              ✨ Imagen generada{imgProviderUsed ? ` con ${
+                                imgProviderUsed === 'openai' ? 'DALL-E 3' :
+                                imgProviderUsed === 'stability' ? 'Stable Diffusion XL' :
+                                imgProviderUsed === 'fal' ? 'Flux Schnell' : imgProviderUsed
+                              }` : ' con IA'}
+                            </span>
                             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{imgSize} · {imgStyle}</span>
                             <div style={{ display: 'flex', gap: 6 }}>
                               <button
