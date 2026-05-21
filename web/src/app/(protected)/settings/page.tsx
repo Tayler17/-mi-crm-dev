@@ -826,6 +826,8 @@ export default function SettingsPage() {
     'smtp.user': '', 'smtp.password': '', 'smtp.from': '',
     'twitter.api_key': '', 'twitter.api_secret': '', 'twitter.access_token': '', 'twitter.access_secret': '',
     'linkedin.access_token': '', 'linkedin.org_id': '',
+    'stability.api_key': '',
+    'fal.api_key': '',
   });
   const [platformSaving, setPlatformSaving] = useState(false);
   const [platformSaved, setPlatformSaved] = useState(false);
@@ -919,6 +921,8 @@ export default function SettingsPage() {
         'twitter.access_secret': p['twitter.access_secret']?.masked? '••••••••' : (p['twitter.access_secret']?.value || ''),
         'linkedin.access_token': p['linkedin.access_token']?.masked ? '••••••••' : (p['linkedin.access_token']?.value || ''),
         'linkedin.org_id':       p['linkedin.org_id']?.value       || '',
+        'stability.api_key':     p['stability.api_key']?.masked    ? '••••••••' : (p['stability.api_key']?.value    || ''),
+        'fal.api_key':           p['fal.api_key']?.masked          ? '••••••••' : (p['fal.api_key']?.value          || ''),
       });
     }
     setAnnouncements(a);
@@ -1894,6 +1898,42 @@ export default function SettingsPage() {
                 value={platformForm['linkedin.org_id']}
                 onChange={(e) => setPlatformForm((p) => ({ ...p, 'linkedin.org_id': e.target.value }))}
                 placeholder="12345678" />
+            </Row>
+          </Section>
+
+          <Section title="🔮 Stability AI — Generación de imágenes">
+            <div style={{ padding: '8px 12px', background: '#faf5ff', borderRadius: 8, marginBottom: 16, fontSize: 12, color: '#7c3aed' }}>
+              API Key de <a href="https://platform.stability.ai" target="_blank" rel="noopener noreferrer" style={{ color: '#7c3aed' }}>Stability AI</a> para generar imágenes con Stable Diffusion XL.
+              Se usa como proveedor alternativo al generar imágenes en Marketing Content.
+            </div>
+            <Row label="API Key" hint="Stability AI API Key — se almacena cifrado">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" type="password" style={{ flex: 1, maxWidth: 420 }}
+                  value={platformForm['stability.api_key']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'stability.api_key': e.target.value }))}
+                  placeholder="sk-••••••••••••••••••••••••••••••••" />
+                {platformCfg['stability.api_key']?.masked && platformForm['stability.api_key'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>✓ Configurado</span>
+                )}
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="⚡ Fal.ai (Flux) — Generación de imágenes">
+            <div style={{ padding: '8px 12px', background: '#fff7ed', borderRadius: 8, marginBottom: 16, fontSize: 12, color: '#c2410c' }}>
+              API Key de <a href="https://fal.ai" target="_blank" rel="noopener noreferrer" style={{ color: '#c2410c' }}>Fal.ai</a> para generar imágenes con Flux Schnell.
+              Generación ultra-rápida como proveedor alternativo en Marketing Content.
+            </div>
+            <Row label="API Key" hint="Fal.ai API Key — se almacena cifrado">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" type="password" style={{ flex: 1, maxWidth: 420 }}
+                  value={platformForm['fal.api_key']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'fal.api_key': e.target.value }))}
+                  placeholder="••••••••••••••••••••••••••••••••" />
+                {platformCfg['fal.api_key']?.masked && platformForm['fal.api_key'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>✓ Configurado</span>
+                )}
+              </div>
             </Row>
           </Section>
 

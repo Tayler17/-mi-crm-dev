@@ -96,12 +96,16 @@ export class GenerateContentDto {
   tone?: string;
 }
 
-const IMAGE_SIZES  = ['1024x1024', '1792x1024', '1024x1792'] as const;
-const IMAGE_STYLES = ['vivid', 'natural'] as const;
+const IMAGE_SIZES     = ['1024x1024', '1792x1024', '1024x1792'] as const;
+const IMAGE_STYLES    = ['vivid', 'natural'] as const;
+const IMAGE_PROVIDERS = ['openai', 'stability', 'fal'] as const;
 
 export class GenerateImageDto {
   @IsString()
   prompt: string;
+
+  @IsOptional() @IsIn(IMAGE_PROVIDERS)
+  provider?: string;
 
   @IsOptional() @IsIn(IMAGE_SIZES)
   size?: string;

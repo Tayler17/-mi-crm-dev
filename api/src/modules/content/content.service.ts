@@ -5,7 +5,7 @@ import { Repository, DataSource } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import axios from 'axios';
-import { createWriteStream, mkdirSync, existsSync } from 'fs';
+import { createWriteStream, mkdirSync, existsSync, writeFileSync } from 'fs';
 import { join, extname } from 'path';
 import { randomBytes } from 'crypto';
 import { ContentPost } from './entities/content-post.entity';
@@ -13,11 +13,25 @@ import { CreateContentPostDto, UpdateContentPostDto, GenerateContentDto, Generat
 import { CONTENT_PUBLISH_QUEUE, ContentPublishJobData } from './content-publish.constants';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
 
-// Approximate DALL-E 3 cost per image in USD
-const DALLE_COST: Record<string, number> = {
-  '1024x1024': 0.040,
-  '1792x1024': 0.080,
-  '1024x1792': 0.080,
+// Approximate cost per image in USD per provider/size
+const IMG_COST: Record<string, Record<string, number>> = {
+  openai:    { '1024x1024': 0.040, '1792x1024': 0.080, '1024x1792': 0.080 },
+  stability: { '1024x1024': 0.003, '1792x1024': 0.003, '1024x1792': 0.003 },
+  fal:       { '1024x1024': 0.003, '1792x1024': 0.003, '1024x1792': 0.003 },
+};
+
+// Map normalised size → Stability AI dimensions
+const STABILITY_SIZES: Record<string, { width: number; height: number }> = {
+  '1024x1024': { width: 1024, height: 1024 },
+  '1792x1024': { width: 1344, height: 768  },
+  '1024x1792': { width: 768,  height: 1344 },
+};
+
+// Map normalised size → Fal.ai image_size param
+const FAL_SIZES: Record<string, string> = {
+  '1024x1024': 'square_hd',
+  '1792x1024': 'landscape_16_9',
+  '1024x1792': 'portrait_16_9',
 };
 
 const IMAGE_UPLOAD_DIR = join(process.cwd(), 'uploads', 'content');
@@ -255,11 +269,11 @@ REGLAS GENERALES:
     tenantId: string,
     userId: string,
     dto: GenerateImageDto,
-  ): Promise<{ url: string; id: string; costUsd: number }> {
+  ): Promise<{ url: string; id: string; costUsd: number; provider: string }> {
     const size  = dto.size  ?? '1024x1024';
     const style = dto.style ?? 'vivid';
 
-    // ── 1. Plan gate ─────────────────────────────────────────────────────────
+    // ── 1. Plan gate ──────────────────────────────────────────────────────────
     const [planRow] = await this.db.query(
       `SELECT p.has_image_gen, p.max_image_gen_month, p.allow_own_api_keys,
               t.settings,
@@ -274,63 +288,123 @@ REGLAS GENERALES:
     if (!planRow || planRow.has_image_gen === false) {
       throw new ForbiddenException('La generación de imágenes con IA no está incluida en tu plan. Actualiza para acceder a esta función.');
     }
-
     const limit = Number(planRow.max_image_gen_month);
     const used  = Number(planRow.used_this_month ?? 0);
     if (limit > 0 && used >= limit) {
-      throw new ForbiddenException(
-        `Has alcanzado el límite de ${limit} imágenes IA este mes. Actualiza tu plan para generar más.`,
-      );
+      throw new ForbiddenException(`Has alcanzado el límite de ${limit} imágenes IA este mes. Actualiza tu plan para generar más.`);
     }
 
-    // ── 2. Resolve API key ────────────────────────────────────────────────────
-    let apiKey: string | undefined;
-    if (planRow.allow_own_api_keys) {
-      const tenantAiKeys = planRow.settings?.aiKeys ?? {};
-      apiKey = tenantAiKeys['openai'] || undefined;
+    // ── 2. Resolve provider + API key ─────────────────────────────────────────
+    const tenantKeys: Record<string, string> = planRow.allow_own_api_keys
+      ? (planRow.settings?.aiKeys ?? {}) : {};
+
+    const [platformAI, platformStability, platformFal] = await Promise.all([
+      this.platformSettings.getAI(),
+      this.platformSettings.getStability(),
+      this.platformSettings.getFal(),
+    ]);
+
+    // Build availability map: provider → apiKey
+    const available: Record<string, string> = {};
+    const openaiKey = tenantKeys['openai'] || (platformAI.provider === 'openai' ? platformAI.apiKey : '') || '';
+    if (openaiKey) available['openai'] = openaiKey;
+    const stabilityKey = tenantKeys['stability'] || platformStability.apiKey || '';
+    if (stabilityKey) available['stability'] = stabilityKey;
+    const falKey = tenantKeys['fal'] || platformFal.apiKey || '';
+    if (falKey) available['fal'] = falKey;
+
+    // Determine which provider to use
+    let provider = dto.provider ?? '';
+    if (!provider || !available[provider]) {
+      // Auto-select first available in priority order
+      provider = ['openai', 'stability', 'fal'].find((p) => available[p]) ?? '';
     }
-    if (!apiKey) {
-      const platformAI = await this.platformSettings.getAI();
-      if (platformAI.provider === 'openai' && platformAI.apiKey) {
-        apiKey = platformAI.apiKey;
-      }
-    }
-    if (!apiKey) {
-      throw new ForbiddenException('No hay una API key de OpenAI configurada. Configura una en Settings → Platform → AI.');
+    if (!provider || !available[provider]) {
+      throw new ForbiddenException('No hay ningún proveedor de imágenes IA configurado. Añade una API key en Settings → Platform.');
     }
 
-    // ── 3. Call DALL-E 3 ──────────────────────────────────────────────────────
-    const dalleRes = await axios.post(
-      'https://api.openai.com/v1/images/generations',
-      {
-        model:           'dall-e-3',
-        prompt:          dto.prompt,
-        n:               1,
-        size,
-        style,
-        response_format: 'url',
-      },
-      { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 60000 },
-    );
+    const apiKey = available[provider];
 
-    const tempUrl: string = dalleRes.data?.data?.[0]?.url;
-    if (!tempUrl) throw new Error('DALL-E no devolvió una URL de imagen válida');
+    // ── 3. Generate image ─────────────────────────────────────────────────────
+    // Each provider returns { localUrl, model }.
+    // DALL-E and Fal.ai return a temp URL that we download; Stability returns base64 saved directly.
+    let localUrl: string;
+    let model: string;
 
-    // ── 4. Download & save permanently ───────────────────────────────────────
-    const localUrl = await this.downloadAndSave(tempUrl);
+    if (provider === 'openai') {
+      const r = await this.callDallE(dto.prompt, size, style, apiKey);
+      model    = r.model;
+      localUrl = await this.downloadAndSave(r.tempUrl);
+    } else if (provider === 'stability') {
+      ({ localUrl, model } = await this.callStability(dto.prompt, size, apiKey));
+    } else {
+      const r = await this.callFal(dto.prompt, size, apiKey);
+      model    = r.model;
+      localUrl = await this.downloadAndSave(r.tempUrl);
+    }
 
-    // ── 5. Record in history ─────────────────────────────────────────────────
-    const cost = DALLE_COST[size] ?? 0.040;
+    // ── 5. Record in history ──────────────────────────────────────────────────
+    const cost = (IMG_COST[provider] ?? IMG_COST['openai'])[size] ?? 0.040;
     const [record] = await this.db.query(
       `INSERT INTO ai_image_generations
          (tenant_id, user_id, prompt, image_url, provider, model, size, style, cost_usd, content_post_id)
-       VALUES ($1,$2,$3,$4,'openai','dall-e-3',$5,$6,$7,$8)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING id`,
-      [tenantId, userId, dto.prompt, localUrl, size, style, cost, dto.contentPostId ?? null],
+      [tenantId, userId, dto.prompt, localUrl, provider, model, size, style, cost, dto.contentPostId ?? null],
     );
 
-    this.logger.log(`[image-gen] Tenant ${tenantId} generated image: ${localUrl} (${size}, cost=$${cost})`);
-    return { url: localUrl, id: record.id, costUsd: cost };
+    this.logger.log(`[image-gen] Tenant ${tenantId} generated image via ${provider}: ${localUrl} (${size}, $${cost})`);
+    return { url: localUrl, id: record.id, costUsd: cost, provider };
+  }
+
+  // ── Provider implementations ──────────────────────────────────────────────
+
+  private async callDallE(
+    prompt: string, size: string, style: string, apiKey: string,
+  ): Promise<{ tempUrl: string; model: string }> {
+    const res = await axios.post(
+      'https://api.openai.com/v1/images/generations',
+      { model: 'dall-e-3', prompt, n: 1, size, style, response_format: 'url' },
+      { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 60000 },
+    );
+    const tempUrl: string = res.data?.data?.[0]?.url;
+    if (!tempUrl) throw new Error('DALL-E no devolvió URL de imagen');
+    return { tempUrl, model: 'dall-e-3' };
+  }
+
+  private async callStability(
+    prompt: string, size: string, apiKey: string,
+  ): Promise<{ localUrl: string; model: string }> {
+    const { width, height } = STABILITY_SIZES[size] ?? STABILITY_SIZES['1024x1024'];
+    const res = await axios.post(
+      'https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image',
+      { text_prompts: [{ text: prompt, weight: 1 }], cfg_scale: 7, height, width, steps: 30, samples: 1 },
+      {
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+        timeout: 90000,
+      },
+    );
+    const b64: string = res.data?.artifacts?.[0]?.base64;
+    if (!b64) throw new Error(`Stability AI error: ${JSON.stringify(res.data)}`);
+
+    if (!existsSync(IMAGE_UPLOAD_DIR)) mkdirSync(IMAGE_UPLOAD_DIR, { recursive: true });
+    const filename = `ai-${Date.now()}-${randomBytes(6).toString('hex')}.png`;
+    writeFileSync(join(IMAGE_UPLOAD_DIR, filename), Buffer.from(b64, 'base64'));
+    return { localUrl: `/uploads/content/${filename}`, model: 'stable-diffusion-xl-1024-v1-0' };
+  }
+
+  private async callFal(
+    prompt: string, size: string, apiKey: string,
+  ): Promise<{ tempUrl: string; model: string }> {
+    const image_size = FAL_SIZES[size] ?? 'square_hd';
+    const res = await axios.post(
+      'https://fal.run/fal-ai/flux/schnell',
+      { prompt, image_size, num_inference_steps: 4, num_images: 1, enable_safety_checker: true },
+      { headers: { Authorization: `Key ${apiKey}`, 'Content-Type': 'application/json' }, timeout: 90000 },
+    );
+    const tempUrl: string = res.data?.images?.[0]?.url;
+    if (!tempUrl) throw new Error(`Fal.ai error: ${JSON.stringify(res.data)}`);
+    return { tempUrl, model: 'fal-ai/flux/schnell' };
   }
 
   async getImageHistory(tenantId: string): Promise<any[]> {
@@ -344,9 +418,12 @@ REGLAS GENERALES:
     );
   }
 
-  async getImageUsage(tenantId: string): Promise<{ used: number; limit: number; hasAccess: boolean }> {
+  async getImageUsage(tenantId: string): Promise<{
+    used: number; limit: number; hasAccess: boolean;
+    availableProviders: string[];
+  }> {
     const [row] = await this.db.query(
-      `SELECT p.has_image_gen, p.max_image_gen_month,
+      `SELECT p.has_image_gen, p.max_image_gen_month, p.allow_own_api_keys, t.settings,
               (SELECT COUNT(*)::int FROM ai_image_generations
                WHERE tenant_id = $1 AND created_at >= date_trunc('month', NOW())) AS used_this_month
        FROM tenants t
@@ -355,11 +432,26 @@ REGLAS GENERALES:
       [tenantId],
     );
 
-    if (!row) return { used: 0, limit: 0, hasAccess: false };
+    if (!row) return { used: 0, limit: 0, hasAccess: false, availableProviders: [] };
+
+    const tenantKeys: Record<string, string> = row.allow_own_api_keys
+      ? (row.settings?.aiKeys ?? {}) : {};
+    const [platformAI, platformStability, platformFal] = await Promise.all([
+      this.platformSettings.getAI(),
+      this.platformSettings.getStability(),
+      this.platformSettings.getFal(),
+    ]);
+
+    const availableProviders: string[] = [];
+    if (tenantKeys['openai'] || (platformAI.provider === 'openai' && platformAI.apiKey)) availableProviders.push('openai');
+    if (tenantKeys['stability'] || platformStability.apiKey) availableProviders.push('stability');
+    if (tenantKeys['fal'] || platformFal.apiKey) availableProviders.push('fal');
+
     return {
       used:      Number(row.used_this_month ?? 0),
       limit:     Number(row.max_image_gen_month ?? 0),
       hasAccess: row.has_image_gen === true,
+      availableProviders,
     };
   }
 

@@ -1752,14 +1752,14 @@ export const generateContentPost = (data: { title: string; channel: string; keyw
 export const getContentPostSchedule = (id: string) =>
   apiGet<{ scheduled: boolean; state?: string; runAt?: string | null }>(`/content/${id}/schedule`);
 
-export const generateContentImage = (data: { prompt: string; size?: string; style?: string; contentPostId?: string }) =>
-  apiPost<{ url: string; id: string; costUsd: number }>('/content/generate-image', data);
+export const generateContentImage = (data: { prompt: string; provider?: string; size?: string; style?: string; contentPostId?: string }) =>
+  apiPost<{ url: string; id: string; costUsd: number; provider: string }>('/content/generate-image', data);
 
 export const getContentImageHistory = () =>
   apiGet<AiImageGeneration[]>('/content/image-gen/history');
 
 export const getContentImageUsage = () =>
-  apiGet<{ used: number; limit: number; hasAccess: boolean }>('/content/image-gen/usage');
+  apiGet<{ used: number; limit: number; hasAccess: boolean; availableProviders: string[] }>('/content/image-gen/usage');
 
 export const uploadContentMedia = async (file: File): Promise<{ url: string; mediaType: string }> => {
   const form = new FormData();

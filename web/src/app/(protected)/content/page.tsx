@@ -288,12 +288,13 @@ function PostModal({
   const [uploadError,  setUploadError]  = useState('');
   // AI image generation
   const [imgPrompt,    setImgPrompt]    = useState('');
+  const [imgProvider,  setImgProvider]  = useState('');   // '' = auto
   const [imgSize,      setImgSize]      = useState('1024x1024');
   const [imgStyle,     setImgStyle]     = useState('vivid');
   const [imgGenerating,setImgGenerating]= useState(false);
   const [imgError,     setImgError]     = useState('');
   const [imgPreview,   setImgPreview]   = useState('');
-  const [imgUsage,     setImgUsage]     = useState<{ used: number; limit: number; hasAccess: boolean } | null>(null);
+  const [imgUsage,     setImgUsage]     = useState<{ used: number; limit: number; hasAccess: boolean; availableProviders: string[] } | null>(null);
   const [imgHistory,   setImgHistory]   = useState<AiImageGeneration[]>([]);
   const [imgHistOpen,  setImgHistOpen]  = useState(false);
   const [saving,       setSaving]       = useState(false);
@@ -323,7 +324,7 @@ function PostModal({
     if (!imgPrompt.trim()) { setImgError('Escribe una descripción para la imagen.'); return; }
     setImgGenerating(true); setImgError(''); setImgPreview('');
     try {
-      const result = await generateContentImage({ prompt: imgPrompt, size: imgSize, style: imgStyle });
+      const result = await generateContentImage({ prompt: imgPrompt, provider: imgProvider || undefined, size: imgSize, style: imgStyle });
       setImgPreview(`${API_URL}${result.url}`);
       // Refresh usage count
       try { setImgUsage(await getContentImageUsage()); } catch {}
@@ -729,20 +730,36 @@ function PostModal({
                       {/* Controls row */}
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                         <div>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>Proveedor</div>
+                          <select className="form-input" style={{ fontSize: 12, padding: '4px 8px' }}
+                            value={imgProvider} onChange={(e) => setImgProvider(e.target.value)}>
+                            <option value="">Auto (primer disponible)</option>
+                            {(!imgUsage || imgUsage.availableProviders.includes('openai')) && (
+                              <option value="openai">🟢 DALL-E 3 (OpenAI) — $0.04–$0.08</option>
+                            )}
+                            {(!imgUsage || imgUsage.availableProviders.includes('stability')) && (
+                              <option value="stability">🔵 Stable Diffusion XL — ~$0.003</option>
+                            )}
+                            {(!imgUsage || imgUsage.availableProviders.includes('fal')) && (
+                              <option value="fal">⚡ Flux Schnell (Fal.ai) — ~$0.003</option>
+                            )}
+                          </select>
+                        </div>
+                        <div>
                           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>Tamaño</div>
                           <select className="form-input" style={{ fontSize: 12, padding: '4px 8px' }}
                             value={imgSize} onChange={(e) => setImgSize(e.target.value)}>
-                            <option value="1024x1024">Cuadrado (1024×1024) — $0.04</option>
-                            <option value="1792x1024">Horizontal (1792×1024) — $0.08</option>
-                            <option value="1024x1792">Vertical (1024×1792) — $0.08</option>
+                            <option value="1024x1024">Cuadrado (1024×1024)</option>
+                            <option value="1792x1024">Horizontal (1792×1024)</option>
+                            <option value="1024x1792">Vertical (1024×1792)</option>
                           </select>
                         </div>
                         <div>
                           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>Estilo</div>
                           <select className="form-input" style={{ fontSize: 12, padding: '4px 8px' }}
                             value={imgStyle} onChange={(e) => setImgStyle(e.target.value)}>
-                            <option value="vivid">Vivid — más dramático y llamativo</option>
-                            <option value="natural">Natural — más fotorrealista</option>
+                            <option value="vivid">Vivid — dramático</option>
+                            <option value="natural">Natural — fotorrealista</option>
                           </select>
                         </div>
                         <button
