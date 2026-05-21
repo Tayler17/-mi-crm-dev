@@ -34,8 +34,8 @@ function fmtDate(dt: string | undefined, locale: string) {
 // ── Live Preview Card ─────────────────────────────────────────────────────────
 
 function PreviewCard({
-  channel, title, body, tagInput, mediaUrl, altText,
-}: { channel: string; title: string; body: string; tagInput: string; mediaUrl?: string; altText?: string }) {
+  channel, title, body, tagInput, mediaUrl, altText, mediaType,
+}: { channel: string; title: string; body: string; tagInput: string; mediaUrl?: string; altText?: string; mediaType?: string }) {
   const { lang } = useLangCtx();
   const i = APP[lang];
 
@@ -77,13 +77,13 @@ function PreviewCard({
           </div>
           <div style={{ marginLeft: 'auto', fontSize: 18, color: '#262626' }}>•••</div>
         </div>
-        {/* Image */}
+        {/* Image / Video */}
         {mediaUrl ? (
-          <img
-            src={mediaUrl}
-            alt={altText ?? title}
-            style={{ width: '100%', aspectRatio: '1/1', objectFit: 'cover', display: 'block' }}
-          />
+          mediaType === 'video' ? (
+            <video src={mediaUrl} controls style={{ width: '100%', aspectRatio: '1/1', objectFit: 'cover', display: 'block', background: '#000' }} />
+          ) : (
+            <img src={mediaUrl} alt={altText ?? title} style={{ width: '100%', aspectRatio: '1/1', objectFit: 'cover', display: 'block' }} />
+          )
         ) : (
           <div style={{
             width: '100%', aspectRatio: '1/1', background: '#f0f0f0',
@@ -91,7 +91,7 @@ function PreviewCard({
             color: '#aaa', fontSize: 32,
           }}>
             <span>{ch.icon}</span>
-            <span style={{ fontSize: 11, marginTop: 6, color: '#bbb' }}>Imagen del post</span>
+            <span style={{ fontSize: 11, marginTop: 6, color: '#bbb' }}>Imagen / Video</span>
           </div>
         )}
         {/* Actions */}
@@ -589,7 +589,7 @@ function PostModal({
                       <input
                         ref={fileRef}
                         type="file"
-                        accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml,image/avif"
+                        accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml,image/avif,video/mp4,video/webm,video/quicktime,video/avi,video/ogg"
                         style={{ display: 'none' }}
                         onChange={handleFileChange}
                       />
@@ -603,9 +603,9 @@ function PostModal({
                           color: 'var(--text-muted)', opacity: uploading ? 0.6 : 1,
                         }}
                       >
-                        {uploading ? i.contentUploading : i.contentChooseFile}
+                        {uploading ? i.contentUploading : '📎 Subir imagen o video'}
                       </button>
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{i.contentFileHint}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>JPG, PNG, GIF, WebP, MP4, WebM — máx. 200 MB</span>
                       {uploadError && (
                         <span style={{ fontSize: 11, color: '#ef4444', fontWeight: 500 }}>⚠ {uploadError}</span>
                       )}
@@ -624,12 +624,20 @@ function PostModal({
                   {/* Thumbnail preview */}
                   {mediaUrl && (
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                      <img
-                        src={mediaUrl}
-                        alt={altText || 'preview'}
-                        style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)', flexShrink: 0 }}
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                      />
+                      {mediaType === 'video' ? (
+                        <video
+                          src={mediaUrl}
+                          controls
+                          style={{ width: 140, height: 80, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)', flexShrink: 0, background: '#000' }}
+                        />
+                      ) : (
+                        <img
+                          src={mediaUrl}
+                          alt={altText || 'preview'}
+                          style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)', flexShrink: 0 }}
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
+                      )}
                       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <input
                           className="form-input"
@@ -666,7 +674,7 @@ function PostModal({
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 {i.contentPreviewLabel} — {CHANNEL_MAP[channel]?.icon} {CHANNEL_MAP[channel]?.label ?? channel}
               </div>
-              <PreviewCard channel={channel} title={title} body={body} tagInput={tagInput} mediaUrl={mediaUrl || undefined} altText={altText || undefined} />
+              <PreviewCard channel={channel} title={title} body={body} tagInput={tagInput} mediaUrl={mediaUrl || undefined} altText={altText || undefined} mediaType={mediaType} />
               {/* Status preview */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{i.status}:</span>

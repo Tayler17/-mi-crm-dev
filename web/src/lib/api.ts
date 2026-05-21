@@ -445,9 +445,10 @@ export const deleteTag = (id: string) => apiDelete(`/tags/${id}`);
 
 export interface DashboardStats {
   contacts: { total: number };
-  conversations: { total: number; open: number; pending: number; resolved: number; today: number };
+  conversations: { total: number; open: number; pending: number; resolved: number; in_range: number };
   deals: { total: number; won: number; lost: number; active: number; pipeline_value: string; won_value: string };
   tasks: { total: number; overdue: number; due_today: number; completed: number };
+  dateRange?: { from: string; to: string; rangeDays: number };
   campaigns: { total: number; active: number; total_sent: number };
   companies: { total: number; with_contacts: number; with_deals: number };
   connections: { total: number; active: number; errors: number };
@@ -459,7 +460,13 @@ export interface DashboardStats {
   conversationsTrend: { day: string; count: number }[];
 }
 
-export const getDashboardStats = () => apiGet<DashboardStats>('/dashboard/stats');
+export const getDashboardStats = (from?: string, to?: string) => {
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to)   params.set('to', to);
+  const qs = params.toString();
+  return apiGet<DashboardStats>(`/dashboard/stats${qs ? `?${qs}` : ''}`);
+};
 
 // ── Reports ───────────────────────────────────────────────────────────────────
 

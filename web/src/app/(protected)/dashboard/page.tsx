@@ -233,6 +233,23 @@ function MiniStatRow({ items }: { items: { label: string; value: string | number
   );
 }
 
+// ── Date range helper ─────────────────────────────────────────────────────────
+
+type Preset = '7d' | '30d' | '90d' | 'custom';
+
+function toISODate(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+
+function presetRange(p: Preset, custom?: { from: string; to: string }) {
+  const now = new Date();
+  const today = toISODate(now);
+  if (p === '7d')  return { from: toISODate(new Date(Date.now() - 6  * 86400000)), to: today };
+  if (p === '30d') return { from: toISODate(new Date(Date.now() - 29 * 86400000)), to: today };
+  if (p === '90d') return { from: toISODate(new Date(Date.now() - 89 * 86400000)), to: today };
+  return { from: custom?.from ?? toISODate(new Date(Date.now() - 29 * 86400000)), to: custom?.to ?? today };
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { lang } = useLangCtx();
@@ -242,14 +259,24 @@ export default function DashboardPage() {
   const [error, setError] = useState('');
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [planData, setPlanData] = useState<{ tenant: any; usage: Record<string, number> } | null>(null);
+  const [preset, setPreset] = useState<Preset>('30d');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo]   = useState('');
   const user = getStoredUser();
 
-  useEffect(() => {
-    getDashboardStats()
+  const loadStats = (p: Preset, cf?: string, ct?: string) => {
+    setLoading(true); setError('');
+    const range = presetRange(p, { from: cf ?? customFrom, to: ct ?? customTo });
+    getDashboardStats(range.from, range.to)
       .then(setStats)
-      .catch((e) => setError(e.message))
+      .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadStats('30d');
     getCurrentPlan().then(setPlanData).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const greetingHour = new Date().getHours();
@@ -257,23 +284,24 @@ export default function DashboardPage() {
 
   const STATUS_LABEL: Record<string, string> = { open: i.open, pending: i.pending, resolved: i.resolved };
 
-  if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--text-muted)', fontSize: 16 }}>
-      {i.loadingMetrics}
-    </div>
-  );
-
   if (error) return (
     <div style={{ padding: 24 }}>
       <div style={{ color: 'var(--danger)', fontSize: 14, marginBottom: 12 }}>{i.errorMetrics}: {error}</div>
-      <button className="btn btn-primary" onClick={() => { setError(''); setLoading(true); getDashboardStats().then(setStats).catch((e) => setError(e.message)).finally(() => setLoading(false)); }}>{i.retry}</button>
+      <button className="btn btn-primary" onClick={() => loadStats(preset)}>{i.retry}</button>
     </div>
   );
 
-  const s = stats!;
-  const c = s.conversations;
+  const s = stats ?? ({} as DashboardStats);
+  const c = s.conversations ?? { total: 0, open: 0, pending: 0, resolved: 0, in_range: 0 };
   const convTotal = (c.open + c.pending + c.resolved) || 1;
   const activeAnnouncements = (s.announcements ?? []).filter((a) => !dismissed.has(a.id));
+
+  const PRESETS: { key: Preset; label: string }[] = [
+    { key: '7d',     label: '7 días' },
+    { key: '30d',    label: '30 días' },
+    { key: '90d',    label: '90 días' },
+    { key: 'custom', label: 'Personalizado' },
+  ];
 
   return (
     <div style={{ padding: 24, maxWidth: 1300 }}>
@@ -283,14 +311,45 @@ export default function DashboardPage() {
         onDismiss={(id) => setDismissed((prev) => new Set([...prev, id]))}
       />
 
-      {/* Header */}
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700 }}>
-          {greeting}, {user?.fullName?.split(' ')[0] || 'usuario'} 👋
-        </h1>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
-          {new Date().toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-        </p>
+      {/* Header + date filter */}
+      <div style={{ marginBottom: 20, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700 }}>
+            {greeting}, {user?.fullName?.split(' ')[0] || 'usuario'} 👋
+          </h1>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
+            {new Date().toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          </p>
+        </div>
+
+        {/* Date range filter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          {PRESETS.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => { setPreset(p.key); if (p.key !== 'custom') loadStats(p.key); }}
+              style={{
+                padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid var(--border)',
+                background: preset === p.key ? 'var(--primary)' : 'var(--bg-card)',
+                color: preset === p.key ? '#fff' : 'var(--text)',
+              }}
+            >{p.label}</button>
+          ))}
+          {preset === 'custom' && (
+            <>
+              <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)}
+                style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12, background: 'var(--bg-card)', color: 'var(--text)' }} />
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>→</span>
+              <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
+                style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12, background: 'var(--bg-card)', color: 'var(--text)' }} />
+              <button
+                onClick={() => { if (customFrom && customTo) loadStats('custom', customFrom, customTo); }}
+                className="btn btn-primary" style={{ padding: '5px 12px', fontSize: 12 }}
+              >Aplicar</button>
+            </>
+          )}
+          {loading && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>⏳</span>}
+        </div>
       </div>
 
       {/* Plan usage widget */}
@@ -298,12 +357,12 @@ export default function DashboardPage() {
 
       {/* KPI row — principal */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))', gap: 14, marginBottom: 20 }}>
-        <StatCard label={i.contacts}        value={s.contacts.total}          icon="👥" color="#6366f1" onClick={() => router.push('/contacts')} />
-        <StatCard label={i.conversations}   value={c.total}    sub={`${c.today} ${i.today_suffix}`} icon="💬" color="#3b82f6" onClick={() => router.push('/inbox')} />
-        <StatCard label={i.activeDeals}     value={s.deals.active} sub={currency(s.deals.pipeline_value)} icon="💼" color="#f59e0b" onClick={() => router.push('/kanban')} />
-        <StatCard label={i.wonDeals}        value={s.deals.won}   sub={currency(s.deals.won_value)} icon="🏆" color="#10b981" />
-        <StatCard label={i.pendingTasks}    value={s.tasks.total - s.tasks.completed} sub={s.tasks.overdue > 0 ? `⚠ ${s.tasks.overdue} ${i.overdue.toLowerCase()}` : 'Al día'} icon="✓" color={s.tasks.overdue > 0 ? '#ef4444' : '#10b981'} onClick={() => router.push('/tasks')} />
-        <StatCard label={i.activeCampaigns} value={s.campaigns.active} sub={`${s.campaigns.total_sent} enviados`} icon="📣" color="#8b5cf6" onClick={() => router.push('/campaigns')} />
+        <StatCard label={i.contacts}        value={s.contacts?.total ?? 0}          icon="👥" color="#6366f1" onClick={() => router.push('/contacts')} />
+        <StatCard label={i.conversations}   value={c.in_range} sub={`${c.open} abiertas`} icon="💬" color="#3b82f6" onClick={() => router.push('/inbox')} />
+        <StatCard label={i.activeDeals}     value={s.deals?.active ?? 0} sub={currency(s.deals?.pipeline_value ?? 0)} icon="💼" color="#f59e0b" onClick={() => router.push('/kanban')} />
+        <StatCard label={i.wonDeals}        value={s.deals?.won ?? 0}   sub={currency(s.deals?.won_value ?? 0)} icon="🏆" color="#10b981" />
+        <StatCard label={i.pendingTasks}    value={(s.tasks?.total ?? 0) - (s.tasks?.completed ?? 0)} sub={(s.tasks?.overdue ?? 0) > 0 ? `⚠ ${s.tasks.overdue} ${i.overdue.toLowerCase()}` : 'Al día'} icon="✓" color={(s.tasks?.overdue ?? 0) > 0 ? '#ef4444' : '#10b981'} onClick={() => router.push('/tasks')} />
+        <StatCard label={i.activeCampaigns} value={s.campaigns?.active ?? 0} sub={`${s.campaigns?.total_sent ?? 0} enviados`} icon="📣" color="#8b5cf6" onClick={() => router.push('/campaigns')} />
       </div>
 
       {/* KPI row — secundaria */}
@@ -360,9 +419,9 @@ export default function DashboardPage() {
               );
             })}
           </div>
-          {s.conversationsTrend.length > 0 && (
+          {(s.conversationsTrend ?? []).length > 0 && (
             <div style={{ marginTop: 16 }}>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{i.last7days}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tendencia del período</div>
               <BarChart data={s.conversationsTrend} />
             </div>
           )}
@@ -374,14 +433,14 @@ export default function DashboardPage() {
             <span>{i.pipeline}</span>
             <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => router.push('/kanban')}>{i.kanban} →</button>
           </div>
-          <FunnelChart stages={s.dealsByStage} />
+          <FunnelChart stages={s.dealsByStage ?? []} />
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <div style={{ textAlign: 'center', padding: 8, background: 'var(--bg-secondary)', borderRadius: 6 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#f59e0b' }}>{currency(s.deals.pipeline_value)}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#f59e0b' }}>{currency(s.deals?.pipeline_value ?? 0)}</div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{i.inPipeline}</div>
             </div>
             <div style={{ textAlign: 'center', padding: 8, background: 'var(--bg-secondary)', borderRadius: 6 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#10b981' }}>{currency(s.deals.won_value)}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#10b981' }}>{currency(s.deals?.won_value ?? 0)}</div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{i.won}</div>
             </div>
           </div>
@@ -395,10 +454,10 @@ export default function DashboardPage() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {[
-              { label: i.dueToday,   value: s.tasks.due_today,  color: '#6366f1', icon: '📅' },
-              { label: i.overdue,    value: s.tasks.overdue,    color: '#ef4444', icon: '⚠' },
-              { label: i.completed,  value: s.tasks.completed,  color: '#10b981', icon: '✅' },
-              { label: i.total,      value: s.tasks.total,      color: 'var(--text)', icon: '📋' },
+              { label: i.dueToday,   value: s.tasks?.due_today  ?? 0, color: '#6366f1', icon: '📅' },
+              { label: i.overdue,    value: s.tasks?.overdue     ?? 0, color: '#ef4444', icon: '⚠' },
+              { label: i.completed,  value: s.tasks?.completed   ?? 0, color: '#10b981', icon: '✅' },
+              { label: i.total,      value: s.tasks?.total       ?? 0, color: 'var(--text)', icon: '📋' },
             ].map((t) => (
               <div key={t.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: 'var(--bg-secondary)', borderRadius: 6 }}>
                 <span style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}><span>{t.icon}</span>{t.label}</span>
@@ -435,11 +494,11 @@ export default function DashboardPage() {
           <span>{i.recentConversations}</span>
           <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => router.push('/inbox')}>{i.viewInbox}</button>
         </div>
-        {s.recentConversations.length === 0 ? (
+        {(s.recentConversations ?? []).length === 0 ? (
           <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 20 }}>{i.noConversations}</div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
-            {s.recentConversations.map((conv: any) => {
+            {(s.recentConversations ?? []).map((conv: any) => {
               const statusColor = STATUS_COLOR[conv.status] ?? '#6b7280';
               return (
                 <div

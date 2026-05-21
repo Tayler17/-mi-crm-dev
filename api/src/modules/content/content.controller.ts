@@ -44,16 +44,19 @@ export class ContentController {
       },
     }),
     fileFilter: (_req, file, cb) => {
-      if (!/\.(jpg|jpeg|png|gif|webp|svg|avif)$/i.test(file.originalname)) {
-        return cb(new BadRequestException('Solo se permiten imágenes (jpg, png, gif, webp, svg, avif)'), false);
+      if (!/\.(jpg|jpeg|png|gif|webp|svg|avif|mp4|webm|mov|avi|ogv)$/i.test(file.originalname)) {
+        return cb(new BadRequestException('Formatos permitidos: jpg, png, gif, webp, svg, avif, mp4, webm, mov, avi'), false);
       }
       cb(null, true);
     },
-    limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+    limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB (videos)
   }))
   uploadMedia(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException('No se recibió ningún archivo');
-    const mediaType = /\.gif$/i.test(file.originalname) ? 'gif' : 'image';
+    const name = file.originalname.toLowerCase();
+    const mediaType = /\.gif$/i.test(name) ? 'gif'
+      : /\.(mp4|webm|mov|avi|ogv)$/i.test(name) ? 'video'
+      : 'image';
     return { url: `/uploads/content/${file.filename}`, mediaType };
   }
 
