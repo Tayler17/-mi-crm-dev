@@ -11,7 +11,10 @@ git pull
 echo "==> Rebuilding containers"
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build --remove-orphans
 
-echo "==> Cleaning old images"
+echo "==> Cleaning unused resources"
 docker image prune -f
+docker volume prune -f
+docker builder prune --keep-storage 3GB -f
 
 echo "✅  Update complete"
+echo "    Disk: $(df -h / | awk 'NR==2{print $3" used / "$2" ("$5")"}')"
