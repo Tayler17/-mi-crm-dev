@@ -398,6 +398,39 @@ export const APP: Record<LangCode, {
   contentNoPostsYet: string; contentNoResults: string; contentCreateFirst: string;
   contentDeleteTitle: string; contentDeleteConfirm: string; contentApprove: string; contentCopyOf: string;
   contentToneProf: string; contentToneFriendly: string; contentToneInfo: string; contentToneFun: string; contentToneInspire: string;
+  // Content — AI image generator tab
+  contentImgTab: string; contentImgPromptPh: string;
+  contentImgProvider: string; contentImgProviderAuto: string;
+  contentImgSize: string; contentImgSquare: string; contentImgHoriz: string; contentImgVert: string;
+  contentImgStyle: string; contentImgStyleVivid: string; contentImgStyleNatural: string;
+  contentImgGenerate: string; contentImgGenerating: string;
+  contentImgUse: string; contentImgDiscard: string;
+  contentImgUsage: string; contentImgNoPlan: string;
+  contentImgErrPrompt: string; contentImgErrGeneric: string;
+  contentImgGeneratedWith: string;
+  // Help center
+  helpGlobalBadge: string; helpGlobalCategory: string; helpGlobalArticle: string;
+  // Deals filters
+  dealDateFrom: string; dealDateTo: string; dealValMin: string; dealValMax: string;
+  // AI chatbots — template UI labels
+  chatbotIndustryGeneral: string; chatbotIndustrySales: string; chatbotIndustrySupport: string;
+  chatbotIndustryRestaurant: string; chatbotIndustryRealEstate: string; chatbotIndustryLogistics: string;
+  chatbotIndustryHealth: string; chatbotIndustryEducation: string; chatbotIndustryEcommerce: string;
+  chatbotIndustryFinance: string; chatbotIndustryLegal: string; chatbotIndustryBeauty: string;
+  chatbotIndustryTech: string;
+  chatbotToneFormal: string; chatbotToneProfessional: string; chatbotToneFriendly: string; chatbotToneCasual: string;
+  chatbotLangEs: string; chatbotLangEn: string; chatbotLangPt: string; chatbotLangFr: string;
+  chatbotLangDe: string; chatbotLangIt: string;
+  chatbotTplSalesDesc: string; chatbotTplSupportDesc: string; chatbotTplRestaurantDesc: string;
+  chatbotTplRealEstateDesc: string; chatbotTplLogisticsDesc: string; chatbotTplHealthDesc: string;
+  chatbotTestBtn: string; chatbotTestPlaceholder: string; chatbotTestInput: string;
+  // Call bots — template UI labels
+  callbotToneLabel: string; callbotIndustryLabel: string;
+  callbotToneFormal: string; callbotToneProto: string; callbotToneProfessional: string;
+  callbotToneProfDesc: string; callbotToneFriendly: string; callbotToneFriendlyDesc: string;
+  callbotToneCasual: string; callbotToneCasualDesc: string;
+  callbotTplSales: string; callbotTplAppointments: string; callbotTplClinic: string;
+  callbotTplLogistics: string; callbotTplHotel: string; callbotTplRestaurant: string;
   // Call bots additional
   callBotTabConfig: string; callBotTabBehavior: string; callBotTabKnowledge: string;
   callBotNameLabel: string; callBotPhoneLabel: string; callBotLangLabel: string; callBotMaxDuration: string;
@@ -511,6 +544,34 @@ export const APP: Record<LangCode, {
     contentDeleteConfirm: '¿Estás seguro de que quieres eliminar este post? Esta acción no se puede deshacer.',
     contentApprove: '✓ Aprobar', contentCopyOf: 'Copia de',
     contentToneProf: 'Profesional', contentToneFriendly: 'Cercano', contentToneInfo: 'Informativo', contentToneFun: 'Divertido', contentToneInspire: 'Inspirador',
+    contentImgTab: '🎨 IA', contentImgPromptPh: "Describe la imagen que quieres generar… Ej: 'Un café acogedor con luz cálida de tarde, estilo fotografía editorial'",
+    contentImgProvider: 'Proveedor', contentImgProviderAuto: 'Auto (primer disponible)',
+    contentImgSize: 'Tamaño', contentImgSquare: 'Cuadrado (1024×1024)', contentImgHoriz: 'Horizontal (1792×1024)', contentImgVert: 'Vertical (1024×1792)',
+    contentImgStyle: 'Estilo', contentImgStyleVivid: 'Vivid — dramático', contentImgStyleNatural: 'Natural — fotorrealista',
+    contentImgGenerate: '✨ Generar imagen', contentImgGenerating: '⏳ Generando…',
+    contentImgUse: 'Usar como media', contentImgDiscard: 'Descartar',
+    contentImgUsage: 'imágenes este mes', contentImgNoPlan: 'Tu plan no incluye generación de imágenes IA.',
+    contentImgErrPrompt: 'Escribe una descripción para la imagen.', contentImgErrGeneric: 'Error al generar la imagen.',
+    contentImgGeneratedWith: 'Imagen generada con IA',
+    helpGlobalBadge: 'De la plataforma', helpGlobalCategory: 'Categoría global (visible a todos los tenants)', helpGlobalArticle: 'Artículo global (visible a todos los tenants)',
+    dealDateFrom: 'Desde fecha', dealDateTo: 'Hasta fecha', dealValMin: '$ mín', dealValMax: '$ máx',
+    chatbotIndustryGeneral: 'General', chatbotIndustrySales: 'Ventas', chatbotIndustrySupport: 'Soporte / Atención al cliente',
+    chatbotIndustryRestaurant: 'Restaurante / Hostelería', chatbotIndustryRealEstate: 'Inmobiliaria', chatbotIndustryLogistics: 'Logística / Transporte',
+    chatbotIndustryHealth: 'Salud / Clínica', chatbotIndustryEducation: 'Educación', chatbotIndustryEcommerce: 'E-commerce',
+    chatbotIndustryFinance: 'Finanzas / Seguros', chatbotIndustryLegal: 'Legal', chatbotIndustryBeauty: 'Belleza / Estética', chatbotIndustryTech: 'Tecnología / SaaS',
+    chatbotToneFormal: 'Serio y protocolario', chatbotToneProfessional: 'Claro y directo', chatbotToneFriendly: 'Cercano y cálido', chatbotToneCasual: 'Relajado e informal',
+    chatbotLangEs: 'Español', chatbotLangEn: 'Inglés', chatbotLangPt: 'Portugués', chatbotLangFr: 'Francés', chatbotLangDe: 'Alemán', chatbotLangIt: 'Italiano',
+    chatbotTplSalesDesc: 'Califica prospectos y agenda citas', chatbotTplSupportDesc: 'Resuelve dudas y tickets técnicos',
+    chatbotTplRestaurantDesc: 'Pedidos, reservas y menú', chatbotTplRealEstateDesc: 'Propiedades, visitas y asesores',
+    chatbotTplLogisticsDesc: 'Seguimiento de envíos y pedidos', chatbotTplHealthDesc: 'Citas médicas y consultas generales',
+    chatbotTestBtn: '🧪 Probar bot', chatbotTestPlaceholder: 'Escribe un mensaje para probar el bot', chatbotTestInput: 'Escribe un mensaje…',
+    callbotToneLabel: 'Tono de voz', callbotIndustryLabel: 'Industria',
+    callbotToneFormal: 'Formal', callbotToneProto: 'Protocolar, muy respetuoso',
+    callbotToneProfessional: 'Profesional', callbotToneProfDesc: 'Claro y directo (recomendado)',
+    callbotToneFriendly: 'Amigable', callbotToneFriendlyDesc: 'Cálido y cercano',
+    callbotToneCasual: 'Casual', callbotToneCasualDesc: 'Relajado e informal',
+    callbotTplSales: 'Ventas', callbotTplAppointments: 'Citas', callbotTplClinic: 'Clínica',
+    callbotTplLogistics: 'Logística', callbotTplHotel: 'Hotel', callbotTplRestaurant: 'Restaurante',
     callBotTabConfig: 'Configuración', callBotTabBehavior: '🤖 Comportamiento', callBotTabKnowledge: '📚 Conocimiento',
     callBotNameLabel: 'Nombre del Bot', callBotPhoneLabel: 'Número de Teléfono', callBotLangLabel: 'Idioma',
     callBotMaxDuration: 'Duración Máxima (seg)', callBotDestNumber: 'Número destino', callBotE164Hint: 'Formato E.164 recomendado: +1234567890',
@@ -927,6 +988,34 @@ export const APP: Record<LangCode, {
     contentDeleteConfirm: 'Are you sure you want to delete this post? This cannot be undone.',
     contentApprove: '✓ Approve', contentCopyOf: 'Copy of',
     contentToneProf: 'Professional', contentToneFriendly: 'Friendly', contentToneInfo: 'Informative', contentToneFun: 'Fun', contentToneInspire: 'Inspiring',
+    contentImgTab: '🎨 AI', contentImgPromptPh: "Describe the image you want to generate… e.g. 'A cozy café with warm afternoon light, editorial photography style'",
+    contentImgProvider: 'Provider', contentImgProviderAuto: 'Auto (first available)',
+    contentImgSize: 'Size', contentImgSquare: 'Square (1024×1024)', contentImgHoriz: 'Landscape (1792×1024)', contentImgVert: 'Portrait (1024×1792)',
+    contentImgStyle: 'Style', contentImgStyleVivid: 'Vivid — dramatic', contentImgStyleNatural: 'Natural — photorealistic',
+    contentImgGenerate: '✨ Generate image', contentImgGenerating: '⏳ Generating…',
+    contentImgUse: 'Use as media', contentImgDiscard: 'Discard',
+    contentImgUsage: 'images this month', contentImgNoPlan: 'Your plan does not include AI image generation.',
+    contentImgErrPrompt: 'Write a description for the image.', contentImgErrGeneric: 'Error generating the image.',
+    contentImgGeneratedWith: 'Image generated with AI',
+    helpGlobalBadge: 'From platform', helpGlobalCategory: 'Global category (visible to all tenants)', helpGlobalArticle: 'Global article (visible to all tenants)',
+    dealDateFrom: 'From date', dealDateTo: 'To date', dealValMin: '$ min', dealValMax: '$ max',
+    chatbotIndustryGeneral: 'General', chatbotIndustrySales: 'Sales', chatbotIndustrySupport: 'Support / Customer service',
+    chatbotIndustryRestaurant: 'Restaurant / Hospitality', chatbotIndustryRealEstate: 'Real Estate', chatbotIndustryLogistics: 'Logistics / Transport',
+    chatbotIndustryHealth: 'Health / Clinic', chatbotIndustryEducation: 'Education', chatbotIndustryEcommerce: 'E-commerce',
+    chatbotIndustryFinance: 'Finance / Insurance', chatbotIndustryLegal: 'Legal', chatbotIndustryBeauty: 'Beauty / Aesthetics', chatbotIndustryTech: 'Technology / SaaS',
+    chatbotToneFormal: 'Formal and serious', chatbotToneProfessional: 'Clear and direct', chatbotToneFriendly: 'Warm and friendly', chatbotToneCasual: 'Relaxed and casual',
+    chatbotLangEs: 'Spanish', chatbotLangEn: 'English', chatbotLangPt: 'Portuguese', chatbotLangFr: 'French', chatbotLangDe: 'German', chatbotLangIt: 'Italian',
+    chatbotTplSalesDesc: 'Qualify prospects and schedule appointments', chatbotTplSupportDesc: 'Resolve questions and technical tickets',
+    chatbotTplRestaurantDesc: 'Orders, reservations and menu', chatbotTplRealEstateDesc: 'Properties, visits and advisors',
+    chatbotTplLogisticsDesc: 'Track shipments and orders', chatbotTplHealthDesc: 'Medical appointments and general consultations',
+    chatbotTestBtn: '🧪 Test bot', chatbotTestPlaceholder: 'Write a message to test the bot', chatbotTestInput: 'Write a message…',
+    callbotToneLabel: 'Voice tone', callbotIndustryLabel: 'Industry',
+    callbotToneFormal: 'Formal', callbotToneProto: 'Very formal and respectful',
+    callbotToneProfessional: 'Professional', callbotToneProfDesc: 'Clear and direct (recommended)',
+    callbotToneFriendly: 'Friendly', callbotToneFriendlyDesc: 'Warm and approachable',
+    callbotToneCasual: 'Casual', callbotToneCasualDesc: 'Relaxed and informal',
+    callbotTplSales: 'Sales', callbotTplAppointments: 'Appointments', callbotTplClinic: 'Clinic',
+    callbotTplLogistics: 'Logistics', callbotTplHotel: 'Hotel', callbotTplRestaurant: 'Restaurant',
     callBotTabConfig: 'Configuration', callBotTabBehavior: '🤖 Behavior', callBotTabKnowledge: '📚 Knowledge',
     callBotNameLabel: 'Bot Name', callBotPhoneLabel: 'Phone Number', callBotLangLabel: 'Language',
     callBotMaxDuration: 'Max Duration (sec)', callBotDestNumber: 'Destination number', callBotE164Hint: 'Recommended E.164 format: +1234567890',
@@ -1343,6 +1432,34 @@ export const APP: Record<LangCode, {
     contentDeleteConfirm: 'Tem certeza que deseja excluir este post? Esta ação não pode ser desfeita.',
     contentApprove: '✓ Aprovar', contentCopyOf: 'Cópia de',
     contentToneProf: 'Profissional', contentToneFriendly: 'Amigável', contentToneInfo: 'Informativo', contentToneFun: 'Divertido', contentToneInspire: 'Inspirador',
+    contentImgTab: '🎨 IA', contentImgPromptPh: "Descreva a imagem que deseja gerar… Ex: 'Um café aconchegante com luz quente da tarde, estilo fotografia editorial'",
+    contentImgProvider: 'Provedor', contentImgProviderAuto: 'Auto (primeiro disponível)',
+    contentImgSize: 'Tamanho', contentImgSquare: 'Quadrado (1024×1024)', contentImgHoriz: 'Paisagem (1792×1024)', contentImgVert: 'Retrato (1024×1792)',
+    contentImgStyle: 'Estilo', contentImgStyleVivid: 'Vívido — dramático', contentImgStyleNatural: 'Natural — fotorrealista',
+    contentImgGenerate: '✨ Gerar imagem', contentImgGenerating: '⏳ Gerando…',
+    contentImgUse: 'Usar como mídia', contentImgDiscard: 'Descartar',
+    contentImgUsage: 'imagens este mês', contentImgNoPlan: 'Seu plano não inclui geração de imagens com IA.',
+    contentImgErrPrompt: 'Escreva uma descrição para a imagem.', contentImgErrGeneric: 'Erro ao gerar a imagem.',
+    contentImgGeneratedWith: 'Imagem gerada com IA',
+    helpGlobalBadge: 'Da plataforma', helpGlobalCategory: 'Categoria global (visível a todos os tenants)', helpGlobalArticle: 'Artigo global (visível a todos os tenants)',
+    dealDateFrom: 'Data inicial', dealDateTo: 'Data final', dealValMin: '$ mín', dealValMax: '$ máx',
+    chatbotIndustryGeneral: 'Geral', chatbotIndustrySales: 'Vendas', chatbotIndustrySupport: 'Suporte / Atendimento',
+    chatbotIndustryRestaurant: 'Restaurante / Hotelaria', chatbotIndustryRealEstate: 'Imobiliária', chatbotIndustryLogistics: 'Logística / Transporte',
+    chatbotIndustryHealth: 'Saúde / Clínica', chatbotIndustryEducation: 'Educação', chatbotIndustryEcommerce: 'E-commerce',
+    chatbotIndustryFinance: 'Finanças / Seguros', chatbotIndustryLegal: 'Jurídico', chatbotIndustryBeauty: 'Beleza / Estética', chatbotIndustryTech: 'Tecnologia / SaaS',
+    chatbotToneFormal: 'Formal e sério', chatbotToneProfessional: 'Claro e direto', chatbotToneFriendly: 'Caloroso e amigável', chatbotToneCasual: 'Relaxado e informal',
+    chatbotLangEs: 'Espanhol', chatbotLangEn: 'Inglês', chatbotLangPt: 'Português', chatbotLangFr: 'Francês', chatbotLangDe: 'Alemão', chatbotLangIt: 'Italiano',
+    chatbotTplSalesDesc: 'Qualifica prospects e agenda visitas', chatbotTplSupportDesc: 'Resolve dúvidas e tickets técnicos',
+    chatbotTplRestaurantDesc: 'Pedidos, reservas e cardápio', chatbotTplRealEstateDesc: 'Imóveis, visitas e assessores',
+    chatbotTplLogisticsDesc: 'Rastreamento de envios e pedidos', chatbotTplHealthDesc: 'Consultas médicas e dúvidas gerais',
+    chatbotTestBtn: '🧪 Testar bot', chatbotTestPlaceholder: 'Escreva uma mensagem para testar o bot', chatbotTestInput: 'Escreva uma mensagem…',
+    callbotToneLabel: 'Tom de voz', callbotIndustryLabel: 'Indústria',
+    callbotToneFormal: 'Formal', callbotToneProto: 'Muito formal e respeitoso',
+    callbotToneProfessional: 'Profissional', callbotToneProfDesc: 'Claro e direto (recomendado)',
+    callbotToneFriendly: 'Amigável', callbotToneFriendlyDesc: 'Caloroso e acolhedor',
+    callbotToneCasual: 'Casual', callbotToneCasualDesc: 'Relaxado e informal',
+    callbotTplSales: 'Vendas', callbotTplAppointments: 'Agendamentos', callbotTplClinic: 'Clínica',
+    callbotTplLogistics: 'Logística', callbotTplHotel: 'Hotel', callbotTplRestaurant: 'Restaurante',
     callBotTabConfig: 'Configuração', callBotTabBehavior: '🤖 Comportamento', callBotTabKnowledge: '📚 Conhecimento',
     callBotNameLabel: 'Nome do Bot', callBotPhoneLabel: 'Número de Telefone', callBotLangLabel: 'Idioma',
     callBotMaxDuration: 'Duração Máxima (s)', callBotDestNumber: 'Número destino', callBotE164Hint: 'Formato E.164 recomendado: +1234567890',
@@ -1759,6 +1876,34 @@ export const APP: Record<LangCode, {
     contentDeleteConfirm: 'Bu gönderiyi silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.',
     contentApprove: '✓ Onayla', contentCopyOf: 'Kopyası:',
     contentToneProf: 'Profesyonel', contentToneFriendly: 'Samimi', contentToneInfo: 'Bilgilendirici', contentToneFun: 'Eğlenceli', contentToneInspire: 'İlham verici',
+    contentImgTab: '🎨 YZ', contentImgPromptPh: "Oluşturmak istediğiniz görseli açıklayın… Örn: 'Sıcak öğleden sonra ışığında şirin bir kafe, editoryal fotoğraf stili'",
+    contentImgProvider: 'Sağlayıcı', contentImgProviderAuto: 'Otomatik (ilk mevcut)',
+    contentImgSize: 'Boyut', contentImgSquare: 'Kare (1024×1024)', contentImgHoriz: 'Yatay (1792×1024)', contentImgVert: 'Dikey (1024×1792)',
+    contentImgStyle: 'Stil', contentImgStyleVivid: 'Canlı — dramatik', contentImgStyleNatural: 'Doğal — fotogerçekçi',
+    contentImgGenerate: '✨ Görsel oluştur', contentImgGenerating: '⏳ Oluşturuluyor…',
+    contentImgUse: 'Medya olarak kullan', contentImgDiscard: 'İptal',
+    contentImgUsage: 'bu ay görsel', contentImgNoPlan: 'Planınız YZ görsel oluşturmayı içermiyor.',
+    contentImgErrPrompt: 'Görsel için bir açıklama yazın.', contentImgErrGeneric: 'Görsel oluşturulurken hata oluştu.',
+    contentImgGeneratedWith: 'YZ ile oluşturulan görsel',
+    helpGlobalBadge: 'Platformdan', helpGlobalCategory: 'Global kategori (tüm tenantlara görünür)', helpGlobalArticle: 'Global makale (tüm tenantlara görünür)',
+    dealDateFrom: 'Başlangıç tarihi', dealDateTo: 'Bitiş tarihi', dealValMin: '$ min', dealValMax: '$ maks',
+    chatbotIndustryGeneral: 'Genel', chatbotIndustrySales: 'Satış', chatbotIndustrySupport: 'Destek / Müşteri hizmetleri',
+    chatbotIndustryRestaurant: 'Restoran / Konaklama', chatbotIndustryRealEstate: 'Gayrimenkul', chatbotIndustryLogistics: 'Lojistik / Taşımacılık',
+    chatbotIndustryHealth: 'Sağlık / Klinik', chatbotIndustryEducation: 'Eğitim', chatbotIndustryEcommerce: 'E-ticaret',
+    chatbotIndustryFinance: 'Finans / Sigorta', chatbotIndustryLegal: 'Hukuk', chatbotIndustryBeauty: 'Güzellik / Estetik', chatbotIndustryTech: 'Teknoloji / SaaS',
+    chatbotToneFormal: 'Resmi ve ciddi', chatbotToneProfessional: 'Net ve doğrudan', chatbotToneFriendly: 'Sıcak ve samimi', chatbotToneCasual: 'Rahat ve gayri resmi',
+    chatbotLangEs: 'İspanyolca', chatbotLangEn: 'İngilizce', chatbotLangPt: 'Portekizce', chatbotLangFr: 'Fransızca', chatbotLangDe: 'Almanca', chatbotLangIt: 'İtalyanca',
+    chatbotTplSalesDesc: 'Adayları nitelendirin ve randevu alın', chatbotTplSupportDesc: 'Soruları ve teknik biletleri çözün',
+    chatbotTplRestaurantDesc: 'Siparişler, rezervasyonlar ve menü', chatbotTplRealEstateDesc: 'Mülkler, ziyaretler ve danışmanlar',
+    chatbotTplLogisticsDesc: 'Gönderi ve siparişleri takip edin', chatbotTplHealthDesc: 'Tıbbi randevular ve genel sorular',
+    chatbotTestBtn: '🧪 Botu test et', chatbotTestPlaceholder: 'Botu test etmek için mesaj yazın', chatbotTestInput: 'Mesaj yazın…',
+    callbotToneLabel: 'Ses tonu', callbotIndustryLabel: 'Sektör',
+    callbotToneFormal: 'Resmi', callbotToneProto: 'Çok resmi ve saygılı',
+    callbotToneProfessional: 'Profesyonel', callbotToneProfDesc: 'Net ve doğrudan (önerilen)',
+    callbotToneFriendly: 'Samimi', callbotToneFriendlyDesc: 'Sıcak ve yakın',
+    callbotToneCasual: 'Gündelik', callbotToneCasualDesc: 'Rahat ve gayri resmi',
+    callbotTplSales: 'Satış', callbotTplAppointments: 'Randevular', callbotTplClinic: 'Klinik',
+    callbotTplLogistics: 'Lojistik', callbotTplHotel: 'Otel', callbotTplRestaurant: 'Restoran',
     callBotTabConfig: 'Yapılandırma', callBotTabBehavior: '🤖 Davranış', callBotTabKnowledge: '📚 Bilgi',
     callBotNameLabel: 'Bot Adı', callBotPhoneLabel: 'Telefon Numarası', callBotLangLabel: 'Dil',
     callBotMaxDuration: 'Maks. Süre (sn)', callBotDestNumber: 'Hedef numara', callBotE164Hint: 'Önerilen E.164 formatı: +1234567890',
@@ -2175,6 +2320,34 @@ export const APP: Record<LangCode, {
     contentDeleteConfirm: 'هل أنت متأكد من حذف هذا المنشور؟ لا يمكن التراجع عن هذا الإجراء.',
     contentApprove: '✓ موافقة', contentCopyOf: 'نسخة من',
     contentToneProf: 'مهني', contentToneFriendly: 'ودي', contentToneInfo: 'معلوماتي', contentToneFun: 'مرح', contentToneInspire: 'ملهم',
+    contentImgTab: '🎨 ذكاء اصطناعي', contentImgPromptPh: 'صف الصورة التي تريد إنشاءها…',
+    contentImgProvider: 'المزود', contentImgProviderAuto: 'تلقائي (أول متاح)',
+    contentImgSize: 'الحجم', contentImgSquare: 'مربع (1024×1024)', contentImgHoriz: 'أفقي (1792×1024)', contentImgVert: 'عمودي (1024×1792)',
+    contentImgStyle: 'الأسلوب', contentImgStyleVivid: 'حيوي — دراماتيكي', contentImgStyleNatural: 'طبيعي — واقعي',
+    contentImgGenerate: '✨ إنشاء صورة', contentImgGenerating: '⏳ جارٍ الإنشاء…',
+    contentImgUse: 'استخدام كوسائط', contentImgDiscard: 'تجاهل',
+    contentImgUsage: 'صور هذا الشهر', contentImgNoPlan: 'خطتك لا تتضمن إنشاء صور بالذكاء الاصطناعي.',
+    contentImgErrPrompt: 'اكتب وصفاً للصورة.', contentImgErrGeneric: 'خطأ في إنشاء الصورة.',
+    contentImgGeneratedWith: 'صورة مُنشأة بالذكاء الاصطناعي',
+    helpGlobalBadge: 'من المنصة', helpGlobalCategory: 'فئة عامة (مرئية لجميع المستأجرين)', helpGlobalArticle: 'مقالة عامة (مرئية لجميع المستأجرين)',
+    dealDateFrom: 'من تاريخ', dealDateTo: 'إلى تاريخ', dealValMin: '$ حد أدنى', dealValMax: '$ حد أقصى',
+    chatbotIndustryGeneral: 'عام', chatbotIndustrySales: 'المبيعات', chatbotIndustrySupport: 'الدعم / خدمة العملاء',
+    chatbotIndustryRestaurant: 'المطاعم / الضيافة', chatbotIndustryRealEstate: 'العقارات', chatbotIndustryLogistics: 'اللوجستيات / النقل',
+    chatbotIndustryHealth: 'الصحة / العيادات', chatbotIndustryEducation: 'التعليم', chatbotIndustryEcommerce: 'التجارة الإلكترونية',
+    chatbotIndustryFinance: 'المالية / التأمين', chatbotIndustryLegal: 'القانون', chatbotIndustryBeauty: 'الجمال / التجميل', chatbotIndustryTech: 'التكنولوجيا / SaaS',
+    chatbotToneFormal: 'رسمي وجاد', chatbotToneProfessional: 'واضح ومباشر', chatbotToneFriendly: 'دافئ وودود', chatbotToneCasual: 'مريح وغير رسمي',
+    chatbotLangEs: 'الإسبانية', chatbotLangEn: 'الإنجليزية', chatbotLangPt: 'البرتغالية', chatbotLangFr: 'الفرنسية', chatbotLangDe: 'الألمانية', chatbotLangIt: 'الإيطالية',
+    chatbotTplSalesDesc: 'تأهيل العملاء المحتملين وجدولة المواعيد', chatbotTplSupportDesc: 'حل الاستفسارات والتذاكر التقنية',
+    chatbotTplRestaurantDesc: 'الطلبات والحجوزات والقائمة', chatbotTplRealEstateDesc: 'العقارات والزيارات والمستشارون',
+    chatbotTplLogisticsDesc: 'تتبع الشحنات والطلبات', chatbotTplHealthDesc: 'المواعيد الطبية والاستشارات العامة',
+    chatbotTestBtn: '🧪 اختبار البوت', chatbotTestPlaceholder: 'اكتب رسالة لاختبار البوت', chatbotTestInput: 'اكتب رسالة…',
+    callbotToneLabel: 'نبرة الصوت', callbotIndustryLabel: 'القطاع',
+    callbotToneFormal: 'رسمي', callbotToneProto: 'رسمي جداً ومحترم',
+    callbotToneProfessional: 'مهني', callbotToneProfDesc: 'واضح ومباشر (موصى به)',
+    callbotToneFriendly: 'ودود', callbotToneFriendlyDesc: 'دافئ وقريب',
+    callbotToneCasual: 'غير رسمي', callbotToneCasualDesc: 'مريح وعفوي',
+    callbotTplSales: 'المبيعات', callbotTplAppointments: 'المواعيد', callbotTplClinic: 'العيادة',
+    callbotTplLogistics: 'اللوجستيات', callbotTplHotel: 'الفندق', callbotTplRestaurant: 'المطعم',
     callBotTabConfig: 'الإعداد', callBotTabBehavior: '🤖 السلوك', callBotTabKnowledge: '📚 المعرفة',
     callBotNameLabel: 'اسم البوت', callBotPhoneLabel: 'رقم الهاتف', callBotLangLabel: 'اللغة',
     callBotMaxDuration: 'المدة القصوى (ثانية)', callBotDestNumber: 'رقم الوجهة', callBotE164Hint: 'التنسيق الموصى به E.164: +1234567890',

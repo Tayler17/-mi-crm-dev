@@ -326,7 +326,7 @@ function PostModal({
   }
 
   async function handleGenerateImage() {
-    if (!imgPrompt.trim()) { setImgError('Escribe una descripción para la imagen.'); return; }
+    if (!imgPrompt.trim()) { setImgError(i.contentImgErrPrompt); return; }
     setImgGenerating(true); setImgError(''); setImgPreview(''); setImgProviderUsed('');
     try {
       const result = await generateContentImage({ prompt: imgPrompt, provider: isOwner ? (imgProvider || undefined) : undefined, size: imgSize, style: imgStyle });
@@ -335,7 +335,7 @@ function PostModal({
       // Refresh usage count
       try { setImgUsage(await getContentImageUsage()); } catch {}
     } catch (err: any) {
-      setImgError(err?.message ?? 'Error al generar la imagen.');
+      setImgError(err?.message ?? i.contentImgErrGeneric);
     } finally {
       setImgGenerating(false);
     }
@@ -653,7 +653,7 @@ function PostModal({
                     style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none',
                       background: mediaTab === 'ai' ? '#7c3aed' : 'var(--bg-secondary)',
                       color: mediaTab === 'ai' ? '#fff' : '#7c3aed' }}>
-                    🎨 IA
+                    {i.contentImgTab}
                   </button>
                 </div>
 
@@ -713,12 +713,12 @@ function PostModal({
                                 }} />
                               </div>
                               <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                                {imgUsage.used} / {imgUsage.limit === -1 ? '∞' : imgUsage.limit} imágenes este mes
+                                {imgUsage.used} / {imgUsage.limit === -1 ? '∞' : imgUsage.limit} {i.contentImgUsage}
                               </span>
                             </>
                           ) : (
                             <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 500 }}>
-                              ⚠️ Tu plan no incluye generación de imágenes IA.
+                              ⚠️ {i.contentImgNoPlan}
                             </span>
                           )}
                         </div>
@@ -730,17 +730,17 @@ function PostModal({
                         style={{ fontSize: 12, minHeight: 64, resize: 'vertical' }}
                         value={imgPrompt}
                         onChange={(e) => setImgPrompt(e.target.value)}
-                        placeholder="Describe la imagen que quieres generar… Ej: 'Un café acogedor con luz cálida de tarde, estilo fotografía editorial'"
+                        placeholder={i.contentImgPromptPh}
                       />
 
                       {/* Controls row */}
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                         {isOwner && (
                           <div>
-                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>Proveedor</div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>{i.contentImgProvider}</div>
                             <select className="form-input" style={{ fontSize: 12, padding: '4px 8px' }}
                               value={imgProvider} onChange={(e) => setImgProvider(e.target.value)}>
-                              <option value="">Auto (primer disponible)</option>
+                              <option value="">{i.contentImgProviderAuto}</option>
                               {(!imgUsage || imgUsage.availableProviders.includes('openai')) && (
                                 <option value="openai">🟢 DALL-E 3 (OpenAI) — $0.04–$0.08</option>
                               )}
@@ -754,20 +754,20 @@ function PostModal({
                           </div>
                         )}
                         <div>
-                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>Tamaño</div>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>{i.contentImgSize}</div>
                           <select className="form-input" style={{ fontSize: 12, padding: '4px 8px' }}
                             value={imgSize} onChange={(e) => setImgSize(e.target.value)}>
-                            <option value="1024x1024">Cuadrado (1024×1024)</option>
-                            <option value="1792x1024">Horizontal (1792×1024)</option>
-                            <option value="1024x1792">Vertical (1024×1792)</option>
+                            <option value="1024x1024">{i.contentImgSquare}</option>
+                            <option value="1792x1024">{i.contentImgHoriz}</option>
+                            <option value="1024x1792">{i.contentImgVert}</option>
                           </select>
                         </div>
                         <div>
-                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>Estilo</div>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>{i.contentImgStyle}</div>
                           <select className="form-input" style={{ fontSize: 12, padding: '4px 8px' }}
                             value={imgStyle} onChange={(e) => setImgStyle(e.target.value)}>
-                            <option value="vivid">Vivid — dramático</option>
-                            <option value="natural">Natural — fotorrealista</option>
+                            <option value="vivid">{i.contentImgStyleVivid}</option>
+                            <option value="natural">{i.contentImgStyleNatural}</option>
                           </select>
                         </div>
                         <button
@@ -781,7 +781,7 @@ function PostModal({
                             whiteSpace: 'nowrap',
                           }}
                         >
-                          {imgGenerating ? '⏳ Generando…' : '✨ Generar imagen'}
+                          {imgGenerating ? i.contentImgGenerating : i.contentImgGenerate}
                         </button>
                       </div>
 
@@ -800,11 +800,11 @@ function PostModal({
                           />
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             <span style={{ fontSize: 12, fontWeight: 600, color: '#7c3aed' }}>
-                              ✨ Imagen generada{imgProviderUsed ? ` con ${
+                              ✨ {i.contentImgGeneratedWith}{imgProviderUsed ? ` — ${
                                 imgProviderUsed === 'openai' ? 'DALL-E 3' :
                                 imgProviderUsed === 'stability' ? 'Stable Diffusion XL' :
                                 imgProviderUsed === 'fal' ? 'Flux Schnell' : imgProviderUsed
-                              }` : ' con IA'}
+                              }` : ''}
                             </span>
                             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{imgSize} · {imgStyle}</span>
                             <div style={{ display: 'flex', gap: 6 }}>
@@ -812,12 +812,12 @@ function PostModal({
                                 type="button"
                                 onClick={applyGeneratedImage}
                                 style={{ padding: '4px 12px', borderRadius: 6, border: 'none', background: '#7c3aed', color: '#fff', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}
-                              >Usar como media</button>
+                              >{i.contentImgUse}</button>
                               <button
                                 type="button"
                                 onClick={() => { setImgPreview(''); }}
                                 style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11 }}
-                              >Descartar</button>
+                              >{i.contentImgDiscard}</button>
                             </div>
                           </div>
                         </div>

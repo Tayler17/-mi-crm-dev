@@ -206,7 +206,7 @@ export default function DealsPage() {
             style={{ flex: '0 1 150px', margin: 0, height: 36, fontSize: 13 }}
             value={filterDateFrom}
             onChange={(e) => setFilterDateFrom(e.target.value)}
-            title="Desde fecha"
+            title={i.dealDateFrom}
           />
 
           {/* Date to */}
@@ -216,7 +216,7 @@ export default function DealsPage() {
             style={{ flex: '0 1 150px', margin: 0, height: 36, fontSize: 13 }}
             value={filterDateTo}
             onChange={(e) => setFilterDateTo(e.target.value)}
-            title="Hasta fecha"
+            title={i.dealDateTo}
           />
 
           {/* Value min */}
@@ -224,7 +224,7 @@ export default function DealsPage() {
             type="number"
             className="form-input"
             style={{ flex: '0 1 110px', margin: 0, height: 36, fontSize: 13 }}
-            placeholder="$ mín"
+            placeholder={i.dealValMin}
             min={0}
             value={filterValueMin}
             onChange={(e) => setFilterValueMin(e.target.value)}
@@ -235,7 +235,7 @@ export default function DealsPage() {
             type="number"
             className="form-input"
             style={{ flex: '0 1 110px', margin: 0, height: 36, fontSize: 13 }}
-            placeholder="$ máx"
+            placeholder={i.dealValMax}
             min={0}
             value={filterValueMax}
             onChange={(e) => setFilterValueMax(e.target.value)}

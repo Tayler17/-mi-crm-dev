@@ -368,7 +368,7 @@ export default function HelpPage() {
               {!selectedArticle.isPublished && <span style={{ color: '#f59e0b', fontWeight: 600 }}>● {i.helpDraft}</span>}
               {(selectedArticle as any).isGlobal && (
                 <span style={{ padding: '2px 8px', borderRadius: 10, background: '#ede9fe', color: '#7c3aed', fontWeight: 700, fontSize: 11 }}>
-                  🌍 De la plataforma
+                  🌍 {i.helpGlobalBadge}
                 </span>
               )}
             </div>
@@ -437,7 +437,7 @@ export default function HelpPage() {
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '8px 10px', background: '#ede9fe', borderRadius: 6 }}>
                   <input type="checkbox" checked={catForm.isGlobal}
                     onChange={(e) => setCatForm({ ...catForm, isGlobal: e.target.checked })} />
-                  <span>🌍 <strong>Categoría global</strong> — visible para todos los tenants</span>
+                  <span>🌍 {i.helpGlobalCategory}</span>
                 </label>
               )}
             </div>
@@ -533,7 +533,7 @@ export default function HelpPage() {
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '4px 10px', background: '#ede9fe', borderRadius: 6 }}>
                     <input type="checkbox" checked={articleForm.isGlobal}
                       onChange={(e) => setArticleForm({ ...articleForm, isGlobal: e.target.checked })} />
-                    🌍 <strong>Artículo global</strong> (todos los tenants lo ven)
+                    🌍 {i.helpGlobalArticle}
                   </label>
                 )}
               </div>

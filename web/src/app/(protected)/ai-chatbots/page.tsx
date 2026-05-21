@@ -229,6 +229,8 @@ function ProviderBadge({ provider }: { provider: string }) {
 
 function TestChatPanel({ bot }: { bot: AiChatbot }) {
   type ChatMsg = { role: 'user' | 'bot'; text: string };
+  const { lang } = useLangCtx();
+  const i = APP[lang];
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -258,13 +260,13 @@ function TestChatPanel({ bot }: { bot: AiChatbot }) {
   return (
     <>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg)', flexShrink: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 13 }}>🧪 Probar bot</div>
+        <div style={{ fontWeight: 700, fontSize: 13 }}>{i.chatbotTestBtn}</div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{bot.provider} / {bot.model}</div>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {msgs.length === 0 && (
           <div style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center', padding: '20px 0' }}>
-            Escribe un mensaje para probar el bot
+            {i.chatbotTestPlaceholder}
           </div>
         )}
         {msgs.map((m, idx) => (
@@ -292,7 +294,7 @@ function TestChatPanel({ bot }: { bot: AiChatbot }) {
         <input
           className="form-input"
           style={{ flex: 1, fontSize: 12 }}
-          placeholder="Escribe un mensaje…"
+          placeholder={i.chatbotTestInput}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
@@ -652,24 +654,31 @@ function BotModal({
                       Plantillas de inicio rápido
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                      {BOT_TEMPLATES.map((tpl) => (
-                        <button
-                          key={tpl.id}
-                          onClick={() => applyTemplate(tpl)}
-                          style={{
-                            textAlign: 'left', padding: '10px 12px', borderRadius: 8,
-                            border: '2px solid var(--border)',
-                            background: (tpl.visualConfig.color ?? '#f1f5f9') + '60',
-                            cursor: 'pointer', transition: 'all 0.15s',
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--primary)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
-                        >
-                          <div style={{ fontSize: 22, marginBottom: 4 }}>{tpl.emoji}</div>
-                          <div style={{ fontWeight: 600, fontSize: 12 }}>{tpl.label}</div>
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{tpl.description}</div>
-                        </button>
-                      ))}
+                      {BOT_TEMPLATES.map((tpl) => {
+                        const tplDescMap: Record<string, string> = {
+                          sales: i.chatbotTplSalesDesc, support: i.chatbotTplSupportDesc,
+                          restaurant: i.chatbotTplRestaurantDesc, realestate: i.chatbotTplRealEstateDesc,
+                          logistics: i.chatbotTplLogisticsDesc, clinic: i.chatbotTplHealthDesc,
+                        };
+                        return (
+                          <button
+                            key={tpl.id}
+                            onClick={() => applyTemplate(tpl)}
+                            style={{
+                              textAlign: 'left', padding: '10px 12px', borderRadius: 8,
+                              border: '2px solid var(--border)',
+                              background: (tpl.visualConfig.color ?? '#f1f5f9') + '60',
+                              cursor: 'pointer', transition: 'all 0.15s',
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--primary)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+                          >
+                            <div style={{ fontSize: 22, marginBottom: 4 }}>{tpl.emoji}</div>
+                            <div style={{ fontWeight: 600, fontSize: 12 }}>{tpl.label}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{tplDescMap[tpl.id] ?? tpl.description}</div>
+                          </button>
+                        );
+                      })}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
                       💡 Al aplicar una plantilla se preconfigura el prompt y los mensajes. Puedes editarlos después.
@@ -694,7 +703,19 @@ function BotModal({
                   <div className="form-group" style={{ margin: 0 }}>
                     <label className="form-label">Industria / Sector</label>
                     <select className="form-input" value={form.visual_config.industry} onChange={(e) => updateVC({ industry: e.target.value })}>
-                      {INDUSTRY_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                      {INDUSTRY_OPTIONS.map((opt) => {
+                        const industryLabelMap: Record<string, string> = {
+                          general: i.chatbotIndustryGeneral, sales: i.chatbotIndustrySales,
+                          support: i.chatbotIndustrySupport, restaurant: i.chatbotIndustryRestaurant,
+                          realestate: i.chatbotIndustryRealEstate, logistics: i.chatbotIndustryLogistics,
+                          clinic: i.chatbotIndustryHealth, education: i.chatbotIndustryEducation,
+                          ecommerce: i.chatbotIndustryEcommerce, finance: i.chatbotIndustryFinance,
+                          legal: i.chatbotIndustryLegal, beauty: i.chatbotIndustryBeauty,
+                          tech: i.chatbotIndustryTech,
+                        };
+                        const icon = opt.label.split(' ')[0];
+                        return <option key={opt.value} value={opt.value}>{icon} {industryLabelMap[opt.value] ?? opt.label}</option>;
+                      })}
                     </select>
                   </div>
 
@@ -714,29 +735,41 @@ function BotModal({
                   <div>
                     <label className="form-label">Tono de comunicación</label>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-                      {TONE_OPTIONS.map((t) => (
-                        <button
-                          key={t.value}
-                          onClick={() => updateVC({ tone: t.value as VisualConfig['tone'] })}
-                          style={{
-                            padding: '10px 8px', borderRadius: 8,
-                            border: `2px solid ${form.visual_config.tone === t.value ? 'var(--primary)' : 'var(--border)'}`,
-                            background: form.visual_config.tone === t.value ? 'var(--primary)10' : 'var(--bg)',
-                            cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s',
-                          }}
-                        >
-                          <div style={{ fontSize: 20, marginBottom: 3 }}>{t.emoji}</div>
-                          <div style={{ fontWeight: 600, fontSize: 12 }}>{t.label}</div>
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{t.hint}</div>
-                        </button>
-                      ))}
+                      {TONE_OPTIONS.map((t) => {
+                        const toneLabelMap: Record<string, string> = {
+                          formal: i.chatbotToneFormal, professional: i.chatbotToneProfessional,
+                          friendly: i.chatbotToneFriendly, casual: i.chatbotToneCasual,
+                        };
+                        return (
+                          <button
+                            key={t.value}
+                            onClick={() => updateVC({ tone: t.value as VisualConfig['tone'] })}
+                            style={{
+                              padding: '10px 8px', borderRadius: 8,
+                              border: `2px solid ${form.visual_config.tone === t.value ? 'var(--primary)' : 'var(--border)'}`,
+                              background: form.visual_config.tone === t.value ? 'var(--primary)10' : 'var(--bg)',
+                              cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s',
+                            }}
+                          >
+                            <div style={{ fontSize: 20, marginBottom: 3 }}>{t.emoji}</div>
+                            <div style={{ fontWeight: 600, fontSize: 12 }}>{toneLabelMap[t.value] ?? t.label}</div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
                   <div className="form-group" style={{ margin: 0 }}>
                     <label className="form-label">Idioma de respuesta</label>
                     <select className="form-input" value={form.visual_config.language} onChange={(e) => updateVC({ language: e.target.value })}>
-                      {LANG_OPTIONS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+                      {LANG_OPTIONS.map((l) => {
+                        const langLabelMap: Record<string, string> = {
+                          es: i.chatbotLangEs, en: i.chatbotLangEn, pt: i.chatbotLangPt,
+                          fr: i.chatbotLangFr, de: i.chatbotLangDe, it: i.chatbotLangIt,
+                        };
+                        const flag = l.label.split(' ')[0];
+                        return <option key={l.value} value={l.value}>{flag} {langLabelMap[l.value] ?? l.label}</option>;
+                      })}
                     </select>
                   </div>
                 </div>

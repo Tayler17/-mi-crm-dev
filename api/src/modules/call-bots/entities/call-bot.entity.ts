@@ -74,6 +74,9 @@ export class CallBot {
   @Column({ name: 'created_by', nullable: true, type: 'uuid' })
   createdBy?: string;
 
+  @Column({ name: 'visual_config', type: 'jsonb', nullable: true })
+  visualConfig?: Record<string, any> | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

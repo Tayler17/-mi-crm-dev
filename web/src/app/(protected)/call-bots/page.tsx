@@ -674,23 +674,30 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
                   ⚡ Plantillas para empezar rápido
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                  {CALL_BOT_TEMPLATES.map((tmpl) => (
-                    <button
-                      key={tmpl.label}
-                      onClick={() => applyTemplate(tmpl)}
-                      style={{
-                        padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)',
-                        background: 'var(--bg)', cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s',
-                        display: 'flex', flexDirection: 'column', gap: 4,
-                      }}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = tmpl.color; (e.currentTarget as HTMLElement).style.background = `${tmpl.color}10`; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLElement).style.background = 'var(--bg)'; }}
-                    >
-                      <div style={{ fontSize: 20 }}>{tmpl.emoji}</div>
-                      <div style={{ fontSize: 12, fontWeight: 600 }}>{tmpl.label}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{tmpl.industry}</div>
-                    </button>
-                  ))}
+                  {CALL_BOT_TEMPLATES.map((tmpl) => {
+                    const callTplLabelMap: Record<string, string> = {
+                      'Ventas': i.callbotTplSales, 'Citas': i.callbotTplAppointments,
+                      'Clínica': i.callbotTplClinic, 'Logística': i.callbotTplLogistics,
+                      'Hotel': i.callbotTplHotel, 'Restaurante': i.callbotTplRestaurant,
+                    };
+                    return (
+                      <button
+                        key={tmpl.label}
+                        onClick={() => applyTemplate(tmpl)}
+                        style={{
+                          padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)',
+                          background: 'var(--bg)', cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s',
+                          display: 'flex', flexDirection: 'column', gap: 4,
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = tmpl.color; (e.currentTarget as HTMLElement).style.background = `${tmpl.color}10`; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLElement).style.background = 'var(--bg)'; }}
+                      >
+                        <div style={{ fontSize: 20 }}>{tmpl.emoji}</div>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>{callTplLabelMap[tmpl.label] ?? tmpl.label}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{tmpl.industry}</div>
+                      </button>
+                    );
+                  })}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
                   Aplicar una plantilla rellena el emoji, color, mensajes y prompt base. Puedes personalizar después.
@@ -713,7 +720,7 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
               </div>
 
               <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Industria / Sector</label>
+                <label className="form-label">{i.callbotIndustryLabel}</label>
                 <select className="form-input" value={vc.industry} onChange={(e) => updateVC('industry', e.target.value)}>
                   <option value="">— Seleccionar —</option>
                   {INDUSTRY_OPTIONS.map((ind) => <option key={ind} value={ind}>{ind}</option>)}
@@ -729,23 +736,33 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
               </div>
 
               <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Tono de comunicación</label>
+                <label className="form-label">{i.callbotToneLabel}</label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
-                  {TONE_OPTIONS.map((t) => (
-                    <label key={t.value} style={{
-                      display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px',
-                      border: `2px solid ${vc.tone === t.value ? 'var(--primary)' : 'var(--border)'}`,
-                      borderRadius: 8, cursor: 'pointer',
-                      background: vc.tone === t.value ? 'rgba(99,102,241,0.05)' : 'var(--bg)',
-                    }}>
-                      <input type="radio" name="tone" value={t.value} checked={vc.tone === t.value}
-                        onChange={() => updateVC('tone', t.value as VisualConfig['tone'])} style={{ marginTop: 2 }} />
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 13 }}>{t.label}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t.desc}</div>
-                      </div>
-                    </label>
-                  ))}
+                  {TONE_OPTIONS.map((t) => {
+                    const callToneLabelMap: Record<string, string> = {
+                      formal: i.callbotToneFormal, professional: i.callbotToneProfessional,
+                      friendly: i.callbotToneFriendly, casual: i.callbotToneCasual,
+                    };
+                    const callToneDescMap: Record<string, string> = {
+                      formal: i.callbotToneProto, professional: i.callbotToneProfDesc,
+                      friendly: i.callbotToneFriendlyDesc, casual: i.callbotToneCasualDesc,
+                    };
+                    return (
+                      <label key={t.value} style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px',
+                        border: `2px solid ${vc.tone === t.value ? 'var(--primary)' : 'var(--border)'}`,
+                        borderRadius: 8, cursor: 'pointer',
+                        background: vc.tone === t.value ? 'rgba(99,102,241,0.05)' : 'var(--bg)',
+                      }}>
+                        <input type="radio" name="tone" value={t.value} checked={vc.tone === t.value}
+                          onChange={() => updateVC('tone', t.value as VisualConfig['tone'])} style={{ marginTop: 2 }} />
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{callToneLabelMap[t.value] ?? t.label}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{callToneDescMap[t.value] ?? t.desc}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
 
