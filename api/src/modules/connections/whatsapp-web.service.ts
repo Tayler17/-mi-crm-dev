@@ -327,7 +327,7 @@ export class WhatsappWebService implements OnModuleInit {
         auth: authState,
         printQRInTerminal: false,
         logger: silentLog,
-        browser: Browsers.macOS('Chrome'),
+        browser: Browsers.ubuntu('Chrome'),
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 25000,
         markOnlineOnConnect: false,
