@@ -25,6 +25,7 @@ type PlanForm = {
   hasCallBots: boolean; hasAiChatbots: boolean; hasAutomations: boolean;
   hasFlows: boolean; hasReports: boolean; hasApiAccess: boolean; hasWebhooks: boolean;
   allowOwnApiKeys: boolean; allowOwnTwilio: boolean; allowOverage: boolean;
+  hasImageGen: boolean; maxImageGenMonth: number;
   extraMessagePrice: number; extraCallMinutePrice: number;
   isActive: boolean; isPublic: boolean;
   stripePriceId: string;
@@ -46,6 +47,7 @@ function planToForm(p: Plan | null): PlanForm {
     hasReports: p?.has_reports ?? false, hasApiAccess: p?.has_api_access ?? false,
     hasWebhooks: p?.has_webhooks ?? false, allowOwnApiKeys: p?.allow_own_api_keys ?? false,
     allowOwnTwilio: p?.allow_own_twilio ?? false, allowOverage: p?.allow_overage ?? false,
+    hasImageGen: p?.has_image_gen ?? false, maxImageGenMonth: p?.max_image_gen_month ?? 0,
     extraMessagePrice: p?.extra_message_price ?? 0, extraCallMinutePrice: p?.extra_call_minute_price ?? 0,
     isActive: p?.is_active ?? true, isPublic: p?.is_public ?? true,
     stripePriceId: p?.stripe_price_id ?? '',
@@ -209,6 +211,7 @@ function PlanModal({ plan, onSave, onClose }: { plan: Plan | null; onSave: (f: P
               <LimitField label="AI Chatbots"        field="maxAiChatbots" />
               <LimitField label="Mensajes IA/mes"    field="maxMessagesMonth" />
               <LimitField label="Minutos llamada/mes" field="maxCallMinutes" />
+              <LimitField label="🎨 Imágenes IA/mes" field="maxImageGenMonth" />
             </div>
           )}
 
@@ -243,6 +246,7 @@ function PlanModal({ plan, onSave, onClose }: { plan: Plan | null; onSave: (f: P
                 <Toggle label="Reportes"          field="hasReports" />
                 <Toggle label="API Access"        field="hasApiAccess" />
                 <Toggle label="Webhooks"          field="hasWebhooks" />
+                <Toggle label="🎨 Generación de imágenes IA (DALL-E 3)" field="hasImageGen" />
                 <Toggle label="🔑 API Keys propias de IA (tenant usa su OpenAI/Anthropic/Gemini)" field="allowOwnApiKeys" />
                 <Toggle label="📞 Twilio propio (tenant configura su cuenta Twilio)" field="allowOwnTwilio" />
                 <Toggle label="📈 Permitir uso adicional (se cobrará automáticamente)" field="allowOverage" />
@@ -533,6 +537,7 @@ export default function PlansPage() {
                     { key: 'has_flows',       label: '🔀 Flujos' },
                     { key: 'has_call_bots',   label: '🤖 Call Bots' },
                     { key: 'has_ai_chatbots', label: '🧠 AI Chatbots' },
+                    { key: 'has_image_gen',   label: '🎨 Imagen IA' },
                     { key: 'has_reports',     label: '📊 Reportes' },
                     { key: 'has_webhooks',       label: '🔌 Webhooks' },
                     { key: 'has_api_access',     label: '🔑 API' },

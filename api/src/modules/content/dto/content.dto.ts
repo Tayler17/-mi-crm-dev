@@ -95,3 +95,20 @@ export class GenerateContentDto {
   @IsOptional() @IsString()
   tone?: string;
 }
+
+const IMAGE_SIZES  = ['1024x1024', '1792x1024', '1024x1792'] as const;
+const IMAGE_STYLES = ['vivid', 'natural'] as const;
+
+export class GenerateImageDto {
+  @IsString()
+  prompt: string;
+
+  @IsOptional() @IsIn(IMAGE_SIZES)
+  size?: string;
+
+  @IsOptional() @IsIn(IMAGE_STYLES)
+  style?: string;
+
+  @IsOptional() @IsString()
+  contentPostId?: string;
+}

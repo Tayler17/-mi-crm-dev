@@ -1,13 +1,26 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import axios from 'axios';
+import { createWriteStream, mkdirSync, existsSync } from 'fs';
+import { join, extname } from 'path';
+import { randomBytes } from 'crypto';
 import { ContentPost } from './entities/content-post.entity';
-import { CreateContentPostDto, UpdateContentPostDto, GenerateContentDto } from './dto/content.dto';
+import { CreateContentPostDto, UpdateContentPostDto, GenerateContentDto, GenerateImageDto } from './dto/content.dto';
 import { CONTENT_PUBLISH_QUEUE, ContentPublishJobData } from './content-publish.constants';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
+
+// Approximate DALL-E 3 cost per image in USD
+const DALLE_COST: Record<string, number> = {
+  '1024x1024': 0.040,
+  '1792x1024': 0.080,
+  '1024x1792': 0.080,
+};
+
+const IMAGE_UPLOAD_DIR = join(process.cwd(), 'uploads', 'content');
 
 const JOB_ID = (postId: string) => `content-${postId}`;
 
@@ -19,6 +32,7 @@ export class ContentService {
     @InjectRepository(ContentPost) private readonly repo: Repository<ContentPost>,
     @InjectQueue(CONTENT_PUBLISH_QUEUE) private readonly queue: Queue<ContentPublishJobData>,
     private readonly platformSettings: PlatformSettingsService,
+    @InjectDataSource() private readonly db: DataSource,
   ) {}
 
   findAll(tenantId: string, status?: string, channel?: string) {
@@ -233,6 +247,138 @@ REGLAS GENERALES:
 - Responde ÚNICAMENTE con el contenido final listo para publicar.
 - Aporta valor real: datos, consejos prácticos o perspectiva única.
 - Adapta perfectamente el formato al canal indicado.`;
+  }
+
+  // ── AI Image Generation ───────────────────────────────────────────────────────
+
+  async generateImage(
+    tenantId: string,
+    userId: string,
+    dto: GenerateImageDto,
+  ): Promise<{ url: string; id: string; costUsd: number }> {
+    const size  = dto.size  ?? '1024x1024';
+    const style = dto.style ?? 'vivid';
+
+    // ── 1. Plan gate ─────────────────────────────────────────────────────────
+    const [planRow] = await this.db.query(
+      `SELECT p.has_image_gen, p.max_image_gen_month, p.allow_own_api_keys,
+              t.settings,
+              (SELECT COUNT(*)::int FROM ai_image_generations
+               WHERE tenant_id = $1 AND created_at >= date_trunc('month', NOW())) AS used_this_month
+       FROM tenants t
+       LEFT JOIN plans p ON p.id = t.plan_id
+       WHERE t.id = $1`,
+      [tenantId],
+    );
+
+    if (!planRow || planRow.has_image_gen === false) {
+      throw new ForbiddenException('La generación de imágenes con IA no está incluida en tu plan. Actualiza para acceder a esta función.');
+    }
+
+    const limit = Number(planRow.max_image_gen_month);
+    const used  = Number(planRow.used_this_month ?? 0);
+    if (limit > 0 && used >= limit) {
+      throw new ForbiddenException(
+        `Has alcanzado el límite de ${limit} imágenes IA este mes. Actualiza tu plan para generar más.`,
+      );
+    }
+
+    // ── 2. Resolve API key ────────────────────────────────────────────────────
+    let apiKey: string | undefined;
+    if (planRow.allow_own_api_keys) {
+      const tenantAiKeys = planRow.settings?.aiKeys ?? {};
+      apiKey = tenantAiKeys['openai'] || undefined;
+    }
+    if (!apiKey) {
+      const platformAI = await this.platformSettings.getAI();
+      if (platformAI.provider === 'openai' && platformAI.apiKey) {
+        apiKey = platformAI.apiKey;
+      }
+    }
+    if (!apiKey) {
+      throw new ForbiddenException('No hay una API key de OpenAI configurada. Configura una en Settings → Platform → AI.');
+    }
+
+    // ── 3. Call DALL-E 3 ──────────────────────────────────────────────────────
+    const dalleRes = await axios.post(
+      'https://api.openai.com/v1/images/generations',
+      {
+        model:           'dall-e-3',
+        prompt:          dto.prompt,
+        n:               1,
+        size,
+        style,
+        response_format: 'url',
+      },
+      { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 60000 },
+    );
+
+    const tempUrl: string = dalleRes.data?.data?.[0]?.url;
+    if (!tempUrl) throw new Error('DALL-E no devolvió una URL de imagen válida');
+
+    // ── 4. Download & save permanently ───────────────────────────────────────
+    const localUrl = await this.downloadAndSave(tempUrl);
+
+    // ── 5. Record in history ─────────────────────────────────────────────────
+    const cost = DALLE_COST[size] ?? 0.040;
+    const [record] = await this.db.query(
+      `INSERT INTO ai_image_generations
+         (tenant_id, user_id, prompt, image_url, provider, model, size, style, cost_usd, content_post_id)
+       VALUES ($1,$2,$3,$4,'openai','dall-e-3',$5,$6,$7,$8)
+       RETURNING id`,
+      [tenantId, userId, dto.prompt, localUrl, size, style, cost, dto.contentPostId ?? null],
+    );
+
+    this.logger.log(`[image-gen] Tenant ${tenantId} generated image: ${localUrl} (${size}, cost=$${cost})`);
+    return { url: localUrl, id: record.id, costUsd: cost };
+  }
+
+  async getImageHistory(tenantId: string): Promise<any[]> {
+    return this.db.query(
+      `SELECT id, prompt, image_url, size, style, cost_usd, content_post_id, created_at
+       FROM ai_image_generations
+       WHERE tenant_id = $1
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [tenantId],
+    );
+  }
+
+  async getImageUsage(tenantId: string): Promise<{ used: number; limit: number; hasAccess: boolean }> {
+    const [row] = await this.db.query(
+      `SELECT p.has_image_gen, p.max_image_gen_month,
+              (SELECT COUNT(*)::int FROM ai_image_generations
+               WHERE tenant_id = $1 AND created_at >= date_trunc('month', NOW())) AS used_this_month
+       FROM tenants t
+       LEFT JOIN plans p ON p.id = t.plan_id
+       WHERE t.id = $1`,
+      [tenantId],
+    );
+
+    if (!row) return { used: 0, limit: 0, hasAccess: false };
+    return {
+      used:      Number(row.used_this_month ?? 0),
+      limit:     Number(row.max_image_gen_month ?? 0),
+      hasAccess: row.has_image_gen === true,
+    };
+  }
+
+  /** Downloads a temporary URL and saves to uploads/content/. Returns the local URL path. */
+  private async downloadAndSave(tempUrl: string): Promise<string> {
+    if (!existsSync(IMAGE_UPLOAD_DIR)) mkdirSync(IMAGE_UPLOAD_DIR, { recursive: true });
+
+    const filename = `ai-${Date.now()}-${randomBytes(6).toString('hex')}.png`;
+    const dest     = join(IMAGE_UPLOAD_DIR, filename);
+
+    const response = await axios.get(tempUrl, { responseType: 'stream', timeout: 60000 });
+    await new Promise<void>((resolve, reject) => {
+      const writer = createWriteStream(dest);
+      response.data.pipe(writer);
+      writer.on('finish', resolve);
+      writer.on('error',  reject);
+    });
+
+    return `/uploads/content/${filename}`;
   }
 
   // ── Template fallback ─────────────────────────────────────────────────────────

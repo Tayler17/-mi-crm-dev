@@ -7,7 +7,7 @@ import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { ContentService } from './content.service';
-import { CreateContentPostDto, UpdateContentPostDto, GenerateContentDto } from './dto/content.dto';
+import { CreateContentPostDto, UpdateContentPostDto, GenerateContentDto, GenerateImageDto } from './dto/content.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 const CONTENT_UPLOAD_DIR = join(process.cwd(), 'uploads', 'content');
@@ -29,6 +29,21 @@ export class ContentController {
   @Post('generate')
   generate(@Body() dto: GenerateContentDto) {
     return this.svc.generate(dto);
+  }
+
+  @Post('generate-image')
+  generateImage(@Request() req: any, @Body() dto: GenerateImageDto) {
+    return this.svc.generateImage(req.user.tenantId, req.user.userId, dto);
+  }
+
+  @Get('image-gen/history')
+  getImageHistory(@Request() req: any) {
+    return this.svc.getImageHistory(req.user.tenantId);
+  }
+
+  @Get('image-gen/usage')
+  getImageUsage(@Request() req: any) {
+    return this.svc.getImageUsage(req.user.tenantId);
   }
 
   @Post('upload')

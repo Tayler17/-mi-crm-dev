@@ -1091,12 +1091,25 @@ export interface Plan {
   allow_overage: boolean;
   extra_message_price: number;
   extra_call_minute_price: number;
+  has_image_gen: boolean;
+  max_image_gen_month: number;
   is_active: boolean;
   is_public: boolean;
   position: number;
   color: string;
   created_at: string;
   stripe_price_id?: string;
+}
+
+export interface AiImageGeneration {
+  id: string;
+  prompt: string;
+  image_url: string;
+  size: string;
+  style: string;
+  cost_usd: number;
+  content_post_id?: string;
+  created_at: string;
 }
 
 export interface TenantWithPlan {
@@ -1738,6 +1751,15 @@ export const generateContentPost = (data: { title: string; channel: string; keyw
 
 export const getContentPostSchedule = (id: string) =>
   apiGet<{ scheduled: boolean; state?: string; runAt?: string | null }>(`/content/${id}/schedule`);
+
+export const generateContentImage = (data: { prompt: string; size?: string; style?: string; contentPostId?: string }) =>
+  apiPost<{ url: string; id: string; costUsd: number }>('/content/generate-image', data);
+
+export const getContentImageHistory = () =>
+  apiGet<AiImageGeneration[]>('/content/image-gen/history');
+
+export const getContentImageUsage = () =>
+  apiGet<{ used: number; limit: number; hasAccess: boolean }>('/content/image-gen/usage');
 
 export const uploadContentMedia = async (file: File): Promise<{ url: string; mediaType: string }> => {
   const form = new FormData();

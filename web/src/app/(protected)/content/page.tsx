@@ -2,8 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  ContentPost, getContentPosts, createContentPost, updateContentPost,
-  deleteContentPost, generateContentPost, uploadContentMedia, API_URL,
+  ContentPost, AiImageGeneration,
+  getContentPosts, createContentPost, updateContentPost,
+  deleteContentPost, generateContentPost, uploadContentMedia,
+  generateContentImage, getContentImageHistory, getContentImageUsage,
+  API_URL,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
 import { APP } from '@/lib/i18n/app';
@@ -280,9 +283,19 @@ function PostModal({
   const [mediaUrl,    setMediaUrl]    = useState(post?.mediaUrl    ?? '');
   const [mediaType,   setMediaType]   = useState(post?.mediaType   ?? 'image');
   const [altText,     setAltText]     = useState(post?.altText     ?? '');
-  const [mediaTab,    setMediaTab]    = useState<'upload' | 'url'>('upload');
+  const [mediaTab,    setMediaTab]    = useState<'upload' | 'url' | 'ai'>('upload');
   const [uploading,    setUploading]    = useState(false);
   const [uploadError,  setUploadError]  = useState('');
+  // AI image generation
+  const [imgPrompt,    setImgPrompt]    = useState('');
+  const [imgSize,      setImgSize]      = useState('1024x1024');
+  const [imgStyle,     setImgStyle]     = useState('vivid');
+  const [imgGenerating,setImgGenerating]= useState(false);
+  const [imgError,     setImgError]     = useState('');
+  const [imgPreview,   setImgPreview]   = useState('');
+  const [imgUsage,     setImgUsage]     = useState<{ used: number; limit: number; hasAccess: boolean } | null>(null);
+  const [imgHistory,   setImgHistory]   = useState<AiImageGeneration[]>([]);
+  const [imgHistOpen,  setImgHistOpen]  = useState(false);
   const [saving,       setSaving]       = useState(false);
   const [error,        setError]        = useState('');
   const [aiOpen,      setAiOpen]      = useState(false);
@@ -292,6 +305,44 @@ function PostModal({
   const [aiGenerated, setAiGenerated] = useState<boolean | null>(null);
   const bodyRef  = useRef<HTMLTextAreaElement>(null);
   const fileRef  = useRef<HTMLInputElement>(null);
+
+  // Load image usage when the AI tab is selected
+  async function handleOpenAiImageTab() {
+    setMediaTab('ai');
+    setImgError('');
+    if (!imgUsage) {
+      try { setImgUsage(await getContentImageUsage()); } catch {}
+    }
+    // Pre-fill prompt from post title
+    if (!imgPrompt && title.trim()) {
+      setImgPrompt(title.trim());
+    }
+  }
+
+  async function handleGenerateImage() {
+    if (!imgPrompt.trim()) { setImgError('Escribe una descripción para la imagen.'); return; }
+    setImgGenerating(true); setImgError(''); setImgPreview('');
+    try {
+      const result = await generateContentImage({ prompt: imgPrompt, size: imgSize, style: imgStyle });
+      setImgPreview(`${API_URL}${result.url}`);
+      // Refresh usage count
+      try { setImgUsage(await getContentImageUsage()); } catch {}
+    } catch (err: any) {
+      setImgError(err?.message ?? 'Error al generar la imagen.');
+    } finally {
+      setImgGenerating(false);
+    }
+  }
+
+  function applyGeneratedImage() {
+    if (!imgPreview) return;
+    // Convert full API_URL to relative for storage — strip origin prefix
+    const path = imgPreview.replace(API_URL, '');
+    setMediaUrl(imgPreview);
+    setMediaType('image');
+    setImgPreview('');
+    setMediaTab('upload'); // go back to normal tab
+  }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -579,20 +630,24 @@ function PostModal({
 
                 {/* Tab bar */}
                 <div style={{ display: 'flex', borderRadius: '6px 6px 0 0', overflow: 'hidden', border: '1px solid var(--border)', borderBottom: 'none', width: 'fit-content' }}>
-                  {(['upload', 'url'] as const).map((tab) => (
-                    <button
-                      key={tab}
-                      type="button"
-                      onClick={() => setMediaTab(tab)}
-                      style={{
-                        padding: '5px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none',
-                        background: mediaTab === tab ? 'var(--primary)' : 'var(--bg-secondary)',
-                        color: mediaTab === tab ? '#fff' : 'var(--text-muted)',
-                      }}
-                    >
-                      {tab === 'upload' ? i.contentUploadFile : i.contentExternalUrl}
-                    </button>
-                  ))}
+                  <button type="button" onClick={() => setMediaTab('upload')}
+                    style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none',
+                      background: mediaTab === 'upload' ? 'var(--primary)' : 'var(--bg-secondary)',
+                      color: mediaTab === 'upload' ? '#fff' : 'var(--text-muted)' }}>
+                    {i.contentUploadFile}
+                  </button>
+                  <button type="button" onClick={() => setMediaTab('url')}
+                    style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none',
+                      background: mediaTab === 'url' ? 'var(--primary)' : 'var(--bg-secondary)',
+                      color: mediaTab === 'url' ? '#fff' : 'var(--text-muted)' }}>
+                    {i.contentExternalUrl}
+                  </button>
+                  <button type="button" onClick={handleOpenAiImageTab}
+                    style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none',
+                      background: mediaTab === 'ai' ? '#7c3aed' : 'var(--bg-secondary)',
+                      color: mediaTab === 'ai' ? '#fff' : '#7c3aed' }}>
+                    🎨 IA
+                  </button>
                 </div>
 
                 <div style={{ border: '1px solid var(--border)', borderRadius: '0 6px 6px 6px', padding: 12, background: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -624,7 +679,7 @@ function PostModal({
                         <span style={{ fontSize: 11, color: '#ef4444', fontWeight: 500 }}>⚠ {uploadError}</span>
                       )}
                     </div>
-                  ) : (
+                  ) : mediaTab === 'url' ? (
                     /* External URL */
                     <input
                       className="form-input"
@@ -633,6 +688,110 @@ function PostModal({
                       onChange={(e) => { setMediaUrl(e.target.value); if (e.target.value) setMediaType('image'); }}
                       placeholder="https://ejemplo.com/imagen.jpg"
                     />
+                  ) : (
+                    /* AI Image Generator */
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {/* Usage indicator */}
+                      {imgUsage && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {imgUsage.hasAccess ? (
+                            <>
+                              <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
+                                <div style={{
+                                  height: '100%', borderRadius: 3,
+                                  background: imgUsage.limit === -1 ? '#7c3aed'
+                                    : imgUsage.used >= imgUsage.limit ? '#ef4444' : '#7c3aed',
+                                  width: imgUsage.limit === -1 ? '20%'
+                                    : `${Math.min(100, (imgUsage.used / imgUsage.limit) * 100)}%`,
+                                }} />
+                              </div>
+                              <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                                {imgUsage.used} / {imgUsage.limit === -1 ? '∞' : imgUsage.limit} imágenes este mes
+                              </span>
+                            </>
+                          ) : (
+                            <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 500 }}>
+                              ⚠️ Tu plan no incluye generación de imágenes IA.
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Prompt */}
+                      <textarea
+                        className="form-input"
+                        style={{ fontSize: 12, minHeight: 64, resize: 'vertical' }}
+                        value={imgPrompt}
+                        onChange={(e) => setImgPrompt(e.target.value)}
+                        placeholder="Describe la imagen que quieres generar… Ej: 'Un café acogedor con luz cálida de tarde, estilo fotografía editorial'"
+                      />
+
+                      {/* Controls row */}
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>Tamaño</div>
+                          <select className="form-input" style={{ fontSize: 12, padding: '4px 8px' }}
+                            value={imgSize} onChange={(e) => setImgSize(e.target.value)}>
+                            <option value="1024x1024">Cuadrado (1024×1024) — $0.04</option>
+                            <option value="1792x1024">Horizontal (1792×1024) — $0.08</option>
+                            <option value="1024x1792">Vertical (1024×1792) — $0.08</option>
+                          </select>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 3 }}>Estilo</div>
+                          <select className="form-input" style={{ fontSize: 12, padding: '4px 8px' }}
+                            value={imgStyle} onChange={(e) => setImgStyle(e.target.value)}>
+                            <option value="vivid">Vivid — más dramático y llamativo</option>
+                            <option value="natural">Natural — más fotorrealista</option>
+                          </select>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={imgGenerating || !imgPrompt.trim()}
+                          onClick={handleGenerateImage}
+                          style={{
+                            padding: '6px 18px', borderRadius: 6, border: 'none',
+                            background: '#7c3aed', color: '#fff', cursor: imgGenerating ? 'not-allowed' : 'pointer',
+                            fontSize: 12, fontWeight: 700, opacity: imgGenerating || !imgPrompt.trim() ? 0.6 : 1,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {imgGenerating ? '⏳ Generando…' : '✨ Generar imagen'}
+                        </button>
+                      </div>
+
+                      {/* Error */}
+                      {imgError && (
+                        <span style={{ fontSize: 12, color: '#dc2626', fontWeight: 500 }}>⚠️ {imgError}</span>
+                      )}
+
+                      {/* Generated preview */}
+                      {imgPreview && (
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: 10, background: '#f5f3ff', borderRadius: 8, border: '1px solid #ddd6fe' }}>
+                          <img
+                            src={imgPreview}
+                            alt="Imagen generada"
+                            style={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 6, border: '1px solid #ddd6fe', flexShrink: 0 }}
+                          />
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#7c3aed' }}>✨ Imagen generada con DALL-E 3</span>
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{imgSize} · {imgStyle}</span>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button
+                                type="button"
+                                onClick={applyGeneratedImage}
+                                style={{ padding: '4px 12px', borderRadius: 6, border: 'none', background: '#7c3aed', color: '#fff', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}
+                              >Usar como media</button>
+                              <button
+                                type="button"
+                                onClick={() => { setImgPreview(''); }}
+                                style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11 }}
+                              >Descartar</button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {/* Thumbnail preview */}

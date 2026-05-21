@@ -109,8 +109,9 @@ export class PlansController {
          has_call_bots, has_ai_chatbots, has_automations, has_flows, has_reports,
          has_api_access, has_webhooks, allow_own_api_keys, allow_own_twilio, allow_overage,
          extra_message_price, extra_call_minute_price,
+         has_image_gen, max_image_gen_month,
          is_active, is_public, stripe_price_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)
        RETURNING *`,
       [
         dto.name, dto.slug, dto.description ?? null, dto.price ?? 0, dto.currency ?? 'USD',
@@ -124,6 +125,7 @@ export class PlansController {
         dto.hasApiAccess ?? false, dto.hasWebhooks ?? false,
         dto.allowOwnApiKeys ?? false, dto.allowOwnTwilio ?? false, dto.allowOverage ?? false,
         dto.extraMessagePrice ?? 0, dto.extraCallMinutePrice ?? 0,
+        dto.hasImageGen ?? false, dto.maxImageGenMonth ?? 0,
         dto.isActive ?? true, dto.isPublic ?? true,
         dto.stripePriceId ?? null,
       ],
@@ -146,6 +148,7 @@ export class PlansController {
       hasAutomations: 'has_automations', hasFlows: 'has_flows', hasReports: 'has_reports',
       hasApiAccess: 'has_api_access', hasWebhooks: 'has_webhooks',
       allowOwnApiKeys: 'allow_own_api_keys', allowOwnTwilio: 'allow_own_twilio', allowOverage: 'allow_overage',
+      hasImageGen: 'has_image_gen', maxImageGenMonth: 'max_image_gen_month',
       extraMessagePrice: 'extra_message_price', extraCallMinutePrice: 'extra_call_minute_price',
       isActive: 'is_active', isPublic: 'is_public', stripePriceId: 'stripe_price_id',
     };
