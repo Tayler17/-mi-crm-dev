@@ -1065,7 +1065,17 @@ export default function ContentPage() {
               </div>
 
               <div>{channelBadge(p.channel, CHANNEL_MAP)}</div>
-              <div>{statusBadge(p.status, STATUS_MAP)}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {statusBadge(p.status, STATUS_MAP)}
+                {p.errorMessage && (
+                  <span title={p.errorMessage} style={{
+                    fontSize: 10, padding: '2px 6px', borderRadius: 4,
+                    background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca',
+                    cursor: 'help', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    display: 'block',
+                  }}>⚠️ Error al publicar</span>
+                )}
+              </div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {p.assignedTo ?? '—'}
               </div>

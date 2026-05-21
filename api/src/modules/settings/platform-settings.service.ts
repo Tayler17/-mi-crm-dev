@@ -31,11 +31,17 @@ export const PLATFORM_KEYS = [
   'smtp.user',
   'smtp.password',
   'smtp.from',
+  'twitter.api_key',
+  'twitter.api_secret',
+  'twitter.access_token',
+  'twitter.access_secret',
+  'linkedin.access_token',
+  'linkedin.org_id',
 ] as const;
 
 export type PlatformKey = (typeof PLATFORM_KEYS)[number];
 
-const SENSITIVE = new Set<PlatformKey>(['ai.api_key', 'voice.auth_token', 'meta.app_secret', 'meta.verify_token', 'elevenlabs.api_key', 'stripe.secret_key', 'stripe.webhook_secret', 'backup.s3_secret_key', 'smtp.password']);
+const SENSITIVE = new Set<PlatformKey>(['ai.api_key', 'voice.auth_token', 'meta.app_secret', 'meta.verify_token', 'elevenlabs.api_key', 'stripe.secret_key', 'stripe.webhook_secret', 'backup.s3_secret_key', 'smtp.password', 'twitter.api_secret', 'twitter.access_secret', 'linkedin.access_token']);
 const MASK = '••••••••';
 
 /** Maps each platform key to its env-var fallback (for local dev / initial setup). */
@@ -68,6 +74,12 @@ const ENV_FALLBACKS: Record<PlatformKey, string> = {
   'smtp.user':     'SMTP_USER',
   'smtp.password': 'SMTP_PASS',
   'smtp.from':     'SMTP_FROM',
+  'twitter.api_key':       'TWITTER_API_KEY',
+  'twitter.api_secret':    'TWITTER_API_SECRET',
+  'twitter.access_token':  'TWITTER_ACCESS_TOKEN',
+  'twitter.access_secret': 'TWITTER_ACCESS_SECRET',
+  'linkedin.access_token': 'LINKEDIN_ACCESS_TOKEN',
+  'linkedin.org_id':       'LINKEDIN_ORG_ID',
 };
 
 @Injectable()
@@ -155,6 +167,26 @@ export class PlatformSettingsService {
       user:     await this.get('smtp.user'),
       password: await this.get('smtp.password'),
       from:     await this.get('smtp.from'),
+    };
+  }
+
+  /** Get Twitter/X credentials in one shot. */
+  async getTwitter(): Promise<{ apiKey: string; apiSecret: string; accessToken: string; accessSecret: string }> {
+    await this.loadCache();
+    return {
+      apiKey:      await this.get('twitter.api_key'),
+      apiSecret:   await this.get('twitter.api_secret'),
+      accessToken: await this.get('twitter.access_token'),
+      accessSecret:await this.get('twitter.access_secret'),
+    };
+  }
+
+  /** Get LinkedIn credentials in one shot. */
+  async getLinkedIn(): Promise<{ accessToken: string; orgId: string }> {
+    await this.loadCache();
+    return {
+      accessToken: await this.get('linkedin.access_token'),
+      orgId:       await this.get('linkedin.org_id'),
     };
   }
 

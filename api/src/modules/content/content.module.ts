@@ -7,11 +7,13 @@ import { ContentService } from './content.service';
 import { ContentController } from './content.controller';
 import { ContentPublishProcessor } from './content-publish.processor';
 import { CONTENT_PUBLISH_QUEUE } from './content-publish.constants';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([ContentPost, Connection]),
     BullModule.registerQueue({ name: CONTENT_PUBLISH_QUEUE }),
+    SettingsModule,
   ],
   controllers: [ContentController],
   providers: [ContentService, ContentPublishProcessor],

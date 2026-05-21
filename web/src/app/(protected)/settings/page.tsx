@@ -824,6 +824,8 @@ export default function SettingsPage() {
     'backup.s3_access_key': '', 'backup.s3_secret_key': '', 'backup.s3_prefix': 'backups/',
     'smtp.host': '', 'smtp.port': '587', 'smtp.secure': 'false',
     'smtp.user': '', 'smtp.password': '', 'smtp.from': '',
+    'twitter.api_key': '', 'twitter.api_secret': '', 'twitter.access_token': '', 'twitter.access_secret': '',
+    'linkedin.access_token': '', 'linkedin.org_id': '',
   });
   const [platformSaving, setPlatformSaving] = useState(false);
   const [platformSaved, setPlatformSaved] = useState(false);
@@ -911,6 +913,12 @@ export default function SettingsPage() {
         'smtp.user':     p['smtp.user']?.value     || '',
         'smtp.password': p['smtp.password']?.masked ? '••••••••' : (p['smtp.password']?.value || ''),
         'smtp.from':     p['smtp.from']?.value     || '',
+        'twitter.api_key':       p['twitter.api_key']?.value       || '',
+        'twitter.api_secret':    p['twitter.api_secret']?.masked   ? '••••••••' : (p['twitter.api_secret']?.value    || ''),
+        'twitter.access_token':  p['twitter.access_token']?.value  || '',
+        'twitter.access_secret': p['twitter.access_secret']?.masked? '••••••••' : (p['twitter.access_secret']?.value || ''),
+        'linkedin.access_token': p['linkedin.access_token']?.masked ? '••••••••' : (p['linkedin.access_token']?.value || ''),
+        'linkedin.org_id':       p['linkedin.org_id']?.value       || '',
       });
     }
     setAnnouncements(a);
@@ -1821,6 +1829,71 @@ export default function SettingsPage() {
                 value={platformForm['smtp.from']}
                 onChange={(e) => setPlatformForm((p) => ({ ...p, 'smtp.from': e.target.value }))}
                 placeholder="AutoMarkIQ <noreply@tuempresa.com>" />
+            </Row>
+          </Section>
+
+          <Section title="🐦 Twitter / X — Publicación de contenido">
+            <div style={{ padding: '8px 12px', background: '#eff6ff', borderRadius: 8, marginBottom: 16, fontSize: 12, color: '#1d4ed8' }}>
+              Credenciales OAuth 1.0a de la Twitter Developer App. Se usan al publicar posts de Marketing Content en el canal Twitter/X.
+              Requiere una App con permisos de <strong>Read and Write</strong> en el portal <a href="https://developer.twitter.com" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8' }}>developer.twitter.com</a>.
+            </div>
+            <Row label="API Key (Consumer Key)" hint="Clave de consumidor de la App de Twitter">
+              <input className="form-input" style={{ maxWidth: 420 }}
+                value={platformForm['twitter.api_key']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'twitter.api_key': e.target.value }))}
+                placeholder="xxxxxxxxxxxxxxxxxxxxxxxxx" />
+            </Row>
+            <Row label="API Secret (Consumer Secret)" hint="Secreto del consumidor — se almacena cifrado">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" type="password" style={{ maxWidth: 420 }}
+                  value={platformForm['twitter.api_secret']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'twitter.api_secret': e.target.value }))}
+                  placeholder="••••••••" />
+                {platformCfg['twitter.api_secret']?.masked && platformForm['twitter.api_secret'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>✓ Configurado</span>
+                )}
+              </div>
+            </Row>
+            <Row label="Access Token" hint="Token de acceso de la cuenta que publicará">
+              <input className="form-input" style={{ maxWidth: 420 }}
+                value={platformForm['twitter.access_token']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'twitter.access_token': e.target.value }))}
+                placeholder="000000000-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+            </Row>
+            <Row label="Access Token Secret" hint="Secreto del token de acceso — se almacena cifrado">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" type="password" style={{ maxWidth: 420 }}
+                  value={platformForm['twitter.access_secret']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'twitter.access_secret': e.target.value }))}
+                  placeholder="••••••••" />
+                {platformCfg['twitter.access_secret']?.masked && platformForm['twitter.access_secret'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>✓ Configurado</span>
+                )}
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="💼 LinkedIn — Publicación de contenido">
+            <div style={{ padding: '8px 12px', background: '#eff6ff', borderRadius: 8, marginBottom: 16, fontSize: 12, color: '#1d4ed8' }}>
+              Token OAuth 2.0 de LinkedIn con scope <strong>w_organization_social</strong>. Se usa al publicar posts en el canal LinkedIn desde Marketing Content.
+              Obtén el token en <a href="https://www.linkedin.com/developers/" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8' }}>linkedin.com/developers</a>.
+            </div>
+            <Row label="Access Token" hint="Token Bearer de LinkedIn — se almacena cifrado">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" type="password" style={{ maxWidth: 420 }}
+                  value={platformForm['linkedin.access_token']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'linkedin.access_token': e.target.value }))}
+                  placeholder="••••••••" />
+                {platformCfg['linkedin.access_token']?.masked && platformForm['linkedin.access_token'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>✓ Configurado</span>
+                )}
+              </div>
+            </Row>
+            <Row label="Organization ID" hint="ID numérico de tu página de empresa en LinkedIn (ej. 12345678)">
+              <input className="form-input" style={{ maxWidth: 240 }}
+                value={platformForm['linkedin.org_id']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'linkedin.org_id': e.target.value }))}
+                placeholder="12345678" />
             </Row>
           </Section>
 

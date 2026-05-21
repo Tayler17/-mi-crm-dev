@@ -53,6 +53,9 @@ export class ContentPost {
   @Column({ name: 'alt_text', nullable: true })
   altText?: string;
 
+  @Column({ name: 'error_message', type: 'text', nullable: true })
+  errorMessage?: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

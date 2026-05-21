@@ -1711,6 +1711,7 @@ export interface ContentPost {
   mediaUrl?: string;
   mediaType?: string;
   altText?: string;
+  errorMessage?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -6,10 +6,13 @@ import { Job } from 'bullmq';
 import { CONTENT_PUBLISH_QUEUE, ContentPublishJobData } from './content-publish.constants';
 import { ContentPost } from './entities/content-post.entity';
 import { Connection } from '../connections/connection.entity';
+import { PlatformSettingsService } from '../settings/platform-settings.service';
 import { publishToInstagram } from './publishers/instagram.publisher';
 import { publishToFacebook } from './publishers/facebook.publisher';
+import { publishToTwitter } from './publishers/twitter.publisher';
+import { publishToLinkedIn } from './publishers/linkedin.publisher';
 
-/** Maps content channel names → Connection.channelType values */
+/** Maps content channel names → Connection.channelType values (tenant-level connections) */
 const CHANNEL_TO_CONNECTION: Record<string, string> = {
   instagram: 'instagram',
   facebook:  'facebook',
@@ -22,6 +25,7 @@ export class ContentPublishProcessor extends WorkerHost {
   constructor(
     @InjectRepository(ContentPost) private readonly posts: Repository<ContentPost>,
     @InjectRepository(Connection)  private readonly connections: Repository<Connection>,
+    private readonly platformSettings: PlatformSettingsService,
   ) {
     super();
   }
@@ -40,7 +44,7 @@ export class ContentPublishProcessor extends WorkerHost {
       return;
     }
 
-    // Find an active, connected connection for this channel
+    // Find an active connection for tenant-level channels (Instagram, Facebook)
     const connectionType = CHANNEL_TO_CONNECTION[post.channel];
     const connection = connectionType
       ? await this.connections.findOne({
@@ -50,10 +54,11 @@ export class ContentPublishProcessor extends WorkerHost {
 
     await this.publishToChannel(post, connection);
 
-    // Mark as published
+    // Mark as published and clear any previous error message
     await this.posts.update(postId, {
-      status:      'published',
-      publishedAt: new Date(),
+      status:       'published',
+      publishedAt:  new Date(),
+      errorMessage: undefined,
     } as Partial<ContentPost>);
 
     this.logger.log(`[content-publish] Post ${postId} → published (channel: ${post.channel})`);
@@ -73,9 +78,20 @@ export class ContentPublishProcessor extends WorkerHost {
         await publishToFacebook(post, connection.credentials);
         break;
 
+      case 'twitter': {
+        const twitterCreds = await this.platformSettings.getTwitter();
+        await publishToTwitter(post, twitterCreds);
+        break;
+      }
+
+      case 'linkedin': {
+        const linkedinCreds = await this.platformSettings.getLinkedIn();
+        await publishToLinkedIn(post, linkedinCreds);
+        break;
+      }
+
       default:
-        // blog, linkedin, twitter, youtube, other — no external API yet.
-        // The post is simply marked as published.
+        // blog, youtube, other — no external API. Post is simply marked as published.
         this.logger.log(`[content-publish] Canal "${post.channel}" no tiene conector externo — marcando como publicado`);
         break;
     }
@@ -94,7 +110,7 @@ export class ContentPublishProcessor extends WorkerHost {
       await this.posts.update(job.data.postId, {
         status:       'approved', // keep as approved so user can retry manually
         errorMessage: `Publicación fallida: ${err.message}`,
-      } as any);
+      } as Partial<ContentPost>);
     }
   }
 
