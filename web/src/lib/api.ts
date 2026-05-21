@@ -633,6 +633,16 @@ export interface CallBot {
   handledCalls: number;
   transferredCalls: number;
   voiceCatalogId?: string;
+  visualConfig?: {
+    emoji?: string;
+    color?: string;
+    businessName?: string;
+    industry?: string;
+    products?: string;
+    tone?: string;
+    restrictions?: string;
+    specialInstructions?: string;
+  } | null;
   createdAt: string;
   updatedAt: string;
 }
