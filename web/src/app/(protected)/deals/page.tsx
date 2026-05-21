@@ -30,6 +30,10 @@ export default function DealsPage() {
   const [filterStatus, setFilterStatus]     = useState('');
   const [filterPriority, setFilterPriority] = useState('');
   const [filterPipeline, setFilterPipeline] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo]     = useState('');
+  const [filterValueMin, setFilterValueMin] = useState('');
+  const [filterValueMax, setFilterValueMax] = useState('');
 
   // ─── create modal
   const [showCreate, setShowCreate] = useState(false);
@@ -72,19 +76,30 @@ export default function DealsPage() {
   // ─── filtered list
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
+    const dateFrom = filterDateFrom ? new Date(filterDateFrom).getTime() : null;
+    const dateTo   = filterDateTo   ? new Date(filterDateTo + 'T23:59:59').getTime() : null;
+    const valMin   = filterValueMin !== '' ? Number(filterValueMin) : null;
+    const valMax   = filterValueMax !== '' ? Number(filterValueMax) : null;
     return deals.filter((d) => {
       if (q && !d.title.toLowerCase().includes(q) && !d.contact?.fullName.toLowerCase().includes(q)) return false;
       if (filterStatus && d.status !== filterStatus) return false;
       if (filterPriority && d.priority !== filterPriority) return false;
       if (filterPipeline && stageMap[d.stageId] !== filterPipeline) return false;
+      if (dateFrom !== null && new Date(d.createdAt).getTime() < dateFrom) return false;
+      if (dateTo   !== null && new Date(d.createdAt).getTime() > dateTo)   return false;
+      if (valMin !== null && Number(d.value) < valMin) return false;
+      if (valMax !== null && Number(d.value) > valMax) return false;
       return true;
     });
-  }, [deals, search, filterStatus, filterPriority, filterPipeline, stageMap]);
+  }, [deals, search, filterStatus, filterPriority, filterPipeline, stageMap, filterDateFrom, filterDateTo, filterValueMin, filterValueMax]);
 
   const total = filtered.reduce((s, d) => s + Number(d.value || 0), 0);
 
-  const hasFilters = search || filterStatus || filterPriority || filterPipeline;
-  function clearFilters() { setSearch(''); setFilterStatus(''); setFilterPriority(''); setFilterPipeline(''); }
+  const hasFilters = search || filterStatus || filterPriority || filterPipeline || filterDateFrom || filterDateTo || filterValueMin || filterValueMax;
+  function clearFilters() {
+    setSearch(''); setFilterStatus(''); setFilterPriority(''); setFilterPipeline('');
+    setFilterDateFrom(''); setFilterDateTo(''); setFilterValueMin(''); setFilterValueMax('');
+  }
 
   // ─── create
   function openCreate() {
@@ -183,6 +198,48 @@ export default function DealsPage() {
             <option value="">{i.allPipelines}</option>
             {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
+
+          {/* Date from */}
+          <input
+            type="date"
+            className="form-input"
+            style={{ flex: '0 1 150px', margin: 0, height: 36, fontSize: 13 }}
+            value={filterDateFrom}
+            onChange={(e) => setFilterDateFrom(e.target.value)}
+            title="Desde fecha"
+          />
+
+          {/* Date to */}
+          <input
+            type="date"
+            className="form-input"
+            style={{ flex: '0 1 150px', margin: 0, height: 36, fontSize: 13 }}
+            value={filterDateTo}
+            onChange={(e) => setFilterDateTo(e.target.value)}
+            title="Hasta fecha"
+          />
+
+          {/* Value min */}
+          <input
+            type="number"
+            className="form-input"
+            style={{ flex: '0 1 110px', margin: 0, height: 36, fontSize: 13 }}
+            placeholder="$ mín"
+            min={0}
+            value={filterValueMin}
+            onChange={(e) => setFilterValueMin(e.target.value)}
+          />
+
+          {/* Value max */}
+          <input
+            type="number"
+            className="form-input"
+            style={{ flex: '0 1 110px', margin: 0, height: 36, fontSize: 13 }}
+            placeholder="$ máx"
+            min={0}
+            value={filterValueMax}
+            onChange={(e) => setFilterValueMax(e.target.value)}
+          />
 
           {/* Clear */}
           {hasFilters && (
