@@ -1077,6 +1077,7 @@ export interface Plan {
   has_api_access: boolean;
   has_webhooks: boolean;
   allow_own_api_keys: boolean;
+  allow_own_twilio: boolean;
   allow_overage: boolean;
   extra_message_price: number;
   extra_call_minute_price: number;

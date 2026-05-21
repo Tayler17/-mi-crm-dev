@@ -24,7 +24,7 @@ type PlanForm = {
   maxMessagesMonth: number; maxCallMinutes: number;
   hasCallBots: boolean; hasAiChatbots: boolean; hasAutomations: boolean;
   hasFlows: boolean; hasReports: boolean; hasApiAccess: boolean; hasWebhooks: boolean;
-  allowOwnApiKeys: boolean; allowOverage: boolean;
+  allowOwnApiKeys: boolean; allowOwnTwilio: boolean; allowOverage: boolean;
   extraMessagePrice: number; extraCallMinutePrice: number;
   isActive: boolean; isPublic: boolean;
   stripePriceId: string;
@@ -45,7 +45,7 @@ function planToForm(p: Plan | null): PlanForm {
     hasAutomations: p?.has_automations ?? true, hasFlows: p?.has_flows ?? true,
     hasReports: p?.has_reports ?? false, hasApiAccess: p?.has_api_access ?? false,
     hasWebhooks: p?.has_webhooks ?? false, allowOwnApiKeys: p?.allow_own_api_keys ?? false,
-    allowOverage: p?.allow_overage ?? false,
+    allowOwnTwilio: p?.allow_own_twilio ?? false, allowOverage: p?.allow_overage ?? false,
     extraMessagePrice: p?.extra_message_price ?? 0, extraCallMinutePrice: p?.extra_call_minute_price ?? 0,
     isActive: p?.is_active ?? true, isPublic: p?.is_public ?? true,
     stripePriceId: p?.stripe_price_id ?? '',
@@ -243,7 +243,8 @@ function PlanModal({ plan, onSave, onClose }: { plan: Plan | null; onSave: (f: P
                 <Toggle label="Reportes"          field="hasReports" />
                 <Toggle label="API Access"        field="hasApiAccess" />
                 <Toggle label="Webhooks"          field="hasWebhooks" />
-                <Toggle label="🔑 API Keys propias (tenant usa su OpenAI/Twilio)" field="allowOwnApiKeys" />
+                <Toggle label="🔑 API Keys propias de IA (tenant usa su OpenAI/Anthropic/Gemini)" field="allowOwnApiKeys" />
+                <Toggle label="📞 Twilio propio (tenant configura su cuenta Twilio)" field="allowOwnTwilio" />
                 <Toggle label="📈 Permitir uso adicional (se cobrará automáticamente)" field="allowOverage" />
               </div>
             </div>
@@ -536,6 +537,7 @@ export default function PlansPage() {
                     { key: 'has_webhooks',       label: '🔌 Webhooks' },
                     { key: 'has_api_access',     label: '🔑 API' },
                     { key: 'allow_own_api_keys', label: '🗝 API Keys propias' },
+                    { key: 'allow_own_twilio',   label: '📞 Twilio propio' },
                   ].filter((f) => (p as any)[f.key]).map((f) => (
                     <span key={f.key} style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: `${p.color}18`, color: p.color, fontWeight: 500 }}>
                       {f.label}
