@@ -1,19 +1,24 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import axios from 'axios';
 import { ContentPost } from './entities/content-post.entity';
 import { CreateContentPostDto, UpdateContentPostDto, GenerateContentDto } from './dto/content.dto';
 import { CONTENT_PUBLISH_QUEUE, ContentPublishJobData } from './content-publish.constants';
+import { PlatformSettingsService } from '../settings/platform-settings.service';
 
 const JOB_ID = (postId: string) => `content-${postId}`;
 
 @Injectable()
 export class ContentService {
+  private readonly logger = new Logger(ContentService.name);
+
   constructor(
     @InjectRepository(ContentPost) private readonly repo: Repository<ContentPost>,
     @InjectQueue(CONTENT_PUBLISH_QUEUE) private readonly queue: Queue<ContentPublishJobData>,
+    private readonly platformSettings: PlatformSettingsService,
   ) {}
 
   findAll(tenantId: string, status?: string, channel?: string) {
@@ -135,7 +140,104 @@ export class ContentService {
 
   // ── AI content generator ──────────────────────────────────────────────────────
 
-  generate(dto: GenerateContentDto): { body: string } {
+  async generate(dto: GenerateContentDto): Promise<{ body: string; aiGenerated: boolean }> {
+    // Try real AI first
+    try {
+      const aiBody = await this.generateWithAI(dto);
+      if (aiBody) return { body: aiBody, aiGenerated: true };
+    } catch (e: any) {
+      this.logger.warn(`[generate] AI call failed, falling back to template: ${e.message}`);
+    }
+
+    // Fallback — hardcoded template
+    return { body: this.generateFromTemplate(dto), aiGenerated: false };
+  }
+
+  // ── AI generation ─────────────────────────────────────────────────────────────
+
+  private async generateWithAI(dto: GenerateContentDto): Promise<string | null> {
+    const platformAI = await this.platformSettings.getAI();
+    if (!platformAI?.apiKey) return null;
+
+    const prompt = this.buildGenerationPrompt(dto);
+
+    if (platformAI.provider === 'openai') {
+      const res = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: platformAI.model ?? 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.7,
+          max_tokens: 800,
+        },
+        { headers: { Authorization: `Bearer ${platformAI.apiKey}` }, timeout: 25000 },
+      );
+      return res.data.choices?.[0]?.message?.content?.trim() ?? null;
+    }
+
+    if (platformAI.provider === 'anthropic') {
+      const res = await axios.post(
+        'https://api.anthropic.com/v1/messages',
+        {
+          model: platformAI.model ?? 'claude-haiku-4-5-20251001',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 800,
+        },
+        { headers: { 'x-api-key': platformAI.apiKey, 'anthropic-version': '2023-06-01' }, timeout: 25000 },
+      );
+      return res.data.content?.[0]?.text?.trim() ?? null;
+    }
+
+    if (platformAI.provider === 'gemini') {
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${platformAI.model ?? 'gemini-1.5-flash'}:generateContent?key=${platformAI.apiKey}`,
+        { contents: [{ parts: [{ text: prompt }] }] },
+        { timeout: 25000 },
+      );
+      return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
+    }
+
+    return null;
+  }
+
+  private buildGenerationPrompt(dto: GenerateContentDto): string {
+    const kw = (dto.keywords ?? '').split(',').map((k) => k.trim()).filter(Boolean);
+    const tone = dto.tone ?? 'profesional';
+    const hashtags = kw.map((k) => `#${k.replace(/\s+/g, '')}`).join(' ');
+
+    const channelGuides: Record<string, string> = {
+      instagram: `Post para Instagram: máx. 2200 caracteres. Usa emojis estratégicamente. Incluye un CTA al final. Termina con hashtags relevantes.`,
+      facebook:  `Post para Facebook: puede ser más largo (hasta 400 palabras). Conversacional, narrativo. Incluye un CTA claro. Agrega hashtags al final si corresponde.`,
+      linkedin:  `Artículo/post para LinkedIn: tono profesional. Usa separadores visuales o bullet points (→). Comparte un insight o aprendizaje. Termina con una pregunta que invite al debate. Agrega hashtags al final.`,
+      twitter:   `Tweet para Twitter/X: MÁXIMO 280 caracteres en total (incluyendo hashtags). Directo, impactante. Un solo mensaje conciso.`,
+      youtube:   `Descripción para YouTube: incluye una descripción corta de 2 líneas al inicio (importante para SEO), luego timestamps de ejemplo, links o recursos, y hashtags al final.`,
+      blog:      `Artículo de blog en Markdown (usa ## y ### para secciones). Mínimo 3 secciones: Introducción, Desarrollo (al menos 2 puntos), Conclusión. Tono ${tone}, informativo y con valor real para el lector.`,
+    };
+
+    const guide = channelGuides[dto.channel] ?? channelGuides.blog;
+
+    return `Eres un experto en marketing de contenidos. Escribe contenido de alta calidad para redes sociales o blog.
+
+CANAL: ${dto.channel.toUpperCase()}
+TÍTULO / TEMA: ${dto.title}
+TONO: ${tone}
+${kw.length ? `PALABRAS CLAVE: ${kw.join(', ')}` : ''}
+${hashtags ? `HASHTAGS A INCLUIR: ${hashtags}` : ''}
+
+INSTRUCCIONES ESPECÍFICAS:
+${guide}
+
+REGLAS GENERALES:
+- Escribe en español.
+- NO incluyas explicaciones previas, ni "Aquí está el post:", ni comillas al inicio/fin.
+- Responde ÚNICAMENTE con el contenido final listo para publicar.
+- Aporta valor real: datos, consejos prácticos o perspectiva única.
+- Adapta perfectamente el formato al canal indicado.`;
+  }
+
+  // ── Template fallback ─────────────────────────────────────────────────────────
+
+  private generateFromTemplate(dto: GenerateContentDto): string {
     const kw = (dto.keywords ?? '')
       .split(',')
       .map((k) => k.trim())
@@ -242,6 +344,6 @@ export class ContentService {
       ].filter((l) => l !== undefined).join('\n'),
     };
 
-    return { body: templates[dto.channel] ?? templates.blog };
+    return templates[dto.channel] ?? templates.blog;
   }
 }

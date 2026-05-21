@@ -289,6 +289,7 @@ function PostModal({
   const [aiKw,        setAiKw]        = useState('');
   const [aiTone,      setAiTone]      = useState('profesional');
   const [aiLoading,   setAiLoading]   = useState(false);
+  const [aiGenerated, setAiGenerated] = useState<boolean | null>(null);
   const bodyRef  = useRef<HTMLTextAreaElement>(null);
   const fileRef  = useRef<HTMLInputElement>(null);
 
@@ -347,6 +348,7 @@ function PostModal({
     try {
       const result = await generateContentPost({ title: title.trim(), channel, keywords: aiKw, tone: aiTone });
       setBody(result.body);
+      setAiGenerated(result.aiGenerated ?? false);
       setAiOpen(false);
     } catch {
       setError(i.error);
@@ -485,18 +487,30 @@ function PostModal({
                   ))}
 
                   {/* AI generate button */}
-                  <button
-                    type="button"
-                    onClick={() => setAiOpen((o) => !o)}
-                    style={{
-                      marginLeft: 'auto', padding: '3px 10px', borderRadius: 6,
-                      border: '1px solid #7c3aed', background: aiOpen ? '#7c3aed' : 'transparent',
-                      color: aiOpen ? '#fff' : '#7c3aed', cursor: 'pointer', fontSize: 11, fontWeight: 600,
-                      display: 'flex', alignItems: 'center', gap: 4,
-                    }}
-                  >
-                    {i.contentGenerateAI}
-                  </button>
+                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {aiGenerated === true && (
+                      <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 10, background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe', fontWeight: 600 }}>
+                        ✨ IA generado
+                      </span>
+                    )}
+                    {aiGenerated === false && (
+                      <span title="Configura un proveedor de IA en Settings → Platform para usar generación real" style={{ fontSize: 10, padding: '2px 7px', borderRadius: 10, background: '#fef9c3', color: '#a16207', border: '1px solid #fde68a', fontWeight: 600, cursor: 'help' }}>
+                        📋 Plantilla
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setAiOpen((o) => !o)}
+                      style={{
+                        padding: '3px 10px', borderRadius: 6,
+                        border: '1px solid #7c3aed', background: aiOpen ? '#7c3aed' : 'transparent',
+                        color: aiOpen ? '#fff' : '#7c3aed', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                        display: 'flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      {i.contentGenerateAI}
+                    </button>
+                  </div>
                 </div>
 
                 {/* AI generator panel */}
