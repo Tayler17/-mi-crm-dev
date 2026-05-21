@@ -22,6 +22,7 @@ import {
   createVoice,
   updateVoice,
   deleteVoice,
+  improveAiChatbotPrompt,
   API_URL,
   CallBot,
   CallLog,
@@ -33,6 +34,158 @@ import {
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
 import { APP } from '@/lib/i18n/app';
+
+// ── Visual Config types ────────────────────────────────────────────────────────
+
+type VisualConfig = {
+  emoji: string;
+  color: string;
+  businessName: string;
+  industry: string;
+  products: string;
+  tone: 'formal' | 'professional' | 'friendly' | 'casual';
+  restrictions: string;
+  specialInstructions: string;
+};
+
+const DEFAULT_VISUAL_CONFIG: VisualConfig = {
+  emoji: '📞',
+  color: '#10b981',
+  businessName: '',
+  industry: '',
+  products: '',
+  tone: 'professional',
+  restrictions: '',
+  specialInstructions: '',
+};
+
+const COMMON_EMOJIS = [
+  '📞','🤖','📱','🎙️','🔊','💼','🏥','🍕','🚚','🏨',
+  '🛒','💊','🏦','✈️','🏗️','🎓','🏡','🔧','⭐','🌟',
+  '💎','🎯','🚀','💡','🌿','🎪','🎭','🎬',
+];
+
+const AVATAR_COLORS = [
+  '#10b981','#6366f1','#f59e0b','#ef4444','#3b82f6',
+  '#8b5cf6','#ec4899','#14b8a6','#f97316','#64748b',
+];
+
+const TONE_OPTIONS = [
+  { value: 'formal',       label: 'Formal',       desc: 'Protocolar, muy respetuoso' },
+  { value: 'professional', label: 'Profesional',   desc: 'Claro y directo (recomendado)' },
+  { value: 'friendly',     label: 'Amigable',      desc: 'Cálido y cercano' },
+  { value: 'casual',       label: 'Casual',        desc: 'Relajado e informal' },
+];
+
+const INDUSTRY_OPTIONS = [
+  'Salud y clínicas','Restaurantes y food','Logística y envíos','Inmobiliaria',
+  'Ventas y retail','Hotelería y turismo','Educación','Banca y finanzas',
+  'Tecnología','Construcción','Automotriz','Seguros','Legal','Otro',
+];
+
+// ── Call Bot templates ─────────────────────────────────────────────────────────
+
+type BotTemplate = {
+  label: string;
+  emoji: string;
+  color: string;
+  industry: string;
+  tone: VisualConfig['tone'];
+  welcomeMessage: string;
+  fallbackMessage: string;
+  handoffKeyword: string;
+  specialInstructions: string;
+  systemPrompt: string;
+};
+
+const CALL_BOT_TEMPLATES: BotTemplate[] = [
+  {
+    label: 'Ventas', emoji: '🛒', color: '#10b981', industry: 'Ventas y retail',
+    tone: 'professional',
+    welcomeMessage: 'Hola, gracias por llamar. Soy el asistente de ventas. ¿En qué puedo ayudarte hoy?',
+    fallbackMessage: 'Lo siento, no entendí. ¿Podrías repetirlo con otras palabras?',
+    handoffKeyword: 'agente',
+    specialInstructions: 'Si el cliente está listo para comprar, transfiere a un agente.',
+    systemPrompt: 'Eres un asistente de ventas por teléfono, amable y efectivo. Tu objetivo es calificar prospectos y agendar citas con el equipo comercial. Sé conciso: cada respuesta debe durar menos de 15 segundos. Habla de forma natural, sin listas ni bullets. Si el cliente dice "agente", transfiere la llamada.',
+  },
+  {
+    label: 'Citas', emoji: '📅', color: '#6366f1', industry: 'Salud y clínicas',
+    tone: 'friendly',
+    welcomeMessage: '¡Hola! Te llama nuestro asistente de citas. ¿Querías agendar o tienes alguna pregunta?',
+    fallbackMessage: 'Perdona, no te escuché bien. ¿Puedes repetirlo?',
+    handoffKeyword: 'humano',
+    specialInstructions: 'Pregunta nombre, fecha preferida y motivo de la cita. Confirma los datos antes de guardar.',
+    systemPrompt: 'Eres un asistente de agendamiento de citas por teléfono. Tu único objetivo es tomar los datos del cliente (nombre, fecha, hora y motivo) para agendar una cita. Sé amable y breve. Confirma cada dato antes de continuar. Si el cliente dice "humano", transfiere la llamada.',
+  },
+  {
+    label: 'Clínica', emoji: '🏥', color: '#ef4444', industry: 'Salud y clínicas',
+    tone: 'formal',
+    welcomeMessage: 'Consultorio médico, buenos días. Soy el asistente virtual. ¿En qué le puedo ayudar?',
+    fallbackMessage: 'Disculpe, no le escuché con claridad. ¿Podría repetirlo?',
+    handoffKeyword: 'recepcion',
+    specialInstructions: 'Para urgencias médicas, transfiere inmediatamente. No dar diagnósticos.',
+    systemPrompt: 'Eres el asistente de voz de una clínica médica. Ayudas a los pacientes a agendar citas, obtener información general y resolver dudas administrativas. NUNCA ofrezcas diagnósticos médicos. Para urgencias, transfiere de inmediato. Sé formal y empático. Habla con claridad y brevedad.',
+  },
+  {
+    label: 'Logística', emoji: '🚚', color: '#f59e0b', industry: 'Logística y envíos',
+    tone: 'professional',
+    welcomeMessage: 'Servicio de rastreo, hola. Dime tu número de guía o pedido para ayudarte.',
+    fallbackMessage: 'No pude entender el número. ¿Puedes dictarlo dígito por dígito?',
+    handoffKeyword: 'soporte',
+    specialInstructions: 'Pide número de guía. Si el paquete está retrasado más de 3 días, transfiere a soporte.',
+    systemPrompt: 'Eres el asistente de rastreo de envíos por teléfono. Ayudas a los clientes a consultar el estado de sus paquetes por número de guía. Sé directo y claro. Si el cliente no tiene el número de guía, pídele nombre y correo. Para problemas complejos, transfiere a soporte diciendo que lo vas a conectar.',
+  },
+  {
+    label: 'Hotel', emoji: '🏨', color: '#8b5cf6', industry: 'Hotelería y turismo',
+    tone: 'friendly',
+    welcomeMessage: '¡Bienvenido! Soy el asistente del hotel. ¿Deseas hacer una reservación o tienes alguna pregunta?',
+    fallbackMessage: 'Lo siento, no entendí. ¿Puedes repetir tu solicitud?',
+    handoffKeyword: 'recepcion',
+    specialInstructions: 'Pregunta fechas, número de personas y tipo de habitación. Confirma disponibilidad.',
+    systemPrompt: 'Eres el asistente de reservaciones de un hotel por teléfono. Ayudas a los huéspedes a consultar disponibilidad, tarifas y hacer reservaciones. Sé amable y hospitalario. Toma los datos: fechas de entrada y salida, número de adultos y niños, y tipo de habitación preferida. Confirma siempre los datos.',
+  },
+  {
+    label: 'Restaurante', emoji: '🍕', color: '#ec4899', industry: 'Restaurantes y food',
+    tone: 'friendly',
+    welcomeMessage: '¡Hola! Gracias por llamar. ¿Quieres hacer una reservación o tienes alguna pregunta?',
+    fallbackMessage: '¿Podrías repetir? Quiero asegurarme de entenderte bien.',
+    handoffKeyword: 'mesero',
+    specialInstructions: 'Para reservas: pregunta fecha, hora y número de personas. Máximo 20 personas por mesa.',
+    systemPrompt: 'Eres el asistente de voz de un restaurante. Ayudas a los clientes con reservaciones, información del menú y horarios. Para reservaciones, necesitas: fecha, hora y número de comensales. Sé simpático y eficiente. Menciona nuestros platillos especiales si el cliente pregunta por el menú.',
+  },
+];
+
+// ── Prompt generator for voice bots ───────────────────────────────────────────
+
+function generateCallPromptFromVisual(vc: VisualConfig, botName: string): string {
+  const parts: string[] = [];
+  const biz = vc.businessName || botName || 'nuestra empresa';
+
+  const toneMap: Record<string, string> = {
+    formal: 'muy formal y protocolar',
+    professional: 'profesional y claro',
+    friendly: 'amigable y cálido',
+    casual: 'casual y cercano',
+  };
+
+  parts.push(`Eres ${botName || 'un asistente'} de ${biz}, un asistente de voz inteligente que atiende llamadas telefónicas.`);
+  parts.push(`Tu estilo de comunicación es ${toneMap[vc.tone] || 'profesional'}.`);
+
+  if (vc.industry) parts.push(`Trabajas en el sector de ${vc.industry}.`);
+  if (vc.products) parts.push(`Productos/servicios que ofrecemos: ${vc.products}.`);
+
+  parts.push('\nREGLAS DE COMUNICACIÓN VOCAL:');
+  parts.push('- Sé conciso: las respuestas deben durar máximo 15-20 segundos al escucharlas.');
+  parts.push('- Habla de forma natural, como en una conversación telefónica real.');
+  parts.push('- Evita listas, bullets o markdown — solo texto fluido y conversacional.');
+  parts.push('- Confirma lo que entendiste cuando el cliente da datos importantes.');
+  parts.push('- Si no entiendes, pide amablemente que repita.');
+
+  if (vc.restrictions) parts.push(`\nRESTRICCIONES IMPORTANTES:\n${vc.restrictions}`);
+  if (vc.specialInstructions) parts.push(`\nINSTRUCCIONES ADICIONALES:\n${vc.specialInstructions}`);
+
+  return parts.join('\n');
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -221,6 +374,8 @@ type BotForm = {
   queueIds: string[];
   transferToNumber: string;
   voiceCatalogId: string;
+  visualConfig: VisualConfig;
+  promptMode: 'visual' | 'advanced';
 };
 
 function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
@@ -229,7 +384,7 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
 }) {
   const { lang } = useLangCtx();
   const i = APP[lang];
-  const [tab, setTab] = useState<'basic' | 'ai' | 'knowledge'>('basic');
+  const [tab, setTab] = useState<'identity' | 'business' | 'behavior' | 'config' | 'voice' | 'knowledge'>('identity');
   const pc = bot?.providerConfig ?? {};
 
   const [availableNumbers, setAvailableNumbers] = useState<string[]>([]);
@@ -292,6 +447,20 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
     setKbSources((p) => p.filter((s) => s.id !== sourceId));
   }
 
+  // ── Init form ────────────────────────────────────────────────────────────────
+  const rawVC = bot?.visualConfig ?? {};
+  const validTones: VisualConfig['tone'][] = ['formal', 'professional', 'friendly', 'casual'];
+  const initVC: VisualConfig = {
+    ...DEFAULT_VISUAL_CONFIG,
+    ...rawVC,
+    tone: validTones.includes(rawVC.tone as VisualConfig['tone'])
+      ? (rawVC.tone as VisualConfig['tone'])
+      : DEFAULT_VISUAL_CONFIG.tone,
+  };
+
+  const hasVisualConfig = !!(bot?.visualConfig && Object.keys(bot.visualConfig).length > 0);
+  const initPromptMode: BotForm['promptMode'] = hasVisualConfig ? 'visual' : 'advanced';
+
   const [form, setForm] = useState<BotForm>({
     name: bot?.name ?? '',
     phoneNumber: bot?.phoneNumber ?? '',
@@ -309,24 +478,87 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
     queueIds: bot?.queueIds ?? [],
     transferToNumber: pc.transferToNumber ?? '',
     voiceCatalogId: (bot as any)?.voiceCatalogId ?? '',
+    visualConfig: initVC,
+    promptMode: initPromptMode,
   });
+  const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [improving, setImproving] = useState(false);
   const [error, setError] = useState('');
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showColorPicker, setShowColorPicker] = useState(false);
 
-  function f(k: keyof BotForm) {
-    return (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-      setForm({ ...form, [k]: e.target.value });
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+  function upd<K extends keyof BotForm>(k: K, v: BotForm[K]) {
+    setForm((p) => ({ ...p, [k]: v }));
+    setDirty(true);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function f(k: keyof BotForm) {
+    return (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+      upd(k, e.target.value as any);
+    };
+  }
+
+  function updateVC<K extends keyof VisualConfig>(k: K, v: VisualConfig[K]) {
+    setForm((p) => {
+      const newVC = { ...p.visualConfig, [k]: v };
+      const newPrompt = p.promptMode === 'visual' ? generateCallPromptFromVisual(newVC, p.name) : p.systemPrompt;
+      return { ...p, visualConfig: newVC, systemPrompt: newPrompt };
+    });
+    setDirty(true);
+  }
+
+  function applyTemplate(tmpl: BotTemplate) {
+    setForm((p) => {
+      const newVC: VisualConfig = {
+        ...p.visualConfig,
+        emoji: tmpl.emoji,
+        color: tmpl.color,
+        industry: tmpl.industry,
+        tone: tmpl.tone,
+        specialInstructions: tmpl.specialInstructions,
+      };
+      return {
+        ...p,
+        visualConfig: newVC,
+        welcomeMessage: tmpl.welcomeMessage,
+        fallbackMessage: tmpl.fallbackMessage,
+        handoffKeyword: tmpl.handoffKeyword,
+        systemPrompt: tmpl.systemPrompt,
+        promptMode: 'advanced',
+      };
+    });
+    setDirty(true);
+  }
+
+  async function handleImprovePrompt() {
+    if (!form.systemPrompt.trim()) return;
+    setImproving(true);
+    try {
+      const res = await improveAiChatbotPrompt(form.systemPrompt);
+      upd('systemPrompt', res.improved);
+      upd('promptMode', 'advanced');
+    } catch (e: any) { alert(e.message || 'Error al mejorar el prompt'); }
+    finally { setImproving(false); }
+  }
+
+  async function handleSubmit(e?: React.FormEvent) {
+    e?.preventDefault();
     if (!form.name.trim()) { setError(i.nameRequired); return; }
     setSaving(true); setError('');
     try {
-      const { transferToNumber, inboxId, voiceCatalogId, ...rest } = form;
+      const { transferToNumber, inboxId, voiceCatalogId, promptMode, ...rest } = form;
       const providerConfig: Record<string, string> = {};
       if (transferToNumber) providerConfig.transferToNumber = transferToNumber;
-      await onSave({ ...rest, inboxId: inboxId || undefined, voiceCatalogId: voiceCatalogId || undefined, providerConfig } as any);
+      await onSave({
+        ...rest,
+        inboxId: inboxId || undefined,
+        voiceCatalogId: voiceCatalogId || undefined,
+        providerConfig,
+        promptMode,
+        transferToNumber,
+      } as any);
       onClose();
     }
     catch (err: any) { setError(err.message || i.error); }
@@ -340,30 +572,305 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
     whiteSpace: 'nowrap' as const, flexShrink: 0,
   });
 
+  const vc = form.visualConfig;
+  const avatarBg = vc.color || '#10b981';
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 640, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2 style={{ margin: 0, fontSize: 18 }}>{bot ? i.callBotEditTitle : i.callBotNewTitle}</h2>
+      <div className="modal" style={{ maxWidth: 680, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="modal-header" style={{ gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+            <div
+              style={{ width: 38, height: 38, borderRadius: 10, background: avatarBg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0, cursor: 'pointer', transition: 'transform 0.15s' }}
+              onClick={() => { setShowEmojiPicker((p) => !p); setShowColorPicker(false); }}
+              title="Cambiar emoji"
+            >
+              {vc.emoji || '📞'}
+            </div>
+            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {bot ? `${i.callBotEditTitle}: ${bot.name}` : i.callBotNewTitle}
+            </h2>
+            {dirty && (
+              <span style={{ fontSize: 11, color: '#f59e0b', fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                ● cambios sin guardar
+              </span>
+            )}
+          </div>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
 
+        {/* Emoji picker popover */}
+        {showEmojiPicker && (
+          <div style={{ position: 'absolute', top: 70, left: 20, zIndex: 100, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 12, padding: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }}
+            onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600 }}>Elige un emoji</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxWidth: 220 }}>
+              {COMMON_EMOJIS.map((em) => (
+                <button key={em} onClick={() => { updateVC('emoji', em); setShowEmojiPicker(false); }}
+                  style={{ width: 34, height: 34, borderRadius: 8, border: vc.emoji === em ? '2px solid var(--primary)' : '1px solid var(--border)', background: 'none', cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {em}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, marginBottom: 6, fontWeight: 600 }}>Color de fondo</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {AVATAR_COLORS.map((c) => (
+                <button key={c} onClick={() => { updateVC('color', c); setShowColorPicker(false); }}
+                  style={{ width: 24, height: 24, borderRadius: '50%', background: c, border: vc.color === c ? '3px solid var(--primary)' : '2px solid transparent', cursor: 'pointer' }} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 16px', overflowX: 'auto' }}>
-          <button style={tabStyle('basic')} onClick={() => setTab('basic')}>{i.callBotTabConfig}</button>
-          <button style={tabStyle('ai')} onClick={() => setTab('ai')}>{i.callBotTabBehavior}</button>
-          {bot && <button style={tabStyle('knowledge')} onClick={() => setTab('knowledge')}>{i.callBotTabKnowledge}</button>}
+          <button style={tabStyle('identity')} onClick={() => setTab('identity')}>🎭 Identidad</button>
+          <button style={tabStyle('business')} onClick={() => setTab('business')}>🏢 Negocio</button>
+          <button style={tabStyle('behavior')} onClick={() => setTab('behavior')}>🧠 Comportamiento</button>
+          <button style={tabStyle('config')} onClick={() => setTab('config')}>📞 Configuración</button>
+          <button style={tabStyle('voice')} onClick={() => setTab('voice')}>🔊 Voz</button>
+          {bot && <button style={tabStyle('knowledge')} onClick={() => setTab('knowledge')}>📚 Conocimiento</button>}
         </div>
 
-        <form onSubmit={handleSubmit} style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 0' }}>
-          {tab === 'basic' && (
+        {/* Tab content */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 0' }}>
+
+          {/* ── IDENTITY ───────────────────────────────────────────────────── */}
+          {tab === 'identity' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+              {/* Avatar + Name */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+                  <div
+                    style={{ width: 72, height: 72, borderRadius: 16, background: avatarBg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', flexShrink: 0 }}
+                    onClick={() => { setShowEmojiPicker((p) => !p); setShowColorPicker(false); }}
+                    title="Clic para cambiar"
+                  >
+                    {vc.emoji || '📞'}
+                  </div>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Clic para cambiar</span>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label className="form-label">Nombre del bot *</label>
+                  <input className="form-input" value={form.name} onChange={f('name')} placeholder="Bot de Ventas" autoFocus />
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>Color del avatar</div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {AVATAR_COLORS.map((c) => (
+                        <button key={c} onClick={() => updateVC('color', c)}
+                          style={{ width: 26, height: 26, borderRadius: '50%', background: c, border: vc.color === c ? '3px solid var(--primary)' : '2px solid transparent', cursor: 'pointer', outline: 'none' }} />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Templates */}
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
+                  ⚡ Plantillas para empezar rápido
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                  {CALL_BOT_TEMPLATES.map((tmpl) => (
+                    <button
+                      key={tmpl.label}
+                      onClick={() => applyTemplate(tmpl)}
+                      style={{
+                        padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)',
+                        background: 'var(--bg)', cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s',
+                        display: 'flex', flexDirection: 'column', gap: 4,
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = tmpl.color; (e.currentTarget as HTMLElement).style.background = `${tmpl.color}10`; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLElement).style.background = 'var(--bg)'; }}
+                    >
+                      <div style={{ fontSize: 20 }}>{tmpl.emoji}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>{tmpl.label}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{tmpl.industry}</div>
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+                  Aplicar una plantilla rellena el emoji, color, mensajes y prompt base. Puedes personalizar después.
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {/* ── BUSINESS ───────────────────────────────────────────────────── */}
+          {tab === 'business' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ padding: '10px 14px', background: '#f0f9ff', borderRadius: 8, fontSize: 12, color: '#0369a1' }}>
+                💡 Estos datos se usan para generar el prompt automáticamente en modo Visual. Cuanto más completes, mejor será el bot.
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Nombre del negocio / empresa</label>
+                <input className="form-input" value={vc.businessName} onChange={(e) => updateVC('businessName', e.target.value)} placeholder="Clínica Santa Rosa" />
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Industria / Sector</label>
+                <select className="form-input" value={vc.industry} onChange={(e) => updateVC('industry', e.target.value)}>
+                  <option value="">— Seleccionar —</option>
+                  {INDUSTRY_OPTIONS.map((ind) => <option key={ind} value={ind}>{ind}</option>)}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Productos / Servicios que ofrece</label>
+                <textarea className="form-input" rows={3} value={vc.products}
+                  onChange={(e) => updateVC('products', e.target.value)}
+                  placeholder="Consultas médicas, análisis clínicos, vacunación, nutrición…"
+                  style={{ resize: 'vertical' }} />
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Tono de comunicación</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
+                  {TONE_OPTIONS.map((t) => (
+                    <label key={t.value} style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px',
+                      border: `2px solid ${vc.tone === t.value ? 'var(--primary)' : 'var(--border)'}`,
+                      borderRadius: 8, cursor: 'pointer',
+                      background: vc.tone === t.value ? 'rgba(99,102,241,0.05)' : 'var(--bg)',
+                    }}>
+                      <input type="radio" name="tone" value={t.value} checked={vc.tone === t.value}
+                        onChange={() => updateVC('tone', t.value as VisualConfig['tone'])} style={{ marginTop: 2 }} />
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{t.label}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t.desc}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Restricciones (qué NO debe hacer el bot)</label>
+                <textarea className="form-input" rows={2} value={vc.restrictions}
+                  onChange={(e) => updateVC('restrictions', e.target.value)}
+                  placeholder="No dar diagnósticos, no mencionar precios sin confirmar, no discutir con el cliente…"
+                  style={{ resize: 'vertical' }} />
+              </div>
+
+            </div>
+          )}
+
+          {/* ── BEHAVIOR ───────────────────────────────────────────────────── */}
+          {tab === 'behavior' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+              {/* Prompt mode toggle */}
+              <div style={{ display: 'flex', gap: 8, padding: '4px', background: 'var(--bg-secondary)', borderRadius: 10, width: 'fit-content' }}>
+                {(['visual', 'advanced'] as const).map((m) => (
+                  <button key={m} onClick={() => {
+                    if (m === 'advanced' && form.promptMode === 'visual') {
+                      setForm((p) => ({
+                        ...p,
+                        promptMode: 'advanced',
+                        systemPrompt: generateCallPromptFromVisual(p.visualConfig, p.name),
+                      }));
+                    } else {
+                      upd('promptMode', m);
+                    }
+                  }}
+                    style={{
+                      padding: '6px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                      background: form.promptMode === m ? 'var(--bg)' : 'transparent',
+                      color: form.promptMode === m ? 'var(--text)' : 'var(--text-muted)',
+                      boxShadow: form.promptMode === m ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
+                    }}>
+                    {m === 'visual' ? '✨ Visual' : '⌨️ Avanzado'}
+                  </button>
+                ))}
+              </div>
+
+              {form.promptMode === 'visual' ? (
+                <div style={{ padding: '14px 16px', background: 'var(--bg-secondary)', borderRadius: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>
+                    Vista previa del prompt generado:
+                  </div>
+                  <pre style={{ fontSize: 12, color: 'var(--text)', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.6, fontFamily: 'inherit' }}>
+                    {generateCallPromptFromVisual(vc, form.name) || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Completa la pestaña "Negocio" para ver el prompt generado.</span>}
+                  </pre>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+                    Cambia a modo <strong>Avanzado</strong> para editar el prompt manualmente.
+                  </div>
+                </div>
+              ) : (
+                <div className="form-group" style={{ margin: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <label className="form-label" style={{ margin: 0 }}>Prompt del Sistema (personalidad del bot)</label>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ fontSize: 11, padding: '3px 10px', color: '#6366f1', borderColor: '#6366f1', border: '1px solid', borderRadius: 6 }}
+                      disabled={improving || !form.systemPrompt.trim()}
+                      onClick={handleImprovePrompt}
+                    >
+                      {improving ? '⏳ Mejorando…' : '✨ Mejorar con IA'}
+                    </button>
+                  </div>
+                  <textarea
+                    className="form-input"
+                    rows={7}
+                    value={form.systemPrompt}
+                    onChange={f('systemPrompt')}
+                    placeholder="Eres un asistente de ventas amable de Empresa X. Tu objetivo es calificar prospectos y agendar citas. Habla de forma concisa y natural por teléfono."
+                    style={{ resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                    <span>💡 Para voz: frases cortas, sin markdown, respuestas de máx. 15-20 segundos</span>
+                    <span>{form.systemPrompt.length} chars</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Instrucciones adicionales (para el prompt visual)</label>
+                <textarea className="form-input" rows={2} value={vc.specialInstructions}
+                  onChange={(e) => updateVC('specialInstructions', e.target.value)}
+                  placeholder="Si el cliente pregunta por precios, di que un asesor lo contactará…"
+                  style={{ resize: 'vertical', fontSize: 13 }} />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Mensaje de bienvenida</label>
+                  <textarea className="form-input" rows={3} value={form.welcomeMessage} onChange={f('welcomeMessage')}
+                    placeholder="Hola, gracias por contactar a Empresa X. ¿En qué puedo ayudarte hoy?"
+                    style={{ resize: 'vertical', fontSize: 13 }} />
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Lo primero que escucha el cliente.</div>
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Mensaje de fallback (cuando no entiende)</label>
+                  <textarea className="form-input" rows={3} value={form.fallbackMessage} onChange={f('fallbackMessage')}
+                    placeholder="Lo siento, no entendí tu solicitud. ¿Podrías repetirlo?"
+                    style={{ resize: 'vertical', fontSize: 13 }} />
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Cuando el bot no comprende.</div>
+                </div>
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Palabra clave para transferir a agente</label>
+                <input className="form-input" value={form.handoffKeyword} onChange={f('handoffKeyword')} placeholder="agente" />
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+                  Cuando el cliente dice esta palabra, la llamada se transfiere automáticamente.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── CONFIG ─────────────────────────────────────────────────────── */}
+          {tab === 'config' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">{i.callBotNameLabel} *</label>
-                  <input className="form-input" value={form.name} onChange={f('name')} placeholder="Bot de Ventas" />
-                </div>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">{i.callBotPhoneLabel}</label>
+                  <label className="form-label">Número de teléfono</label>
                   {availableNumbers.length > 0 ? (
                     <select className="form-input" value={form.phoneNumber} onChange={f('phoneNumber')}>
                       <option value="">— Seleccionar número —</option>
@@ -380,29 +887,28 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
                       : 'El owner debe añadir números en Configuración → Plataforma → Voice.'}
                   </div>
                 </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">{i.callBotLangLabel}</label>
+                  <label className="form-label">Idioma de la llamada</label>
                   <select className="form-input" value={form.language} onChange={f('language')}>
                     {LANGUAGES.map((l) => <option key={l} value={l}>{l}</option>)}
                   </select>
                 </div>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">{i.callBotMaxDuration}</label>
-                  <input type="number" className="form-input" value={form.maxCallDuration} onChange={(e) => setForm({ ...form, maxCallDuration: +e.target.value })} min={30} max={3600} />
-                </div>
               </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Palabra clave para transferir</label>
-                  <input className="form-input" value={form.handoffKeyword} onChange={f('handoffKeyword')} placeholder="agente" />
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Cuando el cliente dice esta palabra se transfiere.</span>
+                  <label className="form-label">Duración máxima (segundos)</label>
+                  <input type="number" className="form-input" value={form.maxCallDuration}
+                    onChange={(e) => { upd('maxCallDuration', +e.target.value); }}
+                    min={30} max={3600} />
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+                    {fmtDuration(form.maxCallDuration)} máximo por llamada
+                  </div>
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">Número destino de transferencia</label>
                   <input className="form-input" value={form.transferToNumber} onChange={f('transferToNumber')} placeholder="+447712345678" />
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Número al que se transfiere la llamada. Si está vacío, cuelga.</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Si está vacío, cuelga al transferir.</span>
                 </div>
               </div>
 
@@ -461,7 +967,8 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
             </div>
           )}
 
-          {tab === 'ai' && (
+          {/* ── VOICE ──────────────────────────────────────────────────────── */}
+          {tab === 'voice' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
               {/* Voice catalog (all users) */}
@@ -469,7 +976,7 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">Voz del sistema</label>
                   <select className="form-input" value={form.voiceCatalogId}
-                    onChange={(e) => setForm((p) => ({ ...p, voiceCatalogId: e.target.value }))}>
+                    onChange={(e) => { upd('voiceCatalogId', e.target.value); }}>
                     <option value="">{isOwner ? '— Configuración manual (avanzado) —' : '— Seleccionar voz —'}</option>
                     {voices.filter((v) => v.isActive).map((v) => (
                       <option key={v.id} value={v.id}>{v.name}</option>
@@ -498,7 +1005,7 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
                       <div className="form-group" style={{ margin: 0 }}>
                         <label className="form-label">Proveedor TTS</label>
                         <select className="form-input" value={form.ttsProvider}
-                          onChange={(e) => setForm((p) => ({ ...p, ttsProvider: e.target.value as BotForm['ttsProvider'] }))}>
+                          onChange={(e) => { upd('ttsProvider', e.target.value as BotForm['ttsProvider']); }}>
                           <option value="twilio_basic">🔊 Twilio Polly (incluido)</option>
                           <option value="openai_tts">🟢 OpenAI TTS (usa key de IA)</option>
                           <option value="elevenlabs">🎙️ ElevenLabs (hiperrealista)</option>
@@ -511,7 +1018,7 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
                     <div className="form-group" style={{ margin: 0 }}>
                       <label className="form-label">Voice ID de ElevenLabs</label>
                       <select className="form-input" value={form.ttsVoiceId}
-                        onChange={(e) => setForm((p) => ({ ...p, ttsVoiceId: e.target.value }))}>
+                        onChange={(e) => { upd('ttsVoiceId', e.target.value); }}>
                         <option value="">— Voz por defecto (Sarah) —</option>
                         <option value="EXAVITQu4vr4xnSDxMaL">Sarah — EN, neutral</option>
                         <option value="TX3LPaxmHKxFdv7VOQHJ">Liam — EN, masculina</option>
@@ -528,21 +1035,16 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
                   )}
                 </>
               )}
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Prompt del Sistema (Personalidad del Bot)</label>
-                <textarea className="form-input" rows={5} value={form.systemPrompt} onChange={f('systemPrompt')} placeholder="Eres un asistente de ventas amable de Empresa X. Tu objetivo es calificar prospectos y agendar citas. Siempre sé cortés y conciso." style={{ resize: 'vertical' }} />
-              </div>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Mensaje de Bienvenida</label>
-                <textarea className="form-input" rows={2} value={form.welcomeMessage} onChange={f('welcomeMessage')} placeholder="Hola, gracias por contactar a Empresa X. ¿En qué puedo ayudarte hoy?" style={{ resize: 'vertical' }} />
-              </div>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Mensaje de Fallback (cuando no entiende)</label>
-                <textarea className="form-input" rows={2} value={form.fallbackMessage} onChange={f('fallbackMessage')} placeholder="Lo siento, no entendí tu solicitud. ¿Podrías repetirlo?" style={{ resize: 'vertical' }} />
-              </div>
+
+              {voices.filter((v) => v.isActive).length === 0 && !isOwner && (
+                <div style={{ padding: '14px 16px', background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>
+                  🔊 No hay voces disponibles en el catálogo. El administrador puede añadirlas en la pestaña "Catálogo de Voces".
+                </div>
+              )}
             </div>
           )}
 
+          {/* ── KNOWLEDGE ──────────────────────────────────────────────────── */}
           {tab === 'knowledge' && bot && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ padding: '12px 16px', background: '#f0fdf4', borderRadius: 8, fontSize: 13, color: '#166534', display: 'flex', gap: 10 }}>
@@ -623,11 +1125,17 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
           )}
 
           {error && <div style={{ color: 'var(--danger)', fontSize: 13, marginTop: 12 }}>{error}</div>}
-        </form>
+        </div>
 
+        {/* Footer */}
         <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" className="btn btn-secondary" onClick={onClose}>{i.cancel}</button>
-          <button className="btn btn-primary" disabled={saving} onClick={handleSubmit as any}>
+          <button
+            className="btn btn-primary"
+            disabled={saving}
+            onClick={() => handleSubmit()}
+            style={{ minWidth: 90 }}
+          >
             {saving ? i.saving : i.save}
           </button>
         </div>
@@ -789,8 +1297,10 @@ export default function CallBotsPage() {
   }
 
   async function handleSave(form: BotForm) {
-    if (editing) await updateCallBot(editing.id, form as any);
-    else await createCallBot(form as any);
+    const { visualConfig, promptMode, ...rest } = form as any;
+    const payload = { ...rest, visual_config: visualConfig };
+    if (editing) await updateCallBot(editing.id, payload as any);
+    else await createCallBot(payload as any);
     await load();
   }
 
@@ -892,107 +1402,119 @@ export default function CallBotsPage() {
         {isOwner && <button style={tabStyle('voices')} onClick={() => setTab('voices')}>Catálogo de Voces ({voices.length})</button>}
       </div>
 
-      {tab === 'bots' ? (
+      {tab === 'bots' && (
         loading ? (
           <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>{i.loading}</div>
         ) : bots.length === 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 60, gap: 12, color: 'var(--text-muted)' }}>
-            <div style={{ fontSize: 48 }}>🤖</div>
+            <div style={{ fontSize: 48 }}>📞</div>
             <div style={{ fontSize: 16 }}>{i.callBotNone}</div>
             <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>{i.createFirstCallBot}</button>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
-            {bots.map((bot) => (
-              <div key={bot.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {/* Bot header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 42, height: 42, borderRadius: 10, background: '#ede9fe', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>🤖</div>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 15 }}>{bot.name}</div>
-                      <StatusDot status={bot.status} />
-                    </div>
-                  </div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                    <div
-                      onClick={() => handleToggle(bot)}
-                      style={{
-                        width: 36, height: 20, borderRadius: 10,
-                        background: bot.status === 'active' ? 'var(--primary)' : '#d1d5db',
-                        position: 'relative', cursor: 'pointer', transition: 'background 0.2s',
-                      }}
-                    >
+            {bots.map((bot) => {
+              const avatarEmoji = bot.visualConfig?.emoji || '📞';
+              const avatarColor = bot.visualConfig?.color || '#10b981';
+              return (
+                <div key={bot.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {/* Bot header */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <div style={{
-                        position: 'absolute', top: 2, left: bot.status === 'active' ? 18 : 2,
-                        width: 16, height: 16, borderRadius: '50%', background: '#fff',
-                        transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                      }} />
-                    </div>
-                  </label>
-                </div>
-
-                {/* Details */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
-                  {bot.phoneNumber && (
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <span style={{ color: 'var(--text-muted)' }}>📞</span>
-                      <span style={{ fontFamily: 'monospace' }}>{bot.phoneNumber}</span>
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: 12, color: 'var(--text-muted)' }}>
-                    <span>🌐 {bot.language}</span>
-                    <span>🔌 {bot.provider}</span>
-                    <span>⏱ {fmtDuration(bot.maxCallDuration)} máx</span>
-                  </div>
-                  {bot.welcomeMessage && (
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic', padding: '6px 10px', background: 'var(--bg-secondary)', borderRadius: 6 }}>
-                      "{bot.welcomeMessage.substring(0, 70)}{bot.welcomeMessage.length > 70 ? '…' : ''}"
-                    </div>
-                  )}
-                </div>
-
-                {/* Twilio webhook URL */}
-                {bot.provider === 'twilio' && (
-                  <WebhookUrlBox botId={bot.id} />
-                )}
-
-                {/* Metrics */}
-                {bot.totalCalls > 0 && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-                    {[
-                      { label: i.callBotCalls,      value: bot.totalCalls,       color: '#6366f1' },
-                      { label: i.callBotHandled,     value: bot.handledCalls,     color: '#10b981' },
-                      { label: i.transferred,        value: bot.transferredCalls, color: '#f59e0b' },
-                    ].map((m) => (
-                      <div key={m.label} style={{ textAlign: 'center', padding: '6px', background: 'var(--bg-secondary)', borderRadius: 6 }}>
-                        <div style={{ fontWeight: 700, fontSize: 16, color: m.color }}>{m.value}</div>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{m.label}</div>
+                        width: 44, height: 44, borderRadius: 12, background: avatarColor,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
+                        boxShadow: `0 2px 8px ${avatarColor}40`, flexShrink: 0,
+                      }}>
+                        {avatarEmoji}
                       </div>
-                    ))}
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 15 }}>{bot.name}</div>
+                        <StatusDot status={bot.status} />
+                      </div>
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <div
+                        onClick={() => handleToggle(bot)}
+                        style={{
+                          width: 36, height: 20, borderRadius: 10,
+                          background: bot.status === 'active' ? 'var(--primary)' : '#d1d5db',
+                          position: 'relative', cursor: 'pointer', transition: 'background 0.2s',
+                        }}
+                      >
+                        <div style={{
+                          position: 'absolute', top: 2, left: bot.status === 'active' ? 18 : 2,
+                          width: 16, height: 16, borderRadius: '50%', background: '#fff',
+                          transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                        }} />
+                      </div>
+                    </label>
                   </div>
-                )}
 
-                {/* Actions */}
-                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', paddingTop: 4, borderTop: '1px solid var(--border)' }}>
-                  {bot.status === 'active' && (
-                    <button
-                      className="btn btn-ghost"
-                      style={{ padding: '4px 10px', fontSize: 12, color: '#10b981', borderColor: '#10b981', border: '1px solid' }}
-                      onClick={() => setDialBot(bot)}
-                    >
-                      {i.callBotDialBtn}
-                    </button>
+                  {/* Details */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+                    {bot.phoneNumber && (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>📞</span>
+                        <span style={{ fontFamily: 'monospace' }}>{bot.phoneNumber}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 12, color: 'var(--text-muted)' }}>
+                      <span>🌐 {bot.language}</span>
+                      <span>🔌 {bot.provider}</span>
+                      <span>⏱ {fmtDuration(bot.maxCallDuration)} máx</span>
+                    </div>
+                    {bot.welcomeMessage && (
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic', padding: '6px 10px', background: 'var(--bg-secondary)', borderRadius: 6 }}>
+                        "{bot.welcomeMessage.substring(0, 70)}{bot.welcomeMessage.length > 70 ? '…' : ''}"
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Twilio webhook URL */}
+                  {bot.provider === 'twilio' && (
+                    <WebhookUrlBox botId={bot.id} />
                   )}
-                  <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => { setEditing(bot); setShowModal(true); }}>{i.edit}</button>
-                  <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => { setSelectedBot(bot.id); setTab('logs'); }}>{i.callBotViewCalls}</button>
-                  <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12, color: 'var(--danger)' }} onClick={() => handleDelete(bot.id, bot.name)}>{i.delete}</button>
+
+                  {/* Metrics */}
+                  {bot.totalCalls > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                      {[
+                        { label: i.callBotCalls,      value: bot.totalCalls,       color: '#6366f1' },
+                        { label: i.callBotHandled,     value: bot.handledCalls,     color: '#10b981' },
+                        { label: i.transferred,        value: bot.transferredCalls, color: '#f59e0b' },
+                      ].map((m) => (
+                        <div key={m.label} style={{ textAlign: 'center', padding: '6px', background: 'var(--bg-secondary)', borderRadius: 6 }}>
+                          <div style={{ fontWeight: 700, fontSize: 16, color: m.color }}>{m.value}</div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{m.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', paddingTop: 4, borderTop: '1px solid var(--border)' }}>
+                    {bot.status === 'active' && (
+                      <button
+                        className="btn btn-ghost"
+                        style={{ padding: '4px 10px', fontSize: 12, color: '#10b981', borderColor: '#10b981', border: '1px solid' }}
+                        onClick={() => setDialBot(bot)}
+                      >
+                        {i.callBotDialBtn}
+                      </button>
+                    )}
+                    <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => { setEditing(bot); setShowModal(true); }}>{i.edit}</button>
+                    <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => { setSelectedBot(bot.id); setTab('logs'); }}>{i.callBotViewCalls}</button>
+                    <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12, color: 'var(--danger)' }} onClick={() => handleDelete(bot.id, bot.name)}>{i.delete}</button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )
-      ) : (
+      )}
+
+      {tab === 'logs' && (
         <div>
           <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
             <select
