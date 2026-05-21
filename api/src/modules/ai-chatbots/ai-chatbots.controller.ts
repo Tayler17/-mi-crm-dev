@@ -66,6 +66,13 @@ export class AiChatbotsController {
     return this.svc.duplicate(id, tenantId, req.user?.sub ?? req.user?.id);
   }
 
+  /** Improve a system prompt using the platform AI. */
+  @Post('improve-prompt')
+  async improvePrompt(@Body('system_prompt') systemPrompt: string) {
+    const improved = await this.engine.improveSystemPrompt(systemPrompt ?? '');
+    return { improved };
+  }
+
   /** Test the bot with a single message (no real conversation needed). */
   @Post(':id/test-message')
   testMessage(

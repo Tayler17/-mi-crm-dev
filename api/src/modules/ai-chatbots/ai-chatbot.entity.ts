@@ -24,6 +24,7 @@ export class AiChatbot {
   @Column({ default: 0 }) total_conversations: number;
   @Column({ default: 0 }) handoff_count: number;
   @Column({ nullable: true }) created_by: string;
+  @Column({ type: 'jsonb', nullable: true }) visual_config: Record<string, any> | null;
   @CreateDateColumn() created_at: Date;
   @UpdateDateColumn() updated_at: Date;
 }

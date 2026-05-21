@@ -1066,4 +1066,51 @@ export class AiChatbotEngineService {
       }
     }
   }
+
+  // ── Improve system prompt using platform AI ────────────────────────────────
+
+  async improveSystemPrompt(systemPrompt: string): Promise<string> {
+    if (!systemPrompt?.trim()) return systemPrompt;
+    const platformAI = await this.platformSettings.getAI();
+    if (!platformAI?.apiKey) return systemPrompt;
+
+    const instruction = `Mejora el siguiente System Prompt para un chatbot de atención al cliente empresarial.
+Hazlo más claro, específico y efectivo. Mantén el idioma y el propósito original.
+Añade estructura con numeración o viñetas si no la tiene.
+No cambies la personalidad ni el objetivo del bot.
+Responde SOLO con el prompt mejorado, sin explicaciones adicionales.
+
+System Prompt original:
+${systemPrompt}`;
+
+    try {
+      if (platformAI.provider === 'openai') {
+        const res = await axios.post(
+          'https://api.openai.com/v1/chat/completions',
+          { model: platformAI.model ?? 'gpt-4o-mini', messages: [{ role: 'user', content: instruction }], temperature: 0.3, max_tokens: 1000 },
+          { headers: { Authorization: `Bearer ${platformAI.apiKey}` }, timeout: 20000 },
+        );
+        return res.data.choices?.[0]?.message?.content ?? systemPrompt;
+      }
+      if (platformAI.provider === 'anthropic') {
+        const res = await axios.post(
+          'https://api.anthropic.com/v1/messages',
+          { model: platformAI.model ?? 'claude-haiku-4-5-20251001', messages: [{ role: 'user', content: instruction }], max_tokens: 1000 },
+          { headers: { 'x-api-key': platformAI.apiKey, 'anthropic-version': '2023-06-01' }, timeout: 20000 },
+        );
+        return res.data.content?.[0]?.text ?? systemPrompt;
+      }
+      if (platformAI.provider === 'gemini') {
+        const res = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${platformAI.model ?? 'gemini-1.5-flash'}:generateContent?key=${platformAI.apiKey}`,
+          { contents: [{ parts: [{ text: instruction }] }] },
+          { timeout: 20000 },
+        );
+        return res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? systemPrompt;
+      }
+    } catch (e: any) {
+      this.logger.warn(`[improveSystemPrompt] AI call failed: ${e.message}`);
+    }
+    return systemPrompt;
+  }
 }

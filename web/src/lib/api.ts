@@ -1376,6 +1376,17 @@ export interface AiChatbot {
   webchat_title?: string;
   webchat_subtitle?: string;
   webchat_placeholder?: string;
+  visual_config?: {
+    emoji?: string;
+    color?: string;
+    businessName?: string;
+    industry?: string;
+    products?: string;
+    tone?: string;
+    language?: string;
+    restrictions?: string;
+    specialInstructions?: string;
+  } | null;
   created_at: string;
   updated_at: string;
 }
@@ -1399,6 +1410,9 @@ export const duplicateAiChatbot = (id: string) => apiPost<AiChatbot>(`/ai-chatbo
 export const getAiChatbotSessions = (id: string) => apiGet<any[]>(`/ai-chatbots/${id}/sessions`);
 export const testAiChatbotMessage = (id: string, message: string) =>
   apiPost<{ reply: string | null; error?: string }>(`/ai-chatbots/${id}/test-message`, { message });
+
+export const improveAiChatbotPrompt = (system_prompt: string) =>
+  apiPost<{ improved: string }>('/ai-chatbots/improve-prompt', { system_prompt });
 
 // ── Knowledge Base ────────────────────────────────────────────────────────────
 
