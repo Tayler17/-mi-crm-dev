@@ -108,6 +108,7 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   { group: '🤖 AUTOMATIZACIÓN', href: '/ai-prompts',      label: 'Prompts IA',           icon: '✨', minRole: 'admin' },
   { group: '🤖 AUTOMATIZACIÓN', href: '/ai-chatbots',     label: 'AI Chatbots',          icon: '🧠', minRole: 'admin' },
   { group: '🤖 AUTOMATIZACIÓN', href: '/call-bots',       label: 'Call Bots',            icon: '🤖', minRole: 'admin' },
+  { group: '🤖 AUTOMATIZACIÓN', href: '/voices',          label: 'Catálogo de Voces',    icon: '🔊', minRole: 'owner' },
   // ── Marketing ──
   { group: '📢 MARKETING',     href: '/campaigns',        label: 'Campañas',             icon: '📣', minRole: 'admin' },
   { group: '📢 MARKETING',     href: '/content',          label: 'Marketing Content',    icon: '📝', minRole: 'admin' },

@@ -10,10 +10,12 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { OnboardingEmailService } from './onboarding-email.service';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, Tenant]),
+    SettingsModule,
     PassportModule,
     ScheduleModule.forRoot(),
     JwtModule.registerAsync({

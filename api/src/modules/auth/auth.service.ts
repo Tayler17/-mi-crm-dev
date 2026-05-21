@@ -15,6 +15,7 @@ import { LoginDto } from './dto/login.dto';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
 import { CreateTenantDto, UpdateTenantDto, RegisterDto } from './dto/tenant.dto';
 import { OnboardingEmailService } from './onboarding-email.service';
+import { PlatformSettingsService } from '../settings/platform-settings.service';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -28,6 +29,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     @InjectDataSource() private readonly db: DataSource,
     private readonly onboardingEmail: OnboardingEmailService,
+    private readonly platformSettings: PlatformSettingsService,
   ) {
     this.ensureResetColumns();
   }
@@ -46,37 +48,57 @@ export class AuthService {
   }
 
   private async createTransporter(): Promise<{ transport: nodemailer.Transporter; from: string }> {
-    const smtpHost = process.env.SMTP_HOST || '';
-    // If SMTP_HOST is mailhog (dev) or empty, fall back to first active email connection in DB
-    if (!smtpHost || smtpHost === 'mailhog') {
-      const rows = await this.db.query(
-        `SELECT credentials FROM channel_connections
-         WHERE channel_type = 'email' AND is_active = true
-           AND (credentials->>'host') IS NOT NULL AND (credentials->>'host') != ''
-         ORDER BY created_at ASC LIMIT 1`,
-      );
-      if (rows.length) {
-        const c = rows[0].credentials ?? {};
-        return {
-          transport: nodemailer.createTransport({
-            host:   String(c.host).trim(),
-            port:   Number(c.port) || 587,
-            secure: Number(c.port) === 465,
-            auth: { user: c.user, pass: c.password },
-            tls: { rejectUnauthorized: false },
-          }),
-          from: `AutoMarkIQ <${c.user}>`,
-        };
-      }
+    // 1) Try platform settings (configurable from UI)
+    const smtp = await this.platformSettings.getSMTP().catch(() => null);
+    if (smtp?.host && smtp.host !== 'mailhog') {
+      return {
+        transport: nodemailer.createTransport({
+          host:   smtp.host,
+          port:   smtp.port,
+          secure: smtp.secure,
+          auth:   smtp.user ? { user: smtp.user, pass: smtp.password } : undefined,
+          tls:    { rejectUnauthorized: false },
+        }),
+        from: smtp.from || smtp.user || 'noreply@automarkiq.com',
+      };
     }
+    // 2) Fall back to env var SMTP_HOST
+    const smtpHost = process.env.SMTP_HOST || '';
+    if (smtpHost && smtpHost !== 'mailhog') {
+      return {
+        transport: nodemailer.createTransport({
+          host:   smtpHost,
+          port:   Number(process.env.SMTP_PORT) || 587,
+          secure: process.env.SMTP_SECURE === 'true',
+          auth:   { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+        }),
+        from: process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@automarkiq.com',
+      };
+    }
+    // 3) Fall back to first active email connection in DB (tenant-configured SMTP)
+    const rows = await this.db.query(
+      `SELECT credentials FROM channel_connections
+       WHERE channel_type = 'email' AND is_active = true
+         AND (credentials->>'host') IS NOT NULL AND (credentials->>'host') != ''
+       ORDER BY created_at ASC LIMIT 1`,
+    );
+    if (rows.length) {
+      const c = rows[0].credentials ?? {};
+      return {
+        transport: nodemailer.createTransport({
+          host:   String(c.host).trim(),
+          port:   Number(c.port) || 587,
+          secure: Number(c.port) === 465,
+          auth:   { user: c.user, pass: c.password },
+          tls:    { rejectUnauthorized: false },
+        }),
+        from: `AutoMarkIQ <${c.user}>`,
+      };
+    }
+    // 4) Last resort: no SMTP configured
     return {
-      transport: nodemailer.createTransport({
-        host:   smtpHost || 'smtp.gmail.com',
-        port:   Number(process.env.SMTP_PORT) || 587,
-        secure: process.env.SMTP_SECURE === 'true',
-        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      }),
-      from: process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@automarkiq.com',
+      transport: nodemailer.createTransport({ host: 'localhost', port: 25, secure: false }),
+      from: 'noreply@automarkiq.com',
     };
   }
 

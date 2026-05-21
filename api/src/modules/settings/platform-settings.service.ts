@@ -25,11 +25,17 @@ export const PLATFORM_KEYS = [
   'backup.s3_access_key',
   'backup.s3_secret_key',
   'backup.s3_prefix',
+  'smtp.host',
+  'smtp.port',
+  'smtp.secure',
+  'smtp.user',
+  'smtp.password',
+  'smtp.from',
 ] as const;
 
 export type PlatformKey = (typeof PLATFORM_KEYS)[number];
 
-const SENSITIVE = new Set<PlatformKey>(['ai.api_key', 'voice.auth_token', 'meta.app_secret', 'meta.verify_token', 'elevenlabs.api_key', 'stripe.secret_key', 'stripe.webhook_secret', 'backup.s3_secret_key']);
+const SENSITIVE = new Set<PlatformKey>(['ai.api_key', 'voice.auth_token', 'meta.app_secret', 'meta.verify_token', 'elevenlabs.api_key', 'stripe.secret_key', 'stripe.webhook_secret', 'backup.s3_secret_key', 'smtp.password']);
 const MASK = '••••••••';
 
 /** Maps each platform key to its env-var fallback (for local dev / initial setup). */
@@ -56,6 +62,12 @@ const ENV_FALLBACKS: Record<PlatformKey, string> = {
   'backup.s3_access_key':  'BACKUP_S3_ACCESS_KEY',
   'backup.s3_secret_key':  'BACKUP_S3_SECRET_KEY',
   'backup.s3_prefix':      'BACKUP_S3_PREFIX',
+  'smtp.host':     'SMTP_HOST',
+  'smtp.port':     'SMTP_PORT',
+  'smtp.secure':   'SMTP_SECURE',
+  'smtp.user':     'SMTP_USER',
+  'smtp.password': 'SMTP_PASS',
+  'smtp.from':     'SMTP_FROM',
 };
 
 @Injectable()
@@ -130,6 +142,19 @@ export class PlatformSettingsService {
       provider:   (await this.get('voice.provider')) || 'twilio',
       accountSid: await this.get('voice.account_sid'),
       authToken:  await this.get('voice.auth_token'),
+    };
+  }
+
+  /** Get SMTP credentials in one shot (used by mailer services). */
+  async getSMTP(): Promise<{ host: string; port: number; secure: boolean; user: string; password: string; from: string }> {
+    await this.loadCache();
+    return {
+      host:     await this.get('smtp.host'),
+      port:     Number(await this.get('smtp.port')) || 587,
+      secure:   (await this.get('smtp.secure')) === 'true',
+      user:     await this.get('smtp.user'),
+      password: await this.get('smtp.password'),
+      from:     await this.get('smtp.from'),
     };
   }
 

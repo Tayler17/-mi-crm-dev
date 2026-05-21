@@ -822,6 +822,8 @@ export default function SettingsPage() {
     'backup.enabled': 'false', 'backup.cron': '0 2 * * *', 'backup.retention_days': '7',
     'backup.s3_bucket': '', 'backup.s3_region': 'us-east-1',
     'backup.s3_access_key': '', 'backup.s3_secret_key': '', 'backup.s3_prefix': 'backups/',
+    'smtp.host': '', 'smtp.port': '587', 'smtp.secure': 'false',
+    'smtp.user': '', 'smtp.password': '', 'smtp.from': '',
   });
   const [platformSaving, setPlatformSaving] = useState(false);
   const [platformSaved, setPlatformSaved] = useState(false);
@@ -903,6 +905,12 @@ export default function SettingsPage() {
         'backup.s3_access_key':   p['backup.s3_access_key']?.value   || '',
         'backup.s3_secret_key':   p['backup.s3_secret_key']?.masked  ? '••••••••' : (p['backup.s3_secret_key']?.value || ''),
         'backup.s3_prefix':       p['backup.s3_prefix']?.value       || 'backups/',
+        'smtp.host':     p['smtp.host']?.value     || '',
+        'smtp.port':     p['smtp.port']?.value     || '587',
+        'smtp.secure':   p['smtp.secure']?.value   || 'false',
+        'smtp.user':     p['smtp.user']?.value     || '',
+        'smtp.password': p['smtp.password']?.masked ? '••••••••' : (p['smtp.password']?.value || ''),
+        'smtp.from':     p['smtp.from']?.value     || '',
       });
     }
     setAnnouncements(a);
@@ -1761,6 +1769,58 @@ export default function SettingsPage() {
                 value={platformForm['backup.s3_prefix']}
                 onChange={(e) => setPlatformForm((p) => ({ ...p, 'backup.s3_prefix': e.target.value }))}
                 placeholder="backups/" />
+            </Row>
+          </Section>
+
+          <Section title="📧 SMTP — Correo saliente">
+            <div style={{ padding: '10px 14px', background: '#f0f9ff', borderRadius: 8, fontSize: 12, color: '#0369a1', marginBottom: 4 }}>
+              Configura el servidor de correo para enviar emails de verificación, recuperación de contraseña y onboarding.
+              Si dejas vacío, el sistema usará la conexión de email activa en Conexiones → Email.
+            </div>
+            <Row label="Host SMTP" hint="ej. smtp.gmail.com, smtp.sendgrid.net, smtp.hostinger.com">
+              <input className="form-input" style={{ maxWidth: 300 }}
+                value={platformForm['smtp.host']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'smtp.host': e.target.value }))}
+                placeholder="smtp.gmail.com" />
+            </Row>
+            <Row label="Puerto" hint="587 (STARTTLS) · 465 (SSL/TLS) · 25 (sin cifrado)">
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <input className="form-input" type="number" style={{ maxWidth: 100 }}
+                  value={platformForm['smtp.port']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'smtp.port': e.target.value }))}
+                  placeholder="587" />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <div
+                    onClick={() => setPlatformForm((p) => ({ ...p, 'smtp.secure': p['smtp.secure'] === 'true' ? 'false' : 'true' }))}
+                    style={{ width: 36, height: 20, borderRadius: 10, background: platformForm['smtp.secure'] === 'true' ? 'var(--primary)' : '#d1d5db', position: 'relative', cursor: 'pointer', transition: 'background 0.2s', flexShrink: 0 }}>
+                    <div style={{ position: 'absolute', top: 2, left: platformForm['smtp.secure'] === 'true' ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+                  </div>
+                  <span>SSL/TLS seguro (puerto 465)</span>
+                </label>
+              </div>
+            </Row>
+            <Row label="Usuario / Email" hint="Cuenta de correo usada para autenticar en el servidor SMTP">
+              <input className="form-input" style={{ maxWidth: 300 }}
+                value={platformForm['smtp.user']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'smtp.user': e.target.value }))}
+                placeholder="notificaciones@tuempresa.com" />
+            </Row>
+            <Row label="Contraseña SMTP" hint="Contraseña de la cuenta o App Password (Gmail, Outlook)">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" type="password" style={{ flex: 1, maxWidth: 340 }}
+                  value={platformForm['smtp.password']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'smtp.password': e.target.value }))}
+                  placeholder="••••••••" />
+                {platformCfg['smtp.password']?.masked && platformForm['smtp.password'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>✓ Configurada</span>
+                )}
+              </div>
+            </Row>
+            <Row label="Remitente (From)" hint="Nombre y email que verán los destinatarios">
+              <input className="form-input" style={{ maxWidth: 340 }}
+                value={platformForm['smtp.from']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'smtp.from': e.target.value }))}
+                placeholder="AutoMarkIQ <noreply@tuempresa.com>" />
             </Row>
           </Section>
 
