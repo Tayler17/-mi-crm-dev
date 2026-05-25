@@ -124,7 +124,7 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   // ── Admin ──
   { group: '🏢 ADMIN',         href: '/billing',          label: 'Mi Plan & Uso',        icon: '💳', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/users',            label: 'Usuarios',             icon: '👤', minRole: 'admin' },
-  { group: '🏢 ADMIN',         href: '/plans',            label: 'Planes & Billing',     icon: '🏦', minRole: 'owner' },
+  { group: '🏢 ADMIN',         href: '/plans',            label: 'Planes & Billing',     icon: '🏦', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/backups',          label: 'Backups',              icon: '💾', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/reports',          label: 'Reportes',             icon: '📊', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/announcements',    label: 'Anuncios',             icon: '📢', minRole: 'admin' },

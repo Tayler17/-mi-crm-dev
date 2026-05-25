@@ -269,31 +269,37 @@ export class AuthService {
 
   async createUser(dto: CreateUserDto, tenantId: string) {
     if (!tenantId) throw new BadRequestException('Tenant ID no encontrado. Vuelve a iniciar sesión.');
-    await checkPlanLimit(this.db, tenantId, 'users');
-    const email = dto.email.trim().toLowerCase();
-    const exists = await this.userRepo.findOne({ where: { email, tenantId } });
-    if (exists) throw new ConflictException('Ya existe un usuario con ese email en este tenant');
-    const passwordHash = await bcrypt.hash(dto.password, 10);
-    const user = this.userRepo.create({
-      tenantId,
-      email,
-      fullName: dto.fullName,
-      passwordHash,
-      role: dto.role ?? 'agent',
-      isActive: true,
-      availability: 'online',
-    });
     try {
+      await checkPlanLimit(this.db, tenantId, 'users');
+      const email = dto.email.trim().toLowerCase();
+      const exists = await this.userRepo.findOne({ where: { email, tenantId } });
+      if (exists) throw new ConflictException('Ya existe un usuario con ese email en este tenant');
+      const passwordHash = await bcrypt.hash(dto.password, 10);
+      const user = this.userRepo.create({
+        tenantId,
+        email,
+        fullName: dto.fullName,
+        passwordHash,
+        role: dto.role ?? 'agent',
+        isActive: true,
+        availability: 'online',
+      });
       const saved = await this.userRepo.save(user);
       const { passwordHash: _, ...result } = saved as any;
       return result;
     } catch (e: any) {
-      const msg: string = e?.message ?? '';
+      // Re-throw HttpExceptions as-is (ForbiddenException from plan limit, ConflictException, etc.)
+      if (e?.status) throw e;
+      // Convert raw DB/unexpected errors to readable messages
+      const msg: string = e?.message ?? String(e);
       if (msg.includes('unique') || msg.includes('duplicate') || msg.includes('already exists')) {
         throw new ConflictException('Ya existe un usuario con ese email.');
       }
       if (msg.includes('violates not-null') || msg.includes('null value')) {
-        throw new BadRequestException(`Error de datos: ${msg}`);
+        throw new BadRequestException(`Error de columna requerida: ${msg}`);
+      }
+      if (msg.includes('invalid input syntax for type uuid')) {
+        throw new BadRequestException('ID de tenant inválido. Cierra sesión y vuelve a entrar.');
       }
       throw new BadRequestException(`No se pudo crear el usuario: ${msg}`);
     }
