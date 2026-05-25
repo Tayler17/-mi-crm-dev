@@ -11,6 +11,7 @@ interface PlanData {
     plan_slug: string;
     plan_expires_at: string | null;
     trial_ends_at: string | null;
+    stripe_subscription_status: string | null;
     billing_email: string | null;
     billing_notes: string | null;
     price: number;
@@ -124,13 +125,14 @@ export default function BillingPage() {
   if (!data)   return null;
 
   const { tenant, usage } = data;
-  const planColor   = tenant.color ?? '#6366f1';
-  const planName    = tenant.plan_name ?? tenant.plan ?? 'Sin plan';
-  const expiresAt   = tenant.plan_expires_at ? new Date(tenant.plan_expires_at) : null;
-  const trialEndsAt = tenant.trial_ends_at   ? new Date(tenant.trial_ends_at)   : null;
-  const now         = new Date();
-  const daysLeft    = expiresAt ? Math.ceil((expiresAt.getTime() - now.getTime()) / 86400000) : null;
-  const trialLeft   = trialEndsAt ? Math.ceil((trialEndsAt.getTime() - now.getTime()) / 86400000) : null;
+  const planColor    = tenant.color ?? '#6366f1';
+  const planName     = tenant.plan_name ?? tenant.plan ?? 'Sin plan';
+  const expiresAt    = tenant.plan_expires_at ? new Date(tenant.plan_expires_at) : null;
+  const trialEndsAt  = tenant.trial_ends_at   ? new Date(tenant.trial_ends_at)   : null;
+  const stripeSub    = tenant.stripe_subscription_status ?? null;
+  const now          = new Date();
+  const daysLeft     = expiresAt ? Math.ceil((expiresAt.getTime() - now.getTime()) / 86400000) : null;
+  const trialLeft    = trialEndsAt ? Math.ceil((trialEndsAt.getTime() - now.getTime()) / 86400000) : null;
 
   return (
     <div style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
@@ -172,7 +174,7 @@ export default function BillingPage() {
           )}
         </div>
 
-        {/* Expiry / trial badges */}
+        {/* Expiry / trial / Stripe badges */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
           {expiresAt && (
             <span style={{
@@ -181,7 +183,7 @@ export default function BillingPage() {
               color: (daysLeft ?? 99) < 7 ? '#dc2626' : '#92400e',
               border: `1px solid ${(daysLeft ?? 99) < 7 ? '#fca5a5' : '#fcd34d'}`,
             }}>
-              {(daysLeft ?? 0) < 0 ? '⚠️ Plan vencido' : `⏳ Vence en ${daysLeft}d`}
+              {(daysLeft ?? 0) < 0 ? '⚠️ Plan vencido' : `⏳ Vence el ${expiresAt.toLocaleDateString()} (${daysLeft}d)`}
             </span>
           )}
           {trialEndsAt && !expiresAt && (
@@ -189,10 +191,20 @@ export default function BillingPage() {
               padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
               background: '#f0fdf4', color: '#166534', border: '1px solid #86efac',
             }}>
-              🎁 Trial — {(trialLeft ?? 0) < 0 ? 'vencido' : `${trialLeft}d restantes`}
+              🎁 Trial — {(trialLeft ?? 0) < 0 ? 'vencido' : `hasta ${trialEndsAt.toLocaleDateString()} (${trialLeft}d)`}
             </span>
           )}
-          {!expiresAt && !trialEndsAt && (
+          {!expiresAt && !trialEndsAt && stripeSub && (
+            <span style={{
+              padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+              background: stripeSub === 'active' ? '#f0fdf4' : stripeSub === 'trialing' ? '#eff6ff' : '#fef2f2',
+              color: stripeSub === 'active' ? '#166534' : stripeSub === 'trialing' ? '#1e40af' : '#dc2626',
+              border: `1px solid ${stripeSub === 'active' ? '#86efac' : stripeSub === 'trialing' ? '#93c5fd' : '#fca5a5'}`,
+            }}>
+              💳 Stripe: {stripeSub === 'active' ? '✅ Activo' : stripeSub === 'trialing' ? '🎁 Trial' : stripeSub === 'past_due' ? '⚠️ Pago pendiente' : stripeSub === 'canceled' ? '❌ Cancelado' : stripeSub}
+            </span>
+          )}
+          {!expiresAt && !trialEndsAt && !stripeSub && (
             <span style={{
               padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
               background: '#f0fdf4', color: '#166534', border: '1px solid #86efac',

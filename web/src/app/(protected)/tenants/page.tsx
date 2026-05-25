@@ -396,15 +396,27 @@ export default function TenantsPage() {
                         📞 {Math.ceil((t.callSecondsMonth ?? 0) / 60)} min/mes
                       </span>
                       {t.billingEmail && <span>✉ {t.billingEmail}</span>}
-                      {t.planExpiresAt && (
+                      {/* Expiry / subscription status — always shown */}
+                      {t.planExpiresAt ? (
                         <span style={{ color: expiresColor, fontWeight: expires !== null && expires < 30 ? 600 : 400 }}>
-                          Expira: {fmtDate(t.planExpiresAt, i.locale)}
+                          📅 Vence: {fmtDate(t.planExpiresAt, i.locale)}
                           {expires !== null && expires >= 0 && ` (${expires}d)`}
                           {expires !== null && expires < 0 && ' — VENCIDO'}
                         </span>
-                      )}
-                      {t.trialEndsAt && !t.planExpiresAt && (
-                        <span style={{ color: '#f59e0b' }}>Trial hasta {fmtDate(t.trialEndsAt, i.locale)}</span>
+                      ) : t.trialEndsAt ? (
+                        <span style={{ color: '#f59e0b' }}>🎁 Trial hasta {fmtDate(t.trialEndsAt, i.locale)}</span>
+                      ) : t.stripeSubscriptionStatus ? (
+                        <span style={{
+                          color: t.stripeSubscriptionStatus === 'active' ? '#10b981'
+                               : t.stripeSubscriptionStatus === 'trialing' ? '#6366f1'
+                               : t.stripeSubscriptionStatus === 'past_due' ? '#f59e0b'
+                               : '#ef4444',
+                          fontWeight: 500,
+                        }}>
+                          💳 Stripe: {t.stripeSubscriptionStatus}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)' }}>Sin fecha de vencimiento</span>
                       )}
                       {t.planPrice !== null && t.planPrice !== undefined && t.planPrice > 0 && (
                         <span>{t.planCurrency} {t.planPrice}/{t.planBillingPeriod}</span>

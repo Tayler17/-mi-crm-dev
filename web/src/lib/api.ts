@@ -1613,6 +1613,7 @@ export interface TenantAdmin {
   billingNotes: string | null;
   planExpiresAt: string | null;
   trialEndsAt: string | null;
+  stripeSubscriptionStatus: string | null;
 }
 
 export interface TenantUser {

@@ -412,6 +412,7 @@ export class AuthService {
         t.trial_ends_at AS "trialEndsAt",
         t.billing_email AS "billingEmail",
         t.billing_notes AS "billingNotes",
+        t.stripe_subscription_status AS "stripeSubscriptionStatus",
         t.created_at AS "createdAt",
         p.name AS "planName", p.color AS "planColor", p.slug AS "planSlug",
         p.price AS "planPrice", p.currency AS "planCurrency",
