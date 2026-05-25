@@ -580,7 +580,7 @@ export default function PlansPage() {
                     </button>
                   ) : (
                     <a
-                      href="mailto:soporte@automarkiq.com?subject=Solicitud de upgrade de plan"
+                      href="mailto:app@automarkiq.com?subject=Solicitud de upgrade de plan"
                       className="btn btn-secondary"
                       style={{ padding: '4px 12px', fontSize: 12, textDecoration: 'none' }}
                     >
