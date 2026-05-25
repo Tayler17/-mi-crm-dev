@@ -680,14 +680,17 @@ export class WhatsappWebService implements OnModuleInit {
             'application/pdf': '.pdf',
           };
           const ext = extMap[mime] || (mime.split('/')[1] ? `.${mime.split('/')[1].split(';')[0]}` : '.bin');
-          const uploadsDir = join(process.cwd(), 'uploads');
+          const uploadsDir = join(process.cwd(), 'uploads', 'messages');
           if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
           const filename = `wa-${Date.now()}${ext}`;
           writeFileSync(join(uploadsDir, filename), buffer);
-          const fileUrl  = `/uploads/${filename}`;
+          const fileUrl  = `/uploads/messages/${filename}`;
           const origName = msgContent.documentMessage?.fileName ?? msgContent.audioMessage?.fileName ?? filename;
           body = `${fileUrl}|${origName}`;
+          // Treat document messages with image extension as images so they render inline
+          const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic'];
           if (contentType === 'imageMessage' || contentType === 'stickerMessage') dbContentType = 'image';
+          else if (contentType === 'documentMessage' && imageExts.includes(ext.toLowerCase())) dbContentType = 'image';
           else if (contentType === 'audioMessage') dbContentType = 'audio';
           else if (contentType === 'videoMessage') dbContentType = 'video';
           else dbContentType = 'file';

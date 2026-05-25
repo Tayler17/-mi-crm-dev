@@ -1438,6 +1438,10 @@ export default function InboxPage() {
                           <audio controls src={`${API_URL}${fileUrl}`} style={{ maxWidth: 220 }} />
                         ) : m.contentType === 'video' && fileUrl ? (
                           <video controls src={`${API_URL}${fileUrl}`} style={{ maxWidth: 220, borderRadius: 6 }} />
+                        ) : m.contentType === 'file' && fileUrl && /\.(jpe?g|png|gif|webp|bmp|heic)$/i.test(fileName) ? (
+                          <a href={`${API_URL}${fileUrl}`} target="_blank" rel="noopener">
+                            <img src={`${API_URL}${fileUrl}`} alt={fileName} style={{ maxWidth: 220, maxHeight: 200, borderRadius: 6, display: 'block' }} />
+                          </a>
                         ) : m.contentType === 'file' && fileUrl ? (
                           <a href={`${API_URL}${fileUrl}`} target="_blank" rel="noopener" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'inherit', textDecoration: 'none' }}>
                             📎 <span style={{ textDecoration: 'underline', wordBreak: 'break-all' }}>{fileName}</span>
