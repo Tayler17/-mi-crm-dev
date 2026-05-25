@@ -7,11 +7,13 @@ import { KnowledgeBaseService } from './knowledge-base.service';
 import { ScraperService } from './scraper.service';
 import { EmbeddingsService } from './embeddings.service';
 import { KnowledgeIndexerProcessor } from './knowledge-indexer.processor';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
     BullModule.registerQueue({ name: KB_QUEUE }),
     MulterModule.register({}),
+    SettingsModule,
   ],
   controllers: [KnowledgeBaseController],
   providers: [

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { PlatformSettingsService } from '../settings/platform-settings.service';
 
 const OPENAI_EMBED_URL = 'https://api.openai.com/v1/embeddings';
 const EMBED_MODEL      = 'text-embedding-3-small'; // 1536 dims, cheap
@@ -9,7 +10,10 @@ const EMBED_MODEL      = 'text-embedding-3-small'; // 1536 dims, cheap
 export class EmbeddingsService {
   private readonly logger = new Logger(EmbeddingsService.name);
 
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly platformSettings: PlatformSettingsService,
+  ) {}
 
   /** Generate a single embedding vector for a text string */
   async embed(text: string, apiKey: string): Promise<number[]> {
@@ -40,15 +44,20 @@ export class EmbeddingsService {
     return results;
   }
 
-  /** Get the tenant's OpenAI API key from settings */
+  /** Get the OpenAI API key: tenant's own key first, fallback to platform key */
   async getApiKey(tenantId: string): Promise<string> {
     const [tenant] = await this.db.query(
       `SELECT settings FROM tenants WHERE id = $1`,
       [tenantId],
     );
-    const key = tenant?.settings?.aiKeys?.openai ?? '';
-    if (!key) throw new Error('No OpenAI API key configured for this tenant. Go to Settings → AI Integrations.');
-    return key;
+    const tenantKey = tenant?.settings?.aiKeys?.openai ?? '';
+    if (tenantKey) return tenantKey;
+
+    // Fallback: use platform-level OpenAI key
+    const platformKey = await this.platformSettings.get('ai.api_key');
+    if (platformKey) return platformKey;
+
+    throw new Error('No OpenAI API key configured. Ask your administrator to set it in Platform Settings → AI.');
   }
 
   /** Format a vector for pgvector insertion */
