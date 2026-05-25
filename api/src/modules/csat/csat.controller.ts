@@ -23,8 +23,8 @@ export class CsatController {
   ) {
     const token = randomBytes(32).toString('hex');
     const [row] = await this.db.query(
-      `INSERT INTO csat_responses (tenant_id, conversation_id, contact_id, score, token, created_at)
-       SELECT $1, $2, contact_id, 0, $3, NOW()
+      `INSERT INTO csat_responses (tenant_id, conversation_id, contact_id, token, created_at)
+       SELECT $1, $2, contact_id, $3, NOW()
        FROM conversations WHERE id=$2 AND tenant_id=$1
        RETURNING id, token`,
       [tenantId, conversationId, token],
