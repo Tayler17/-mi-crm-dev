@@ -576,7 +576,7 @@ export default function PlansPage() {
                     <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: 12 }} disabled={checkingOut === p.id} onClick={() => handleCheckout(p.id)}>
                       {checkingOut === p.id ? i.redirecting : i.subscribe}
                     </button>
-                  ) : !isAdmin ? (
+                  ) : (
                     <a
                       href="mailto:soporte@automarkiq.com?subject=Solicitud de upgrade de plan"
                       className="btn btn-secondary"
@@ -584,7 +584,7 @@ export default function PlansPage() {
                     >
                       {lang === 'en' ? '✉ Contact us to upgrade' : lang === 'pt' ? '✉ Contatar para upgrade' : lang === 'tr' ? '✉ Yükseltmek için iletişim' : lang === 'ar' ? '✉ تواصل للترقية' : '✉ Solicitar upgrade'}
                     </a>
-                  ) : null}
+                  )}
                   {isAdmin && (
                     <>
                       <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => { setEditing(p); setShowModal(true); }}>{i.edit}</button>

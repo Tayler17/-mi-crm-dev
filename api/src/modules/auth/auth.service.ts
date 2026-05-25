@@ -272,7 +272,11 @@ export class AuthService {
     try {
       await checkPlanLimit(this.db, tenantId, 'users');
       const email = dto.email.trim().toLowerCase();
-      const exists = await this.userRepo.findOne({ where: { email, tenantId } });
+      // Use raw query with explicit ::uuid cast to avoid TypeORM varchar=uuid type mismatch
+      const [exists] = await this.db.query(
+        'SELECT id FROM users WHERE email=$1 AND tenant_id=$2::uuid LIMIT 1',
+        [email, tenantId],
+      );
       if (exists) throw new ConflictException('Ya existe un usuario con ese email en este tenant');
       const passwordHash = await bcrypt.hash(dto.password, 10);
       const user = this.userRepo.create({
