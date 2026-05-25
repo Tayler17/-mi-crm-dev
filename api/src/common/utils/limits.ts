@@ -15,6 +15,7 @@ export async function checkPlanLimit(
        p.max_users, p.max_contacts, p.max_inboxes, p.max_call_minutes,
        p.max_ai_chatbots, p.max_call_bots, p.max_campaigns, p.max_automations, p.max_flows,
        p.allow_overage,
+       t.stripe_subscription_status, t.plan_expires_at,
        (SELECT COUNT(*)::int FROM users            WHERE tenant_id::text=$1 AND is_active=true)  AS users_count,
        (SELECT COUNT(*)::int FROM contacts         WHERE tenant_id::text=$1)                     AS contacts_count,
        (SELECT COUNT(*)::int FROM inboxes          WHERE tenant_id::text=$1)                     AS inboxes_count,
@@ -38,6 +39,13 @@ export async function checkPlanLimit(
   // If plan allows overage (pay-as-you-go), never block resource creation
   if (row.allow_overage) return;
 
+  // If plan is expired or subscription is not active, apply FREE plan limits
+  const subStatus = row.stripe_subscription_status ?? 'none';
+  const planExpiry = row.plan_expires_at ? new Date(row.plan_expires_at) : null;
+  const isExpired  = planExpiry ? planExpiry < new Date() : false;
+  const isActive   = ['active', 'trialing'].includes(subStatus);
+  const useFree    = isExpired && !isActive;
+
   // Safety net: if tenant has no plan assigned (plan_id NULL), apply FREE plan limits
   const FREE: Record<string, number> = {
     max_users: 2, max_contacts: 500, max_inboxes: 1,
@@ -45,7 +53,7 @@ export async function checkPlanLimit(
     max_campaigns: 2, max_automations: 5, max_flows: 2,
   };
   const lim = (col: string, fallback: number) =>
-    row[col] != null ? Number(row[col]) : (FREE[col] ?? fallback);
+    useFree ? (FREE[col] ?? fallback) : (row[col] != null ? Number(row[col]) : (FREE[col] ?? fallback));
 
   const checks: Record<Resource, { limit: number; count: number; label: string }> = {
     users:        { limit: lim('max_users', 2),         count: row.users_count,                        label: 'usuarios' },
