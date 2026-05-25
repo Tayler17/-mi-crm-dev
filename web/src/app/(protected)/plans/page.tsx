@@ -375,6 +375,14 @@ export default function PlansPage() {
   const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
   const [checkingOut,  setCheckingOut]  = useState<string | null>(null);
 
+  // Detect role: owner/admin can manage plans; tenants only browse
+  const isAdmin = (() => {
+    try {
+      const role = JSON.parse(localStorage.getItem('user') || '{}').role;
+      return role === 'owner' || role === 'admin';
+    } catch { return false; }
+  })();
+
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
@@ -382,7 +390,7 @@ export default function PlansPage() {
     try {
       const [p, t, sub] = await Promise.all([
         getPlans(),
-        getTenantsWithPlans(),
+        isAdmin ? getTenantsWithPlans() : Promise.resolve([]),
         getBillingSubscription().catch(() => null),
       ]);
       setPlans(p); setTenants(t); setSubscription(sub);
@@ -452,7 +460,7 @@ export default function PlansPage() {
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>{i.plansTitle}</h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>{i.plansSubtitle}</p>
         </div>
-        {tab === 'plans' && (
+        {isAdmin && tab === 'plans' && (
           <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>
             + {i.newPlan}
           </button>
@@ -484,8 +492,10 @@ export default function PlansPage() {
       )}
 
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: 24 }}>
-        <button style={tabStyle('plans')}   onClick={() => setTab('plans')}>{i.plansTab} ({plans.length})</button>
-        <button style={tabStyle('tenants')} onClick={() => setTab('tenants')}>{i.tenantsTab} ({tenants.length})</button>
+        <button style={tabStyle('plans')} onClick={() => setTab('plans')}>{i.plansTab} ({plans.length})</button>
+        {isAdmin && (
+          <button style={tabStyle('tenants')} onClick={() => setTab('tenants')}>{i.tenantsTab} ({tenants.length})</button>
+        )}
       </div>
 
       {loading ? (
@@ -560,17 +570,27 @@ export default function PlansPage() {
                 </div>
 
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', paddingTop: 4, borderTop: '1px solid var(--border)' }}>
-                  {p.stripe_price_id && (
-                    subscription?.plan_id === p.id ? (
-                      <span style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, background: '#dcfce7', color: '#15803d', fontWeight: 600 }}>{i.currentPlan}</span>
-                    ) : (
-                      <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: 12 }} disabled={checkingOut === p.id} onClick={() => handleCheckout(p.id)}>
-                        {checkingOut === p.id ? i.redirecting : i.subscribe}
-                      </button>
-                    )
+                  {subscription?.plan_id === p.id ? (
+                    <span style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, background: '#dcfce7', color: '#15803d', fontWeight: 600 }}>{i.currentPlan}</span>
+                  ) : p.stripe_price_id ? (
+                    <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: 12 }} disabled={checkingOut === p.id} onClick={() => handleCheckout(p.id)}>
+                      {checkingOut === p.id ? i.redirecting : i.subscribe}
+                    </button>
+                  ) : !isAdmin ? (
+                    <a
+                      href="mailto:soporte@automarkiq.com?subject=Solicitud de upgrade de plan"
+                      className="btn btn-secondary"
+                      style={{ padding: '4px 12px', fontSize: 12, textDecoration: 'none' }}
+                    >
+                      {lang === 'en' ? '✉ Contact us to upgrade' : lang === 'pt' ? '✉ Contatar para upgrade' : lang === 'tr' ? '✉ Yükseltmek için iletişim' : lang === 'ar' ? '✉ تواصل للترقية' : '✉ Solicitar upgrade'}
+                    </a>
+                  ) : null}
+                  {isAdmin && (
+                    <>
+                      <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => { setEditing(p); setShowModal(true); }}>{i.edit}</button>
+                      <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12, color: 'var(--danger)' }} onClick={() => handleDelete(p)}>{i.delete}</button>
+                    </>
                   )}
-                  <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => { setEditing(p); setShowModal(true); }}>{i.edit}</button>
-                  <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12, color: 'var(--danger)' }} onClick={() => handleDelete(p)}>{i.delete}</button>
                 </div>
               </div>
             ))}

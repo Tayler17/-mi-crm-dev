@@ -268,6 +268,7 @@ export class AuthService {
   }
 
   async createUser(dto: CreateUserDto, tenantId: string) {
+    if (!tenantId) throw new BadRequestException('Tenant ID no encontrado. Vuelve a iniciar sesión.');
     await checkPlanLimit(this.db, tenantId, 'users');
     const email = dto.email.trim().toLowerCase();
     const exists = await this.userRepo.findOne({ where: { email, tenantId } });
@@ -280,10 +281,22 @@ export class AuthService {
       passwordHash,
       role: dto.role ?? 'agent',
       isActive: true,
+      availability: 'online',
     });
-    const saved = await this.userRepo.save(user);
-    const { passwordHash: _, ...result } = saved as any;
-    return result;
+    try {
+      const saved = await this.userRepo.save(user);
+      const { passwordHash: _, ...result } = saved as any;
+      return result;
+    } catch (e: any) {
+      const msg: string = e?.message ?? '';
+      if (msg.includes('unique') || msg.includes('duplicate') || msg.includes('already exists')) {
+        throw new ConflictException('Ya existe un usuario con ese email.');
+      }
+      if (msg.includes('violates not-null') || msg.includes('null value')) {
+        throw new BadRequestException(`Error de datos: ${msg}`);
+      }
+      throw new BadRequestException(`No se pudo crear el usuario: ${msg}`);
+    }
   }
 
   async updateUser(id: string, dto: UpdateUserDto, tenantId: string) {

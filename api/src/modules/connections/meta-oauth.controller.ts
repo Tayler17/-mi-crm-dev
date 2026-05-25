@@ -39,7 +39,8 @@ export class MetaOAuthController {
       JSON.stringify({ type: type || 'facebook', tenantId, inboxId, ts: Date.now() }),
     ).toString('base64url');
 
-    // Scopes needed for Messenger + Instagram messaging (new API)
+    // Scopes for Messenger + Instagram (only standard scopes; instagram_business_*
+    // require Meta App Review and are invalid for most apps in the OAuth dialog)
     const scope = [
       'public_profile',
       'business_management',
@@ -47,8 +48,8 @@ export class MetaOAuthController {
       'pages_messaging',
       'pages_read_engagement',
       'pages_manage_metadata',
-      'instagram_business_basic',
-      'instagram_business_manage_messages',
+      'instagram_basic',
+      'instagram_manage_messages',
     ].join(',');
 
     const url =
