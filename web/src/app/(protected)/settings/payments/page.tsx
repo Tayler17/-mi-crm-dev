@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -8,20 +8,22 @@ import {
   type ConnectAccount,
 } from '@/lib/api';
 
-export default function PaymentsSettingsPage() {
+// ── Inner component (uses useSearchParams — must be inside <Suspense>) ────────
+
+function PaymentsSettingsContent() {
   const params = useSearchParams();
-  const [account, setAccount]             = useState<ConnectAccount | null>(null);
-  const [loading, setLoading]             = useState(true);
-  const [working, setWorking]             = useState(false);
-  const [error, setError]                 = useState('');
-  const [successMsg, setSuccessMsg]       = useState('');
-  const [hasFeature, setHasFeature]       = useState<boolean | null>(null);
+  const [account, setAccount]       = useState<ConnectAccount | null>(null);
+  const [loading, setLoading]       = useState(true);
+  const [working, setWorking]       = useState(false);
+  const [error, setError]           = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+  const [hasFeature, setHasFeature] = useState<boolean | null>(null);
 
   useEffect(() => {
     const success = params.get('success');
     const refresh = params.get('refresh');
     if (success === '1') setSuccessMsg('✅ Onboarding completado. Sincronizando estado...');
-    if (refresh === '1')  setSuccessMsg('🔄 Sesión expirada — generando nuevo enlace de onboarding...');
+    if (refresh === '1') setSuccessMsg('🔄 Sesión expirada — generando nuevo enlace de onboarding...');
 
     // Check plan feature first
     getCurrentPlan()
@@ -265,5 +267,15 @@ export default function PaymentsSettingsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Page export — wraps content in Suspense (required for useSearchParams) ────
+
+export default function PaymentsSettingsPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 40, color: 'var(--text-muted)' }}>Cargando...</div>}>
+      <PaymentsSettingsContent />
+    </Suspense>
   );
 }
