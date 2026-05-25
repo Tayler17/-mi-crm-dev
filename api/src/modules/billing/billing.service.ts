@@ -306,6 +306,34 @@ export class BillingService {
     return status;
   }
 
+  // ── Connect: Payment Links ────────────────────────────────────────────────
+
+  async createConnectPaymentLink(tenantId: string, params: {
+    amount: number;
+    currency: string;
+    description: string;
+    dealId?: string;
+  }): Promise<{ url: string; sessionId: string }> {
+    const row = await this.getConnectAccount(tenantId);
+    if (!row?.account_id) throw new BadRequestException('No tienes una cuenta de Stripe Connect activa. Ve a Configuración → Pagos para conectarla.');
+    if (!row.charges_enabled) throw new BadRequestException('Tu cuenta de Stripe aún no tiene cobros habilitados. Completa el onboarding en Configuración → Pagos.');
+
+    const provider = await this.getProvider(tenantId);
+    if (!(provider as any).createConnectCheckoutSession) throw new BadRequestException('Provider does not support Connect checkout');
+
+    const base = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const returnPath = params.dealId ? `/deals/${params.dealId}` : '/deals';
+
+    return (provider as any).createConnectCheckoutSession({
+      accountId:   row.account_id,
+      amount:      params.amount,
+      currency:    params.currency,
+      description: params.description,
+      successUrl:  `${base}${returnPath}?payment=success`,
+      cancelUrl:   `${base}${returnPath}?payment=cancelled`,
+    });
+  }
+
   // ── Transactions ─────────────────────────────────────────────────────────
 
   async getTransactions(tenantId: string, limit = 50) {

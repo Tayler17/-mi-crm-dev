@@ -1199,6 +1199,13 @@ export const syncConnectAccount = () =>
     '/billing/connect/sync', {},
   );
 
+export const createConnectPaymentLink = (data: {
+  amount: number;
+  currency: string;
+  description: string;
+  dealId?: string;
+}) => apiPost<{ url: string; sessionId: string }>('/billing/connect/payment-link', data);
+
 // ── Backups ───────────────────────────────────────────────────────────────────
 
 export interface BackupLog {

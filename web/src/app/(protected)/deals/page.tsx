@@ -358,20 +358,25 @@ export default function DealsPage() {
                     placeholder="🔍 Buscar contacto…"
                     value={contactSearch}
                     onChange={(e) => { setContactSearch(e.target.value); setContactId(''); }}
-                    style={{ marginBottom: 4 }}
                   />
-                  <select
-                    className="form-input"
-                    value={contactId}
-                    onChange={(e) => setContactId(e.target.value)}
-                    size={Math.min(6, (contacts.filter((c) => !contactSearch || (c.fullName || '').toLowerCase().includes(contactSearch.toLowerCase())).length) + 1)}
-                    style={{ height: 'auto' }}
-                  >
-                    <option value="">{i.noContactOption}</option>
-                    {contacts
-                      .filter((c) => !contactSearch || (c.fullName || '').toLowerCase().includes(contactSearch.toLowerCase()))
-                      .map((c) => <option key={c.id} value={c.id}>{c.fullName}</option>)}
-                  </select>
+                  {contactSearch && (
+                    <select
+                      className="form-input"
+                      size={Math.min(5, contacts.filter((c) => (c.fullName || '').toLowerCase().includes(contactSearch.toLowerCase())).length + 1)}
+                      style={{ height: 'auto', marginTop: 2 }}
+                      onChange={(e) => { setContactId(e.target.value); setContactSearch(contacts.find((c) => c.id === e.target.value)?.fullName || ''); }}
+                    >
+                      <option value="">— Sin contacto —</option>
+                      {contacts
+                        .filter((c) => (c.fullName || '').toLowerCase().includes(contactSearch.toLowerCase()))
+                        .map((c) => <option key={c.id} value={c.id}>{c.fullName}</option>)}
+                    </select>
+                  )}
+                  {contactId && !contactSearch && (
+                    <div style={{ fontSize: 12, color: '#10b981', marginTop: 2 }}>
+                      ✓ {contacts.find((c) => c.id === contactId)?.fullName}
+                    </div>
+                  )}
                 </div>
                 <div className="form-group">
                   <label className="form-label">{i.pipeline}</label>

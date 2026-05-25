@@ -58,6 +58,15 @@ export class BillingController {
     return this.billing.syncConnectAccount(tenantId);
   }
 
+  @Post('connect/payment-link')
+  @UseGuards(JwtAuthGuard)
+  createPaymentLink(
+    @TenantId() tenantId: string,
+    @Body() dto: { amount: number; currency: string; description: string; dealId?: string },
+  ) {
+    return this.billing.createConnectPaymentLink(tenantId, dto);
+  }
+
   // ── Webhook (raw body — no auth) ─────────────────────────────────────────
 
   @Post('webhook')

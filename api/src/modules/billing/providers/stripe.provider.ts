@@ -117,6 +117,45 @@ export class StripeProvider implements PaymentProvider {
     return { url: link.url };
   }
 
+  /** Creates a one-time Checkout Session on behalf of a connected account */
+  async createConnectCheckoutSession(params: {
+    accountId: string;
+    amount: number;
+    currency: string;
+    description: string;
+    successUrl: string;
+    cancelUrl: string;
+    applicationFeePercent?: number; // platform fee %, default 0
+  }): Promise<{ url: string; sessionId: string }> {
+    const stripe = await this.sdk();
+    const amountCents = Math.round(params.amount * 100);
+    const feePercent = params.applicationFeePercent ?? 0;
+    const appFee = feePercent > 0 ? Math.round(amountCents * feePercent / 100) : 0;
+
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: 'payment',
+        line_items: [{
+          price_data: {
+            currency: params.currency.toLowerCase(),
+            product_data: { name: params.description || 'Pago' },
+            unit_amount: amountCents,
+          },
+          quantity: 1,
+        }],
+        success_url: params.successUrl,
+        cancel_url:  params.cancelUrl,
+        ...(appFee > 0 ? {
+          payment_intent_data: {
+            application_fee_amount: appFee,
+          },
+        } : {}),
+      },
+      { stripeAccount: params.accountId },
+    );
+    return { url: session.url, sessionId: session.id };
+  }
+
   async createTransfer(params: { accountId: string; amount: number; currency: string; description?: string }): Promise<{ transferId: string }> {
     const stripe = await this.sdk();
     const transfer = await stripe.transfers.create({

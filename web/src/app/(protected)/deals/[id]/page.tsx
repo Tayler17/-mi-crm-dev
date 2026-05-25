@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   getDealDetail, updateDeal, deleteDeal, updateDealStage,
   getPipelineStages, getCallBots, initiateCall,
-  getContacts, getCompanies,
+  getContacts, getCompanies, createConnectPaymentLink,
   type DealDetail, type PipelineStage, type CallBot,
 } from '@/lib/api';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
@@ -138,23 +138,32 @@ function EditModal({ deal, onSave, onClose }: { deal: any; onSave: (d: any) => P
                 className="form-input"
                 placeholder="🔍 Buscar contacto…"
                 value={contactSearch}
-                onChange={(e) => setContactSearch(e.target.value)}
-                style={{ marginBottom: 4 }}
+                onChange={(e) => { setContactSearch(e.target.value); if (!e.target.value) setForm((p) => ({ ...p, contactId: '' })); }}
               />
-              <select
-                className="form-input"
-                value={form.contactId}
-                onChange={(e) => setForm((p) => ({ ...p, contactId: e.target.value }))}
-                size={Math.min(6, contacts.filter((c) => !contactSearch || (c.full_name || c.fullName || '').toLowerCase().includes(contactSearch.toLowerCase())).length + 1)}
-                style={{ height: 'auto' }}
-              >
-                <option value="">— Sin contacto —</option>
-                {contacts
-                  .filter((c) => !contactSearch || (c.full_name || c.fullName || '').toLowerCase().includes(contactSearch.toLowerCase()))
-                  .map((c) => (
-                    <option key={c.id} value={c.id}>{c.full_name || c.fullName || c.email || c.id}</option>
-                  ))}
-              </select>
+              {contactSearch && (
+                <select
+                  className="form-input"
+                  size={Math.min(5, contacts.filter((c) => (c.full_name || c.fullName || '').toLowerCase().includes(contactSearch.toLowerCase())).length + 1)}
+                  style={{ height: 'auto', marginTop: 2 }}
+                  onChange={(e) => {
+                    const name = contacts.find((c) => c.id === e.target.value);
+                    setForm((p) => ({ ...p, contactId: e.target.value }));
+                    setContactSearch(name ? (name.full_name || name.fullName || '') : '');
+                  }}
+                >
+                  <option value="">— Sin contacto —</option>
+                  {contacts
+                    .filter((c) => (c.full_name || c.fullName || '').toLowerCase().includes(contactSearch.toLowerCase()))
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>{c.full_name || c.fullName || c.email || c.id}</option>
+                    ))}
+                </select>
+              )}
+              {form.contactId && !contactSearch && (
+                <div style={{ fontSize: 12, color: '#10b981', marginTop: 2 }}>
+                  ✓ {contacts.find((c) => c.id === form.contactId)?.full_name || contacts.find((c) => c.id === form.contactId)?.fullName}
+                </div>
+              )}
             </div>
             <div className="form-group" style={{ margin: 0 }}>
               <label className="form-label">Empresa</label>
@@ -256,6 +265,106 @@ function DialModal({ contactPhone, onClose }: { contactPhone: string; onClose: (
   );
 }
 
+function PaymentLinkModal({ deal, onClose }: { deal: any; onClose: () => void }) {
+  const [amount, setAmount]       = useState(String(deal.value || ''));
+  const [currency, setCurrency]   = useState(deal.currency || 'USD');
+  const [desc, setDesc]           = useState(deal.title || '');
+  const [working, setWorking]     = useState(false);
+  const [result, setResult]       = useState<{ url: string } | null>(null);
+  const [error, setError]         = useState('');
+  const [copied, setCopied]       = useState(false);
+
+  async function handleCreate() {
+    if (!amount || Number(amount) <= 0) { setError('El importe debe ser mayor a 0'); return; }
+    setWorking(true); setError('');
+    try {
+      const res = await createConnectPaymentLink({
+        amount: Number(amount),
+        currency,
+        description: desc || deal.title,
+        dealId: deal.id,
+      });
+      setResult(res);
+    } catch (e: any) { setError(e.message); }
+    finally { setWorking(false); }
+  }
+
+  function handleCopy() {
+    if (!result?.url) return;
+    navigator.clipboard.writeText(result.url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2500); });
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 style={{ margin: 0, fontSize: 18 }}>💳 Generar link de pago</h2>
+          <button className="btn btn-ghost" onClick={onClose}>✕</button>
+        </div>
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {result ? (
+            <>
+              <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 10, padding: '12px 16px', fontSize: 14, color: '#166534', fontWeight: 500 }}>
+                ✅ Link generado correctamente
+              </div>
+              <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: '10px 14px', fontSize: 13, wordBreak: 'break-all', color: 'var(--text-muted)' }}>
+                {result.url}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleCopy}>
+                  {copied ? '✓ Copiado!' : '📋 Copiar link'}
+                </button>
+                <a href={result.url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ flex: 1, textAlign: 'center', textDecoration: 'none' }}>
+                  🔗 Abrir en Stripe
+                </a>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
+                Comparte este link con tu cliente por WhatsApp, email o mensaje directo.
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Importe</label>
+                  <input type="number" min="0.01" step="0.01" className="form-input" value={amount}
+                    onChange={(e) => setAmount(e.target.value)} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Moneda</label>
+                  <select className="form-input" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                    {['USD','EUR','GBP','MXN','COP','ARS','CLP','PEN','BRL'].map((c) => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Descripción (visible al cliente)</label>
+                <input className="form-input" value={desc} onChange={(e) => setDesc(e.target.value)}
+                  placeholder="Ej: Servicio de recogida, Factura #123..." />
+              </div>
+              {error && (
+                <div style={{ fontSize: 13, color: '#dc2626', background: '#fef2f2', padding: '8px 12px', borderRadius: 6 }}>
+                  {error.includes('Configuración → Pagos') ? (
+                    <>{error.split('Configuración → Pagos')[0]}<a href="/settings/payments" style={{ color: '#dc2626', fontWeight: 700 }}>Configuración → Pagos</a></>
+                  ) : error}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn btn-secondary" onClick={onClose}>{result ? 'Cerrar' : 'Cancelar'}</button>
+          {!result && (
+            <button className="btn btn-primary" disabled={working} onClick={handleCreate}>
+              {working ? 'Generando...' : '💳 Generar link'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StageSelector({ deal, onStageChange }: { deal: any; onStageChange: (stageId: string) => Promise<void> }) {
   const { lang } = useLangCtx();
   const i = APP[lang];
@@ -308,6 +417,7 @@ export default function DealDetailPage() {
   const [activeTab, setActiveTab] = useState<'overview' | 'tasks' | 'conversations' | 'calls' | 'notes' | 'activity' | 'custom'>('overview');
   const [showEdit, setShowEdit] = useState(false);
   const [showDial, setShowDial] = useState(false);
+  const [showPayment, setShowPayment] = useState(false);
   const [expandedTranscript, setExpandedTranscript] = useState<string | null>(null);
 
   const dealStatusLabels: Record<string, string> = {
@@ -401,10 +511,11 @@ export default function DealDetailPage() {
               <div style={{ fontSize: 30, fontWeight: 800, color: '#10b981' }}>{currency(d.value, i.locale)}</div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{d.currency ?? 'USD'}</div>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {d.contact?.phone && (
                 <button className="btn btn-secondary" onClick={() => setShowDial(true)}>{i.callBotDialBtn}</button>
               )}
+              <button className="btn btn-secondary" onClick={() => setShowPayment(true)}>💳 Link de pago</button>
               <button className="btn btn-secondary" onClick={() => setShowEdit(true)}>✏ {i.edit}</button>
               <button className="btn btn-ghost" style={{ color: 'var(--danger)' }} onClick={handleDelete}>{i.delete}</button>
             </div>
@@ -658,6 +769,7 @@ export default function DealDetailPage() {
 
       {showEdit && <EditModal deal={d} onSave={handleUpdate} onClose={() => setShowEdit(false)} />}
       {showDial && <DialModal contactPhone={d.contact?.phone ?? ''} onClose={() => { setShowDial(false); reload(); }} />}
+      {showPayment && <PaymentLinkModal deal={d} onClose={() => setShowPayment(false)} />}
     </div>
   );
 }
