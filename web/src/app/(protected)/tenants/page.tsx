@@ -405,7 +405,7 @@ export default function TenantsPage() {
                         </span>
                       ) : t.trialEndsAt ? (
                         <span style={{ color: '#f59e0b' }}>🎁 Trial hasta {fmtDate(t.trialEndsAt, i.locale)}</span>
-                      ) : t.stripeSubscriptionStatus ? (
+                      ) : t.stripeSubscriptionStatus && t.stripeSubscriptionStatus !== 'none' ? (
                         <span style={{
                           color: t.stripeSubscriptionStatus === 'active' ? '#10b981'
                                : t.stripeSubscriptionStatus === 'trialing' ? '#6366f1'
@@ -416,7 +416,7 @@ export default function TenantsPage() {
                           💳 Stripe: {t.stripeSubscriptionStatus}
                         </span>
                       ) : (
-                        <span style={{ color: 'var(--text-muted)' }}>Sin fecha de vencimiento</span>
+                        <span style={{ color: '#f59e0b', fontWeight: 500 }}>⚠️ Sin fecha de vencimiento</span>
                       )}
                       {t.planPrice !== null && t.planPrice !== undefined && t.planPrice > 0 && (
                         <span>{t.planCurrency} {t.planPrice}/{t.planBillingPeriod}</span>
