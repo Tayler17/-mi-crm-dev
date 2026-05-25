@@ -13,7 +13,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build --r
 
 echo "==> Cleaning unused resources"
 docker image prune -f
-docker volume prune -f
+# NOTE: Never run 'docker volume prune' here — it risks deleting the PostgreSQL data volume
 docker builder prune --keep-storage 3GB -f
 
 echo "✅  Update complete"

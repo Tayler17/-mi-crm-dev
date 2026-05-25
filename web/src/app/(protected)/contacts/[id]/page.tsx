@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   getContactProfile, updateContact, deleteContact, getTags,
-  addContactTag, removeContactTag,
+  addContactTag, removeContactTag, getCompanies,
   type ContactProfile, type Tag,
 } from '@/lib/api';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
@@ -63,8 +63,14 @@ function EditModal({ contact, onSave, onClose }: { contact: any; onSave: (data: 
     location: contact.location || '',
     website: contact.website || '',
     notes: contact.notes || '',
+    companyId: contact.company_id || contact.companyId || '',
     _lidPhone: isLidPhone ? rawPhone : '',
   });
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    getCompanies().then((list) => setCompanies(list)).catch(() => {});
+  }, []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -128,6 +134,13 @@ function EditModal({ contact, onSave, onClose }: { contact: any; onSave: (data: 
               <label className="form-label">Sitio web</label>
               <input className="form-input" value={form.website} onChange={(e) => setForm((p) => ({ ...p, website: e.target.value }))} placeholder="https://..." />
             </div>
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Empresa</label>
+            <select className="form-input" value={form.companyId} onChange={(e) => setForm((p) => ({ ...p, companyId: e.target.value }))}>
+              <option value="">— Sin empresa —</option>
+              {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
           </div>
           <div className="form-group" style={{ margin: 0 }}>
             <label className="form-label">Notas internas</label>
