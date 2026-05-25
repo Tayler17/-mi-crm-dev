@@ -375,13 +375,15 @@ export default function PlansPage() {
   const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
   const [checkingOut,  setCheckingOut]  = useState<string | null>(null);
 
-  // Detect role: owner/admin can manage plans; tenants only browse
-  const isAdmin = (() => {
+  // Only the platform owner can create/edit/delete plans and see the Tenants tab.
+  // Tenant admins (role='admin') can browse plans and request upgrades, but cannot manage them.
+  const isOwner = (() => {
     try {
-      const role = JSON.parse(localStorage.getItem('user') || '{}').role;
-      return role === 'owner' || role === 'admin';
+      return JSON.parse(localStorage.getItem('user') || '{}').role === 'owner';
     } catch { return false; }
   })();
+  // Keep isAdmin as alias so existing non-management references stay readable
+  const isAdmin = isOwner;
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
