@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   getDealDetail, updateDeal, deleteDeal, updateDealStage,
   getPipelineStages, getCallBots, initiateCall,
+  getContacts, getCompanies,
   type DealDetail, type PipelineStage, type CallBot,
 } from '@/lib/api';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
@@ -63,14 +64,31 @@ function EditModal({ deal, onSave, onClose }: { deal: any; onSave: (d: any) => P
     priority: deal.priority || 'medium',
     expectedCloseDate: deal.expected_close_date ? deal.expected_close_date.slice(0, 10) : '',
     notes: deal.notes || '',
+    contactId: deal.contact_id || deal.contactId || '',
+    companyId: deal.company_id || deal.companyId || '',
   });
+  const [contacts, setContacts] = useState<{ id: string; full_name?: string; fullName?: string; email?: string }[]>([]);
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [contactSearch, setContactSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    getContacts().then((list: any[]) => setContacts(list)).catch(() => {});
+    getCompanies().then((list: any[]) => setCompanies(list)).catch(() => {});
+  }, []);
 
   async function handleSave() {
     if (!form.title.trim()) { setError(i.dealErrTitle); return; }
     setSaving(true); setError('');
-    try { await onSave(form); onClose(); }
+    try {
+      await onSave({
+        ...form,
+        contactId: form.contactId || null,
+        companyId: form.companyId || null,
+      });
+      onClose();
+    }
     catch (e: any) { setError(e.message); }
     finally { setSaving(false); }
   }
@@ -112,6 +130,39 @@ function EditModal({ deal, onSave, onClose }: { deal: any; onSave: (d: any) => P
           <div className="form-group" style={{ margin: 0 }}>
             <label className="form-label">Fecha estimada de cierre</label>
             <input type="date" className="form-input" value={form.expectedCloseDate} onChange={(e) => setForm((p) => ({ ...p, expectedCloseDate: e.target.value }))} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Contacto</label>
+              <input
+                className="form-input"
+                placeholder="🔍 Buscar contacto…"
+                value={contactSearch}
+                onChange={(e) => setContactSearch(e.target.value)}
+                style={{ marginBottom: 4 }}
+              />
+              <select
+                className="form-input"
+                value={form.contactId}
+                onChange={(e) => setForm((p) => ({ ...p, contactId: e.target.value }))}
+                size={Math.min(6, contacts.filter((c) => !contactSearch || (c.full_name || c.fullName || '').toLowerCase().includes(contactSearch.toLowerCase())).length + 1)}
+                style={{ height: 'auto' }}
+              >
+                <option value="">— Sin contacto —</option>
+                {contacts
+                  .filter((c) => !contactSearch || (c.full_name || c.fullName || '').toLowerCase().includes(contactSearch.toLowerCase()))
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>{c.full_name || c.fullName || c.email || c.id}</option>
+                  ))}
+              </select>
+            </div>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Empresa</label>
+              <select className="form-input" value={form.companyId} onChange={(e) => setForm((p) => ({ ...p, companyId: e.target.value }))}>
+                <option value="">— Sin empresa —</option>
+                {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
           </div>
           <div className="form-group" style={{ margin: 0 }}>
             <label className="form-label">{i.notes}</label>

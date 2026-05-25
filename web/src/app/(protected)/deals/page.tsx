@@ -44,6 +44,7 @@ export default function DealsPage() {
   const [currency, setCurrency]     = useState('USD');
   const [priority, setPriority]     = useState('medium');
   const [contactId, setContactId]   = useState('');
+  const [contactSearch, setContactSearch] = useState('');
   const [pipelineId, setPipelineId] = useState('');
   const [stageId, setStageId]       = useState('');
   const [formStages, setFormStages] = useState<PipelineStage[]>([]);
@@ -104,7 +105,7 @@ export default function DealsPage() {
   // ─── create
   function openCreate() {
     setTitle(''); setValue(''); setCurrency('USD'); setPriority('medium');
-    setContactId(''); setPipelineId(''); setStageId(''); setFormError('');
+    setContactId(''); setContactSearch(''); setPipelineId(''); setStageId(''); setFormError('');
     setShowCreate(true);
   }
 
@@ -352,9 +353,24 @@ export default function DealsPage() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">{i.contactLabel}</label>
-                  <select className="form-input" value={contactId} onChange={(e) => setContactId(e.target.value)}>
+                  <input
+                    className="form-input"
+                    placeholder="🔍 Buscar contacto…"
+                    value={contactSearch}
+                    onChange={(e) => { setContactSearch(e.target.value); setContactId(''); }}
+                    style={{ marginBottom: 4 }}
+                  />
+                  <select
+                    className="form-input"
+                    value={contactId}
+                    onChange={(e) => setContactId(e.target.value)}
+                    size={Math.min(6, (contacts.filter((c) => !contactSearch || (c.fullName || '').toLowerCase().includes(contactSearch.toLowerCase())).length) + 1)}
+                    style={{ height: 'auto' }}
+                  >
                     <option value="">{i.noContactOption}</option>
-                    {contacts.map((c) => <option key={c.id} value={c.id}>{c.fullName}</option>)}
+                    {contacts
+                      .filter((c) => !contactSearch || (c.fullName || '').toLowerCase().includes(contactSearch.toLowerCase()))
+                      .map((c) => <option key={c.id} value={c.id}>{c.fullName}</option>)}
                   </select>
                 </div>
                 <div className="form-group">

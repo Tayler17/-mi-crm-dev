@@ -80,7 +80,11 @@ function EditModal({ contact, onSave, onClose }: { contact: any; onSave: (data: 
     try {
       // If user left phone blank and it was a LID, preserve the LID value
       const phoneToSave = form.phone.trim() || form._lidPhone || undefined;
-      await onSave({ ...form, phone: phoneToSave });
+      await onSave({
+        ...form,
+        phone: phoneToSave,
+        companyId: form.companyId || null,  // empty string → null (UUID validator rejects '')
+      });
       onClose();
     }
     catch (e: any) { setError(e.message); }
