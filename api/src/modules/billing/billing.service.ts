@@ -324,14 +324,27 @@ export class BillingService {
     const base = process.env.FRONTEND_URL || 'http://localhost:3000';
     const returnPath = params.dealId ? `/deals/${params.dealId}` : '/deals';
 
-    return (provider as any).createConnectCheckoutSession({
-      accountId:   row.account_id,
-      amount:      params.amount,
-      currency:    params.currency,
-      description: params.description,
-      successUrl:  `${base}${returnPath}?payment=success`,
-      cancelUrl:   `${base}${returnPath}?payment=cancelled`,
-    });
+    try {
+      return await (provider as any).createConnectCheckoutSession({
+        accountId:   row.account_id,
+        amount:      params.amount,
+        currency:    params.currency,
+        description: params.description,
+        successUrl:  `${base}${returnPath}?payment=success`,
+        cancelUrl:   `${base}${returnPath}?payment=cancelled`,
+      });
+    } catch (e: any) {
+      if (e?.status) throw e; // re-throw our own HttpExceptions as-is
+      const msg: string = e?.message ?? String(e);
+      const type: string = e?.type ?? '';
+      if (type === 'StripeAuthenticationError' || msg.includes('Invalid API Key') || msg.includes('No API key')) {
+        throw new BadRequestException('La Secret Key de Stripe es inválida. Ve a Configuración → Plataforma → Stripe.');
+      }
+      if (msg.includes('No such account') || msg.includes('account')) {
+        throw new BadRequestException('La cuenta de Stripe Connect no se encontró. Puede que hayas configurado la cuenta en modo test y estés usando una clave live (o viceversa). Ve a Configuración → Pagos para reconectar.');
+      }
+      throw new BadRequestException(`Error al crear el link de pago: ${msg}`);
+    }
   }
 
   // ── Transactions ─────────────────────────────────────────────────────────
