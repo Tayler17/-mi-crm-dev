@@ -10,6 +10,7 @@ import { WhatsappWebService } from '../connections/whatsapp-web.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { KnowledgeBaseService } from '../knowledge-base/knowledge-base.service';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
+import { BillingService } from '../billing/billing.service';
 
 interface MediaResult {
   /** Text to pass to the LLM (transcription for audio, empty for images) */
@@ -32,6 +33,7 @@ interface AiResult {
   addTag?: { tagName: string };
   removeTag?: { tagName: string };
   createTask?: { title: string; description?: string; dueDate?: string; priority?: string };
+  createPaymentLink?: { amount: number; currency: string; description: string };
 }
 
 type ChatMessage = {
@@ -49,6 +51,7 @@ export class AiChatbotEngineService {
     private readonly notifications: NotificationsService,
     private readonly kbSvc: KnowledgeBaseService,
     private readonly platformSettings: PlatformSettingsService,
+    private readonly billing: BillingService,
   ) {}
 
   // ── Core processing (called by BotQueueProcessor) ────────────────────────────
@@ -250,12 +253,20 @@ export class AiChatbotEngineService {
       this.logger.error(`[engine] Failed to load transfer queues: ${e.message}`);
     }
 
-    // 6c. Load pipeline stages, existing open deals, and tenant tags for tool calling
+    // 6c. Load pipeline stages, existing open deals, tenant tags, and Stripe Connect status
     let stageNames: string[] = [];
     let stageMap: Record<string, string> = {}; // name.lower → id
     let existingDeals: any[] = [];
     let tagNames: string[] = [];
     let tagMap: Record<string, string> = {}; // name.lower → id
+    let stripeConnectEnabled = false;
+    try {
+      const [connectRow] = await this.db.query(
+        `SELECT charges_enabled FROM payment_accounts WHERE tenant_id=$1 AND provider='stripe'`,
+        [tenantId],
+      ).catch(() => []);
+      stripeConnectEnabled = !!(connectRow?.charges_enabled);
+    } catch {}
     try {
       const stages = await this.db.query(
         `SELECT ps.id, ps.name FROM pipeline_stages ps
@@ -345,8 +356,8 @@ export class AiChatbotEngineService {
     // 9b. RAG: search knowledge base for relevant context
     const ragContext = await this.kbSvc.searchRelevantContext(bot.id, tenantId, userText).catch(() => '');
 
-    // 9c. Call AI — pass queueMap + stages + deals + tags so each provider can use function/tool calling
-    const result = await this.callAi(bot, apiKey, history, media, queueMap, stageNames, stageMap, existingDeals, tagNames, tagMap, ragContext);
+    // 9c. Call AI — pass queueMap + stages + deals + tags + stripeConnect so each provider can use function/tool calling
+    const result = await this.callAi(bot, apiKey, history, media, queueMap, stageNames, stageMap, existingDeals, tagNames, tagMap, ragContext, stripeConnectEnabled);
     if (!result) {
       this.logger.warn(`[engine] AI returned null for conv ${conversationId} (bot "${bot.name}", provider "${bot.provider}") — sending fallback`);
       await this.saveBotMessage(tenantId, conversationId,
@@ -354,7 +365,7 @@ export class AiChatbotEngineService {
       return;
     }
 
-    let { reply, transferTo, resolveConversation, setWaiting, createDeal, updateDeal, addTag, removeTag, createTask } = result;
+    let { reply, transferTo, resolveConversation, setWaiting, createDeal, updateDeal, addTag, removeTag, createTask, createPaymentLink } = result;
     this.logger.log(`[engine] AI reply (first 120): "${reply?.slice(0, 120)}" transferTo="${transferTo ?? 'none'}" resolve=${!!resolveConversation} wait=${!!setWaiting} createDeal=${!!createDeal} updateDeal=${!!updateDeal} addTag=${addTag?.tagName ?? 'none'} removeTag=${removeTag?.tagName ?? 'none'} createTask=${createTask?.title ?? 'none'}`);
 
     // If a CRM action was requested but the AI returned no message, use a generic confirmation
@@ -483,6 +494,31 @@ export class AiChatbotEngineService {
         ? `${createTask.title} · vence ${new Date(createTask.dueDate).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' })}`
         : createTask.title;
       await this.saveActivityMessage(tenantId, conversationId, `🤖 Bot creó tarea: ${taskLabel}`);
+    }
+
+    // 10f. Handle payment link creation
+    if (createPaymentLink && stripeConnectEnabled) {
+      const { amount, currency, description } = createPaymentLink;
+      const clampedAmount = Math.max(1, Math.min(10000, amount ?? 0));
+      if (clampedAmount < 1) {
+        await this.saveBotMessage(tenantId, conversationId, 'El monto mínimo para generar un link de pago es $1.');
+      } else {
+        try {
+          const { url } = await this.billing.createConnectPaymentLink(tenantId, {
+            amount: clampedAmount,
+            currency: (currency || 'USD').toUpperCase(),
+            description: description || 'Pago',
+          });
+          await this.saveBotMessage(tenantId, conversationId, `💳 ${url}`);
+          await this.saveActivityMessage(tenantId, conversationId,
+            `🤖 Bot generó link de pago: ${clampedAmount} ${currency || 'USD'}`);
+          this.logger.log(`[engine] Payment link generated for conv ${conversationId}: ${clampedAmount} ${currency}`);
+        } catch (e: any) {
+          this.logger.warn(`[engine] create_payment_link failed: ${e.message}`);
+          await this.saveBotMessage(tenantId, conversationId,
+            'Lo siento, no pude generar el link de pago en este momento. Por favor contacta a un agente.');
+        }
+      }
     }
 
     // 11. Execute transfer if the AI requested one via function call
@@ -676,6 +712,7 @@ export class AiChatbotEngineService {
     tagNames: string[] = [],
     tagMap: Record<string, string> = {},
     ragContext: string = '',
+    stripeConnectEnabled = false,
   ): Promise<AiResult | null> {
     try {
       const maxTokens   = parseInt(bot.max_tokens,  10) || 300;
@@ -693,6 +730,7 @@ export class AiChatbotEngineService {
       }
       if (tagNames.length > 0)   crmLines.push(`- add_tag: OBLIGATORIO — en cuanto identifiques la intención principal del usuario, aplica la etiqueta más apropiada de esta lista: ${tagNames.join(', ')}. Úsala en la misma respuesta en que queda clara la intención, no esperes al final de la conversación. Si el tema cambia, usa remove_tag para la anterior y add_tag para la nueva.`);
       crmLines.push('- create_task: cuando el usuario pida callback, cotización, recordatorio o cualquier acción de seguimiento.');
+      if (stripeConnectEnabled) crmLines.push('- create_payment_link: SOLO cuando el cliente confirme EXPLÍCITAMENTE que quiere pagar y hayas acordado el monto exacto. Siempre pregunta primero "¿Confirmas el pago de $X [moneda]?" antes de llamar esta herramienta. Monto mínimo $1, máximo $10,000.');
       if (transferTargets.length > 0) crmLines.push(`- transfer_conversation: solo cuando el usuario pida explícitamente hablar con otro departamento o cuando claramente necesitas un servicio que no puedes ofrecer. Destinos: ${transferTargets.join(', ')}.`);
       crmLines.push('- resolve_conversation: cuando el caso del usuario haya quedado completamente resuelto.');
       crmLines.push('Siempre incluye un mensaje de confirmación breve y amigable para el usuario al usar cualquier herramienta.');
@@ -706,9 +744,9 @@ export class AiChatbotEngineService {
       ].filter(Boolean).join('\n\n').trim();
 
       switch (bot.provider) {
-        case 'openai':    return await this.callOpenAi(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames);
-        case 'anthropic': return await this.callAnthropic(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames);
-        case 'gemini':    return await this.callGemini(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames);
+        case 'openai':    return await this.callOpenAi(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled);
+        case 'anthropic': return await this.callAnthropic(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled);
+        case 'gemini':    return await this.callGemini(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled);
         default:
           this.logger.warn(`Unknown AI provider: ${bot.provider}`);
           return null;
@@ -740,7 +778,7 @@ export class AiChatbotEngineService {
   private async callOpenAi(
     apiKey: string, model: string, systemPrompt: string | null,
     history: any[], media: MediaResult, maxTokens: number, temperature: number,
-    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [],
+    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false,
   ): Promise<AiResult> {
     const messages: any[] = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
@@ -771,6 +809,9 @@ export class AiChatbotEngineService {
       tools.push({ type: 'function', function: { name: 'remove_tag', description: 'Remove a tag/label from this contact and conversation.', parameters: { type: 'object', properties: { tag_name: { type: 'string', enum: tagNames, description: 'Tag to remove' }, message: { type: 'string', description: 'Optional short message to the customer (leave empty string if no message needed)' } }, required: ['tag_name', 'message'] } } });
     }
     tools.push({ type: 'function', function: { name: 'create_task', description: 'Create a follow-up task linked to this contact. Use when the customer requests a callback, a quote, or any pending action that must be tracked.', parameters: { type: 'object', properties: { title: { type: 'string', description: 'Short task title (e.g. "Llamar a María el lunes", "Enviar cotización")' }, description: { type: 'string', description: 'Additional details (optional)' }, due_date: { type: 'string', description: 'ISO 8601 date string for the deadline (optional, e.g. "2026-05-01")' }, priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Task priority (default: medium)' }, message: { type: 'string', description: 'Confirmation message to the customer' } }, required: ['title', 'message'] } } });
+    if (stripeConnectEnabled) {
+      tools.push({ type: 'function', function: { name: 'create_payment_link', description: 'Generate a Stripe payment link to send to the customer. RULES: 1) ONLY call after the customer explicitly confirms they want to pay AND you have confirmed the exact amount. 2) Always ask "¿Confirmas el pago de $X [currency]?" BEFORE calling this. 3) Amount: min $1, max $10,000. 4) The link will be sent automatically after generation.', parameters: { type: 'object', properties: { amount: { type: 'number', description: 'Amount to charge (e.g. 150.00). Must be between 1 and 10000.' }, currency: { type: 'string', description: 'Currency code: USD, EUR, GBP, MXN, etc.', default: 'USD' }, description: { type: 'string', description: 'Description visible to the customer on the payment page (e.g. "Consulta médica - 1 hora")' }, message: { type: 'string', description: 'Message to send to the customer confirming the payment link is being sent' } }, required: ['amount', 'currency', 'description', 'message'] } } });
+    }
     body.tools = tools;
     body.tool_choice = 'auto';
 
@@ -789,6 +830,7 @@ export class AiChatbotEngineService {
           case 'add_tag':               return { reply: args.message ?? '', addTag: { tagName: args.tag_name } };
           case 'remove_tag':            return { reply: args.message ?? '', removeTag: { tagName: args.tag_name } };
           case 'create_task':           return { reply: args.message ?? '', createTask: { title: args.title, description: args.description, dueDate: args.due_date, priority: args.priority } };
+          case 'create_payment_link':   return { reply: args.message ?? '', createPaymentLink: { amount: args.amount, currency: args.currency ?? 'USD', description: args.description } };
         }
       } catch { /* fall through */ }
     }
@@ -798,7 +840,7 @@ export class AiChatbotEngineService {
   private async callAnthropic(
     apiKey: string, model: string, systemPrompt: string | null,
     history: any[], media: MediaResult, maxTokens: number, temperature: number,
-    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [],
+    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false,
   ): Promise<AiResult> {
     const chatMsgs: any[] = [...this.historyToMsgs(history)];
     if (media.imageBase64 && media.imageMimeType) {
@@ -824,6 +866,9 @@ export class AiChatbotEngineService {
       tools.push({ name: 'remove_tag', description: 'Remove a tag/label from this contact and conversation.', input_schema: { type: 'object', properties: { tag_name: { type: 'string', enum: tagNames }, message: { type: 'string', description: 'Optional message to the customer (empty string if not needed)' } }, required: ['tag_name', 'message'] } });
     }
     tools.push({ name: 'create_task', description: 'Create a follow-up task linked to this contact. Use when the customer requests a callback, a quote, or any pending action that must be tracked.', input_schema: { type: 'object', properties: { title: { type: 'string' }, description: { type: 'string' }, due_date: { type: 'string', description: 'ISO 8601 date (optional)' }, priority: { type: 'string', enum: ['low', 'medium', 'high'] }, message: { type: 'string' } }, required: ['title', 'message'] } });
+    if (stripeConnectEnabled) {
+      tools.push({ name: 'create_payment_link', description: 'Generate a Stripe payment link to send to the customer. RULES: 1) ONLY call after the customer explicitly confirms they want to pay AND you confirmed the exact amount. 2) Always ask "¿Confirmas el pago de $X [currency]?" BEFORE calling. 3) Amount: min $1, max $10,000.', input_schema: { type: 'object', properties: { amount: { type: 'number', description: 'Amount to charge. Must be between 1 and 10000.' }, currency: { type: 'string', description: 'Currency code: USD, EUR, GBP, MXN, etc.' }, description: { type: 'string', description: 'Description visible to the customer on the payment page' }, message: { type: 'string', description: 'Message to send to the customer' } }, required: ['amount', 'currency', 'description', 'message'] } });
+    }
     body.tools = tools;
 
     const res = await axios.post('https://api.anthropic.com/v1/messages', body, { headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }, timeout: 30000 });
@@ -839,6 +884,7 @@ export class AiChatbotEngineService {
           case 'add_tag':               return { reply: i.message ?? '', addTag: { tagName: i.tag_name } };
           case 'remove_tag':            return { reply: i.message ?? '', removeTag: { tagName: i.tag_name } };
           case 'create_task':           return { reply: i.message ?? '', createTask: { title: i.title, description: i.description, dueDate: i.due_date, priority: i.priority } };
+          case 'create_payment_link':   return { reply: i.message ?? '', createPaymentLink: { amount: i.amount, currency: i.currency ?? 'USD', description: i.description } };
         }
       }
     }
@@ -848,7 +894,7 @@ export class AiChatbotEngineService {
   private async callGemini(
     apiKey: string, model: string, systemPrompt: string | null,
     history: any[], media: MediaResult, maxTokens: number, temperature: number,
-    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [],
+    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false,
   ): Promise<AiResult> {
     const histMsgs = this.historyToMsgs(history);
     const contents = histMsgs.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
@@ -877,6 +923,9 @@ export class AiChatbotEngineService {
       fnDeclarations.push({ name: 'remove_tag', description: 'Remove a tag/label from this contact and conversation.', parameters: { type: 'OBJECT', properties: { tag_name: { type: 'STRING', enum: tagNames }, message: { type: 'STRING', description: 'Optional message to the customer (empty string if not needed)' } }, required: ['tag_name', 'message'] } });
     }
     fnDeclarations.push({ name: 'create_task', description: 'Create a follow-up task linked to this contact. Use when the customer requests a callback, a quote, or any pending action that must be tracked.', parameters: { type: 'OBJECT', properties: { title: { type: 'STRING' }, description: { type: 'STRING' }, due_date: { type: 'STRING', description: 'ISO 8601 date (optional)' }, priority: { type: 'STRING', enum: ['low', 'medium', 'high'] }, message: { type: 'STRING' } }, required: ['title', 'message'] } });
+    if (stripeConnectEnabled) {
+      fnDeclarations.push({ name: 'create_payment_link', description: 'Generate a Stripe payment link to send to the customer. RULES: 1) ONLY call after the customer explicitly confirms they want to pay AND you confirmed the exact amount. 2) Always ask "¿Confirmas el pago de $X [currency]?" BEFORE calling. 3) Amount: min $1, max $10,000.', parameters: { type: 'OBJECT', properties: { amount: { type: 'NUMBER', description: 'Amount to charge. Must be between 1 and 10000.' }, currency: { type: 'STRING', description: 'Currency code: USD, EUR, GBP, MXN, etc.' }, description: { type: 'STRING', description: 'Description visible to the customer on the payment page' }, message: { type: 'STRING', description: 'Message to send to the customer' } }, required: ['amount', 'currency', 'description', 'message'] } });
+    }
     body.tools = [{ functionDeclarations: fnDeclarations }];
 
     const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, body, { headers: { 'Content-Type': 'application/json' }, timeout: 30000 });
@@ -892,6 +941,7 @@ export class AiChatbotEngineService {
         case 'add_tag':               return { reply: args?.message ?? '', addTag: { tagName: args.tag_name } };
         case 'remove_tag':            return { reply: args?.message ?? '', removeTag: { tagName: args.tag_name } };
         case 'create_task':           return { reply: args?.message ?? '', createTask: { title: args.title, description: args.description, dueDate: args.due_date, priority: args.priority } };
+        case 'create_payment_link':   return { reply: args?.message ?? '', createPaymentLink: { amount: args?.amount, currency: args?.currency ?? 'USD', description: args?.description } };
       }
     }
     return { reply: part?.text?.trim() ?? '' };
