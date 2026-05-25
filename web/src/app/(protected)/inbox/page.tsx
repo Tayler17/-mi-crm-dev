@@ -522,6 +522,7 @@ export default function InboxPage() {
   const [newInboxId, setNewInboxId] = useState('');
   const [newSubject, setNewSubject] = useState('');
   const [newChannel, setNewChannel] = useState('email');
+  const [contactSearch, setContactSearch] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
 
@@ -781,7 +782,7 @@ export default function InboxPage() {
       if (newInboxId) payload.inboxId = newInboxId;
       const created = await createConversation(payload as any);
       setShowNew(false);
-      setNewContactId(''); setNewInboxId(''); setNewSubject(''); setNewChannel('email');
+      setNewContactId(''); setNewInboxId(''); setNewSubject(''); setNewChannel('email'); setContactSearch('');
       loadList();
       selectConv(created.id);
     } catch (e: unknown) { setCreateError(e instanceof Error ? e.message : 'Error'); }
@@ -2113,9 +2114,28 @@ export default function InboxPage() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">{i.contactLabel}</label>
-                  <select className="form-input" value={newContactId} onChange={(e) => setNewContactId(e.target.value)}>
+                  <input
+                    className="form-input"
+                    placeholder="🔍 Buscar contacto..."
+                    value={contactSearch}
+                    onChange={(e) => { setContactSearch(e.target.value); setNewContactId(''); }}
+                    style={{ marginBottom: 4 }}
+                  />
+                  <select
+                    className="form-input"
+                    value={newContactId}
+                    onChange={(e) => {
+                      setNewContactId(e.target.value);
+                      const c = contacts.find((x) => x.id === e.target.value);
+                      if (c) setContactSearch(c.fullName ?? '');
+                    }}
+                    size={Math.min(6, (contacts.filter((c) => !contactSearch.trim() || c.fullName?.toLowerCase().includes(contactSearch.toLowerCase())).length) + 1)}
+                    style={{ height: 'auto' }}
+                  >
                     <option value="">— {i.noContact} —</option>
-                    {contacts.map((c) => <option key={c.id} value={c.id}>{c.fullName}</option>)}
+                    {contacts
+                      .filter((c) => !contactSearch.trim() || c.fullName?.toLowerCase().includes(contactSearch.toLowerCase()))
+                      .map((c) => <option key={c.id} value={c.id}>{c.fullName}</option>)}
                   </select>
                 </div>
                 <div className="form-group">
