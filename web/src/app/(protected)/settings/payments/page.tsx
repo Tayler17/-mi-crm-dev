@@ -2,18 +2,20 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import {
-  getConnectAccount, createConnectOnboarding, syncConnectAccount,
+  getConnectAccount, createConnectOnboarding, syncConnectAccount, getCurrentPlan,
   type ConnectAccount,
 } from '@/lib/api';
 
 export default function PaymentsSettingsPage() {
   const params = useSearchParams();
-  const [account, setAccount]   = useState<ConnectAccount | null>(null);
-  const [loading, setLoading]   = useState(true);
-  const [working, setWorking]   = useState(false);
-  const [error, setError]       = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
+  const [account, setAccount]             = useState<ConnectAccount | null>(null);
+  const [loading, setLoading]             = useState(true);
+  const [working, setWorking]             = useState(false);
+  const [error, setError]                 = useState('');
+  const [successMsg, setSuccessMsg]       = useState('');
+  const [hasFeature, setHasFeature]       = useState<boolean | null>(null);
 
   useEffect(() => {
     const success = params.get('success');
@@ -21,10 +23,28 @@ export default function PaymentsSettingsPage() {
     if (success === '1') setSuccessMsg('✅ Onboarding completado. Sincronizando estado...');
     if (refresh === '1')  setSuccessMsg('🔄 Sesión expirada — generando nuevo enlace de onboarding...');
 
-    load().then(() => {
-      if (success === '1') handleSync();
-      if (refresh === '1') handleOnboard();
-    });
+    // Check plan feature first
+    getCurrentPlan()
+      .then((data: any) => {
+        const enabled = !!(data?.tenant?.has_stripe_connect);
+        setHasFeature(enabled);
+        if (enabled) {
+          load().then(() => {
+            if (success === '1') handleSync();
+            if (refresh === '1') handleOnboard();
+          });
+        } else {
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        // If plan fetch fails, allow access (fail open)
+        setHasFeature(true);
+        load().then(() => {
+          if (success === '1') handleSync();
+          if (refresh === '1') handleOnboard();
+        });
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -63,6 +83,58 @@ export default function PaymentsSettingsPage() {
   }
 
   if (loading) return <div style={{ padding: 40, color: 'var(--text-muted)' }}>Cargando...</div>;
+
+  // Feature gate — show upgrade CTA if plan doesn't include Stripe Connect
+  if (hasFeature === false) {
+    return (
+      <div style={{ padding: 32, maxWidth: 600, margin: '0 auto' }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>💳 Pagos — Stripe Connect</h1>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 28 }}>
+          Recibe pagos de tus clientes directamente desde el CRM.
+        </p>
+        <div style={{
+          background: 'var(--bg-card)', border: '2px solid #e5e7eb',
+          borderRadius: 14, padding: 32, textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+            Tu plan no incluye Stripe Connect
+          </div>
+          <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.6 }}>
+            La función de cobros a clientes vía Stripe Connect está disponible en planes superiores.
+            Actualiza tu plan para empezar a recibir pagos directamente desde tus deals.
+          </p>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <Link href="/plans" className="btn btn-primary">
+              🚀 Ver planes disponibles
+            </Link>
+            <a
+              href="mailto:app@automarkiq.com?subject=Quiero activar Stripe Connect"
+              className="btn btn-secondary"
+            >
+              ✉ Contactar soporte
+            </a>
+          </div>
+        </div>
+        <div style={{ marginTop: 24, background: 'var(--bg-secondary)', borderRadius: 12, padding: 20 }}>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>¿Qué incluye Stripe Connect?</div>
+          {[
+            ['💳', 'Cobra a tus clientes', 'Genera links de pago desde cualquier deal y envíalos por WhatsApp o email'],
+            ['🏦', 'Dinero directo a tu banco', 'Stripe transfiere automáticamente según el ciclo configurado'],
+            ['📊', 'Historial de pagos', 'Consulta todos los cobros realizados desde el CRM'],
+          ].map(([icon, title, desc]) => (
+            <div key={title} style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+              <div style={{ fontSize: 22, flexShrink: 0 }}>{icon}</div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{title}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   const isConnected = !!account?.account_id;
   const isComplete  = account?.onboarding_complete;

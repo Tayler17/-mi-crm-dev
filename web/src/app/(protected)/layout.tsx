@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { logout, getStoredUser, openNotificationsStream, setMyAvailability, getMyChats } from '@/lib/api';
+import { logout, getStoredUser, openNotificationsStream, setMyAvailability, getMyChats, getCurrentPlan } from '@/lib/api';
 import { LangContext } from '@/lib/lang-context';
 import { GlobalSearch } from '@/components/GlobalSearch';
 
@@ -89,7 +89,7 @@ const ROLE_COLOR: Record<string, string> = { owner: '#7c3aed', admin: '#2563eb',
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 type NavGroup = '🧩 CORE CRM' | '💬 COMUNICACIÓN' | '🤖 AUTOMATIZACIÓN' | '📢 MARKETING' | '⚙️ CONFIGURACIÓN' | '🏢 ADMIN' | null;
-const NAV: { href: string; label: string; icon: string; minRole?: Role; group: NavGroup }[] = [
+const NAV: { href: string; label: string; icon: string; minRole?: Role; group: NavGroup; planFeature?: string }[] = [
   // ── Core CRM ──
   { group: '🧩 CORE CRM',      href: '/dashboard',        label: 'Dashboard',            icon: '⊞' },
   { group: '🧩 CORE CRM',      href: '/contacts',         label: 'Contactos',            icon: '👥' },
@@ -123,7 +123,7 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   { group: '⚙️ CONFIGURACIÓN', href: '/appointments',     label: 'Schedules',            icon: '📅' },
   // ── Admin ──
   { group: '🏢 ADMIN',         href: '/billing',           label: 'Mi Plan & Uso',       icon: '💳', minRole: 'admin' },
-  { group: '🏢 ADMIN',         href: '/settings/payments', label: 'Pagos Stripe',         icon: '🔗', minRole: 'admin' },
+  { group: '🏢 ADMIN',         href: '/settings/payments', label: 'Pagos Stripe',         icon: '🔗', minRole: 'admin', planFeature: 'has_stripe_connect' },
   { group: '🏢 ADMIN',         href: '/users',             label: 'Usuarios',             icon: '👤', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/plans',            label: 'Planes & Billing',     icon: '🏦', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/backups',          label: 'Backups',              icon: '💾', minRole: 'admin' },
@@ -154,6 +154,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   const [sidebarOpen,   setSidebarOpen]   = useState(false);
   const [availability,  setAvailability]  = useState('online');
   const [chatUnread,    setChatUnread]    = useState(0);
+  const [planFeatures,  setPlanFeatures]  = useState<Record<string, boolean>>({});
 
   const sseRef         = useRef<EventSource | null>(null);
   const chatPollRef    = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -216,6 +217,19 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     };
     loadChatUnread();
     chatPollRef.current = setInterval(loadChatUnread, 60_000);
+
+    // Load plan features once (for nav visibility gating)
+    getCurrentPlan().then((data: any) => {
+      const t = data?.tenant ?? {};
+      setPlanFeatures({
+        has_stripe_connect: !!t.has_stripe_connect,
+        has_reports:        !!t.has_reports,
+        has_webhooks:       !!t.has_webhooks,
+        has_api_access:     !!t.has_api_access,
+        has_ai_chatbots:    !!t.has_ai_chatbots,
+        has_call_bots:      !!t.has_call_bots,
+      });
+    }).catch(() => {});
 
     return () => {
       es.close();
@@ -360,7 +374,10 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
         </button>
         <nav className="sidebar-nav">
           {(() => {
-            const visible = NAV.filter((item) => hasRole(user?.role, item.minRole ?? 'agent'));
+            const visible = NAV.filter((item) =>
+              hasRole(user?.role, item.minRole ?? 'agent') &&
+              (!item.planFeature || planFeatures[item.planFeature] === true)
+            );
             const nodes: React.ReactNode[] = [];
             let lastGroup: NavGroup | undefined = undefined;
             for (const item of visible) {

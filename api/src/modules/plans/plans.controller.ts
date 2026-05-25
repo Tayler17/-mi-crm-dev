@@ -36,7 +36,8 @@ export class PlansController {
               p.extra_message_price, p.extra_call_minute_price,
               p.has_call_bots, p.has_ai_chatbots,
               p.has_automations, p.has_flows, p.has_reports, p.has_api_access,
-              p.has_webhooks, p.allow_own_twilio, p.price, p.billing_period, p.color
+              p.has_webhooks, p.allow_own_twilio, p.price, p.billing_period, p.color,
+              p.has_stripe_connect
        FROM tenants t
        LEFT JOIN plans p ON p.id = t.plan_id
        WHERE t.id = $1`,
@@ -110,8 +111,8 @@ export class PlansController {
          has_api_access, has_webhooks, allow_own_api_keys, allow_own_twilio, allow_overage,
          extra_message_price, extra_call_minute_price,
          has_image_gen, max_image_gen_month,
-         is_active, is_public, stripe_price_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)
+         is_active, is_public, stripe_price_id, has_stripe_connect)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)
        RETURNING *`,
       [
         dto.name, dto.slug, dto.description ?? null, dto.price ?? 0, dto.currency ?? 'USD',
@@ -127,7 +128,7 @@ export class PlansController {
         dto.extraMessagePrice ?? 0, dto.extraCallMinutePrice ?? 0,
         dto.hasImageGen ?? false, dto.maxImageGenMonth ?? 0,
         dto.isActive ?? true, dto.isPublic ?? true,
-        dto.stripePriceId ?? null,
+        dto.stripePriceId ?? null, dto.hasStripeConnect ?? false,
       ],
     );
     return plan;
@@ -151,6 +152,7 @@ export class PlansController {
       hasImageGen: 'has_image_gen', maxImageGenMonth: 'max_image_gen_month',
       extraMessagePrice: 'extra_message_price', extraCallMinutePrice: 'extra_call_minute_price',
       isActive: 'is_active', isPublic: 'is_public', stripePriceId: 'stripe_price_id',
+      hasStripeConnect: 'has_stripe_connect',
     };
     for (const [k, col] of Object.entries(map)) {
       if (dto[k] !== undefined) { values.push(dto[k]); fields.push(`${col}=$${values.length}`); }
