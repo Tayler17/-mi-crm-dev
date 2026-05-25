@@ -38,11 +38,24 @@ export class BillingService {
     if (tenant?.stripe_customer_id) return tenant.stripe_customer_id;
 
     const provider = await this.getProvider(tenantId);
-    const customerId = await provider.getOrCreateCustomer({
-      tenantId,
-      email: tenant?.billing_email || undefined,
-      name:  tenant?.name          || undefined,
-    });
+    let customerId: string;
+    try {
+      customerId = await provider.getOrCreateCustomer({
+        tenantId,
+        email: tenant?.billing_email || undefined,
+        name:  tenant?.name          || undefined,
+      });
+    } catch (e: any) {
+      if (e?.status) throw e;
+      const msg: string = e?.message ?? String(e);
+      const type: string = e?.type ?? '';
+      if (type === 'StripeAuthenticationError' || msg.includes('Invalid API Key') || msg.includes('No API key')) {
+        throw new BadRequestException(
+          'La Secret Key de Stripe es inválida. Ve a Configuración → Plataforma → Stripe y verifica que sea la clave secreta (sk_live_... o sk_test_...).',
+        );
+      }
+      throw new BadRequestException(`Error al crear cliente Stripe: ${msg}`);
+    }
 
     await this.db.query(
       'UPDATE tenants SET stripe_customer_id=$2, updated_at=NOW() WHERE id=$1',
@@ -71,18 +84,33 @@ export class BillingService {
     if (!plan) throw new BadRequestException('Plan no encontrado');
     if (!plan.stripe_price_id) throw new BadRequestException('Este plan no tiene un precio de Stripe configurado');
 
-    const customerId = await this.ensureCustomer(tenantId);
-    const provider   = await this.getProvider(tenantId);
-    const base       = process.env.FRONTEND_URL || 'http://localhost:3000';
+    try {
+      const customerId = await this.ensureCustomer(tenantId);
+      const provider   = await this.getProvider(tenantId);
+      const base       = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-    return provider.createCheckoutSession({
-      tenantId,
-      customerId,
-      priceId:    plan.stripe_price_id,
-      successUrl: `${base}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl:  `${base}/billing/cancel`,
-      metadata:   { planId: plan.id },
-    });
+      return await provider.createCheckoutSession({
+        tenantId,
+        customerId,
+        priceId:    plan.stripe_price_id,
+        successUrl: `${base}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl:  `${base}/billing/cancel`,
+        metadata:   { planId: plan.id },
+      });
+    } catch (e: any) {
+      // Re-throw our own HttpExceptions as-is
+      if (e?.status) throw e;
+      // Convert Stripe SDK errors (which have a numeric statusCode) to readable messages
+      // so NestJS doesn't forward Stripe's 401 as an HTTP 401 to the client
+      const msg: string = e?.message ?? String(e);
+      const type: string = e?.type ?? '';
+      if (type === 'StripeAuthenticationError' || msg.includes('Invalid API Key') || msg.includes('No API key')) {
+        throw new BadRequestException(
+          'La Secret Key de Stripe es inválida. Ve a Configuración → Plataforma → Stripe y verifica que sea la clave secreta (sk_live_... o sk_test_...).',
+        );
+      }
+      throw new BadRequestException(`Error de Stripe: ${msg}`);
+    }
   }
 
   async createPortal(tenantId: string) {
