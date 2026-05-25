@@ -20,11 +20,17 @@ export class CallBotsService {
   ) {}
 
   findAll(tenantId: string) {
-    return this.botRepo.find({ where: { tenantId }, order: { createdAt: 'DESC' } });
+    return this.db.query(
+      `SELECT * FROM call_bots WHERE tenant_id::text = $1 ORDER BY created_at DESC`,
+      [tenantId],
+    );
   }
 
   async findOne(id: string, tenantId: string) {
-    const bot = await this.botRepo.findOne({ where: { id, tenantId } });
+    const [bot] = await this.db.query(
+      `SELECT * FROM call_bots WHERE id::text = $1 AND tenant_id::text = $2`,
+      [id, tenantId],
+    );
     if (!bot) throw new NotFoundException('Call bot not found');
     return bot;
   }
