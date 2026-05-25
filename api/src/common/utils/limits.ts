@@ -8,22 +8,21 @@ export async function checkPlanLimit(
   tenantId: string,
   resource: Resource,
 ): Promise<void> {
-  // Cast t.id::text so PostgreSQL infers $1 as text throughout the query,
-  // preventing "operator does not exist: character varying = uuid" when
-  // tenant_id columns in child tables are varchar while tenants.id is uuid.
+  // Use ::text casts on ALL tenant_id/id columns so PostgreSQL always compares
+  // text=text regardless of whether the column is uuid or varchar in each table.
   const [row] = await db.query(
     `SELECT
        p.max_users, p.max_contacts, p.max_inboxes, p.max_call_minutes,
        p.max_ai_chatbots, p.max_call_bots, p.max_campaigns, p.max_automations, p.max_flows,
        p.allow_overage,
-       (SELECT COUNT(*)::int FROM users            WHERE tenant_id=$1 AND is_active=true)  AS users_count,
-       (SELECT COUNT(*)::int FROM contacts         WHERE tenant_id=$1)                     AS contacts_count,
-       (SELECT COUNT(*)::int FROM inboxes          WHERE tenant_id=$1)                     AS inboxes_count,
-       (SELECT COUNT(*)::int FROM ai_chatbots      WHERE tenant_id::text=$1)               AS ai_chatbots_count,
-       (SELECT COUNT(*)::int FROM call_bots        WHERE tenant_id::text=$1)               AS call_bots_count,
-       (SELECT COUNT(*)::int FROM campaigns        WHERE tenant_id=$1)                     AS campaigns_count,
-       (SELECT COUNT(*)::int FROM automation_rules WHERE tenant_id=$1)                     AS automations_count,
-       (SELECT COUNT(*)::int FROM conversation_flows WHERE tenant_id=$1)                   AS flows_count,
+       (SELECT COUNT(*)::int FROM users            WHERE tenant_id::text=$1 AND is_active=true)  AS users_count,
+       (SELECT COUNT(*)::int FROM contacts         WHERE tenant_id::text=$1)                     AS contacts_count,
+       (SELECT COUNT(*)::int FROM inboxes          WHERE tenant_id::text=$1)                     AS inboxes_count,
+       (SELECT COUNT(*)::int FROM ai_chatbots      WHERE tenant_id::text=$1)                     AS ai_chatbots_count,
+       (SELECT COUNT(*)::int FROM call_bots        WHERE tenant_id::text=$1)                     AS call_bots_count,
+       (SELECT COUNT(*)::int FROM campaigns        WHERE tenant_id::text=$1)                     AS campaigns_count,
+       (SELECT COUNT(*)::int FROM automation_rules WHERE tenant_id::text=$1)                     AS automations_count,
+       (SELECT COUNT(*)::int FROM conversation_flows WHERE tenant_id::text=$1)                   AS flows_count,
        COALESCE((
          SELECT SUM(duration)::int FROM call_logs
          WHERE tenant_id::text=$1 AND created_at >= date_trunc('month', NOW())

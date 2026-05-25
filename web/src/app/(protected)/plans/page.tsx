@@ -565,10 +565,12 @@ export default function PlansPage() {
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.is_active ? '#10b981' : '#d1d5db', display: 'inline-block' }} />
                   <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.is_active ? i.active : i.inactive}</span>
-                  {p.is_public && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>· {i.planPublic}</span>}
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
-                    {tenants.filter((t) => t.plan_id === p.id).length} {i.tenantsTab.toLowerCase()}
-                  </span>
+                  {isAdmin && p.is_public && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>· {i.planPublic}</span>}
+                  {isAdmin && (
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
+                      {tenants.filter((t) => t.plan_id === p.id).length} {i.tenantsTab.toLowerCase()}
+                    </span>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', paddingTop: 4, borderTop: '1px solid var(--border)' }}>
