@@ -1093,6 +1093,7 @@ export interface Plan {
   extra_call_minute_price: number;
   has_image_gen: boolean;
   max_image_gen_month: number;
+  has_stripe_connect: boolean;
   is_active: boolean;
   is_public: boolean;
   position: number;
