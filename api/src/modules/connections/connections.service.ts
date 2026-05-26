@@ -207,7 +207,7 @@ export class ConnectionsService {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                subscribed_fields: 'messages,messaging_postbacks,messaging_optins,message_deliveries',
+                subscribed_fields: 'messages,messaging_postbacks,messaging_optins,messaging_referrals',
                 access_token: creds.accessToken,
               }),
               signal: AbortSignal.timeout(8000),
