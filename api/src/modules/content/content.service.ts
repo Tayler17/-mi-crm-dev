@@ -27,6 +27,13 @@ const STABILITY_SIZES: Record<string, { width: number; height: number }> = {
   '1024x1792': { width: 768,  height: 1344 },
 };
 
+// Map normalised size → gpt-image-1 dimensions (different from dall-e-3)
+const GPT_IMAGE_SIZES: Record<string, string> = {
+  '1024x1024': '1024x1024',
+  '1792x1024': '1536x1024',  // landscape
+  '1024x1792': '1024x1536',  // portrait
+};
+
 // Map normalised size → Fal.ai image_size param
 const FAL_SIZES: Record<string, string> = {
   '1024x1024': 'square_hd',
@@ -360,31 +367,32 @@ REGLAS GENERALES:
   private async callDallE(
     prompt: string, size: string, apiKey: string,
   ): Promise<{ localUrl: string; model: string }> {
+    // gpt-image-1 is the current model for service-account keys (sk-svcacct-*).
+    // It uses slightly different size strings and always returns b64_json.
+    const gptSize = GPT_IMAGE_SIZES[size] ?? '1024x1024';
     const res = await axios.post(
       'https://api.openai.com/v1/images/generations',
-      // Note: no `style` or `response_format` — both removed from the current API.
-      // Default response includes a URL for dall-e-3; gpt-image-1 (service account keys) returns b64_json.
-      { model: 'dall-e-3', prompt, n: 1, size },
-      { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 60000 },
+      { model: 'gpt-image-1', prompt, n: 1, size: gptSize },
+      { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 90000 },
     );
     const item = res.data?.data?.[0];
-    if (!item) throw new Error('DALL-E no devolvió imagen');
+    if (!item) throw new Error('OpenAI image API no devolvió imagen');
 
-    // Service-account keys are routed to gpt-image-1 and always return base64
+    // gpt-image-1 always returns base64
     if (item.b64_json) {
       if (!existsSync(IMAGE_UPLOAD_DIR)) mkdirSync(IMAGE_UPLOAD_DIR, { recursive: true });
       const filename = `ai-${Date.now()}-${randomBytes(6).toString('hex')}.png`;
       writeFileSync(join(IMAGE_UPLOAD_DIR, filename), Buffer.from(item.b64_json, 'base64'));
-      return { localUrl: `/uploads/content/${filename}`, model: 'dall-e-3' };
+      return { localUrl: `/uploads/content/${filename}`, model: 'gpt-image-1' };
     }
 
-    // Standard keys return a temporary URL → download and save locally
+    // Fallback: older dall-e-3 keys return a temporary URL
     if (item.url) {
       const localUrl = await this.downloadAndSave(item.url);
-      return { localUrl, model: 'dall-e-3' };
+      return { localUrl, model: 'gpt-image-1' };
     }
 
-    throw new Error('DALL-E no devolvió URL ni base64');
+    throw new Error('OpenAI image API no devolvió URL ni base64');
   }
 
   private async callStability(
