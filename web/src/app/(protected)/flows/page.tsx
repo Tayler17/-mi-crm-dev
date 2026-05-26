@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   getFlows, createFlow, updateFlow, deleteFlow, toggleFlow, duplicateFlow, getFlowSessions,
   getInboxes, getAgents, getTags, getTeams, getQueues,
@@ -882,6 +882,55 @@ export default function FlowsPage() {
     setSessions(s);
   }
 
+  // ── Export / Import JSON ──────────────────────────────────────────────────────
+
+  function exportFlow(f: ConversationFlow) {
+    const data = {
+      name: f.name,
+      description: f.description ?? '',
+      triggerType: f.triggerType ?? f.trigger_type ?? 'new_conversation',
+      triggerValue: f.triggerValue ?? f.trigger_value ?? '',
+      steps: f.steps ?? [],
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${f.name.replace(/[^a-z0-9áéíóúñ]/gi, '-').toLowerCase()}.flow.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const importFileRef = useRef<HTMLInputElement>(null);
+
+  function handleImportJson(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target?.result as string);
+        if (!Array.isArray(data.steps)) {
+          alert('Archivo inválido: falta el campo "steps". Asegúrate de exportar un flow válido.');
+          return;
+        }
+        importTemplate({
+          slug: 'imported-' + Date.now(),
+          name: data.name ?? file.name.replace(/\.flow\.json$/, ''),
+          description: data.description ?? '',
+          icon: '📥',
+          triggerType: data.triggerType ?? 'new_conversation',
+          triggerValue: data.triggerValue ?? '',
+          steps: data.steps,
+        });
+      } catch {
+        alert('Error al leer el archivo. Asegúrate de que es un JSON válido.');
+      }
+      if (importFileRef.current) importFileRef.current.value = '';
+    };
+    reader.readAsText(file);
+  }
+
   return (
     <div className="page">
       <div className="page-header">
@@ -890,6 +939,8 @@ export default function FlowsPage() {
           <p className="page-subtitle">{i.flowsSubtitle}</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <input ref={importFileRef} type="file" accept=".json,.flow.json" style={{ display: 'none' }} onChange={handleImportJson} />
+          <button className="btn btn-secondary" onClick={() => importFileRef.current?.click()}>📁 Importar JSON</button>
           <button className="btn btn-secondary" onClick={() => setShowTemplates(true)}>📥 {i.flowFromTemplate}</button>
           <button className="btn btn-primary" onClick={() => { setEditing(null); setShowBuilder(true); }}>{i.flowNew}</button>
         </div>
@@ -905,6 +956,7 @@ export default function FlowsPage() {
             {i.noFlowsHint}
           </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button className="btn btn-secondary" onClick={() => importFileRef.current?.click()}>📁 Importar JSON</button>
             <button className="btn btn-secondary" onClick={() => setShowTemplates(true)}>📥 {i.flowImportTemplate}</button>
             <button className="btn btn-primary" onClick={() => { setEditing(null); setShowBuilder(true); }}>{i.flowNewFromScratch}</button>
           </div>
@@ -965,6 +1017,9 @@ export default function FlowsPage() {
                   <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => handleDuplicate(f)}>
                     📋 {i.duplicate}
                   </button>
+                  <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => exportFlow(f)}>
+                    📤 Exportar
+                  </button>
                   <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px', color: '#ef4444', borderColor: '#ef444444' }} onClick={() => handleDelete(f)}>
                     {i.delete}
                   </button>
@@ -990,7 +1045,16 @@ export default function FlowsPage() {
                   {i.flowTemplatesHint}
                 </p>
               </div>
-              <button className="modal-close" onClick={() => setShowTemplates(false)}>✕</button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12 }}
+                  onClick={() => { setShowTemplates(false); importFileRef.current?.click(); }}
+                >
+                  📁 Importar JSON
+                </button>
+                <button className="modal-close" onClick={() => setShowTemplates(false)}>✕</button>
+              </div>
             </div>
 
             <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
