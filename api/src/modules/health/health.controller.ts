@@ -10,7 +10,7 @@ import { execSync } from 'child_process';
 export class HealthController {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
-    @InjectQueue('bot-queue') private readonly botQueue: Queue,
+    @InjectQueue('bot-messages') private readonly botQueue: Queue,
   ) {}
 
   // Public ping — used by external uptime monitors
