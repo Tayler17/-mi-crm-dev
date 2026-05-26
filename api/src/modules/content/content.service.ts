@@ -327,14 +327,12 @@ REGLAS GENERALES:
 
     // ── 3. Generate image ─────────────────────────────────────────────────────
     // Each provider returns { localUrl, model }.
-    // DALL-E and Fal.ai return a temp URL that we download; Stability returns base64 saved directly.
+    // Stability saves base64 directly. DALL-E handles both URL (standard keys) and b64_json (service-account keys). Fal downloads a temp URL.
     let localUrl: string;
     let model: string;
 
     if (provider === 'openai') {
-      const r = await this.callDallE(dto.prompt, size, style, apiKey);
-      model    = r.model;
-      localUrl = await this.downloadAndSave(r.tempUrl);
+      ({ localUrl, model } = await this.callDallE(dto.prompt, size, apiKey));
     } else if (provider === 'stability') {
       ({ localUrl, model } = await this.callStability(dto.prompt, size, apiKey));
     } else {
@@ -360,16 +358,33 @@ REGLAS GENERALES:
   // ── Provider implementations ──────────────────────────────────────────────
 
   private async callDallE(
-    prompt: string, size: string, style: string, apiKey: string,
-  ): Promise<{ tempUrl: string; model: string }> {
+    prompt: string, size: string, apiKey: string,
+  ): Promise<{ localUrl: string; model: string }> {
     const res = await axios.post(
       'https://api.openai.com/v1/images/generations',
-      { model: 'dall-e-3', prompt, n: 1, size, response_format: 'url' },
+      // Note: no `style` or `response_format` — both removed from the current API.
+      // Default response includes a URL for dall-e-3; gpt-image-1 (service account keys) returns b64_json.
+      { model: 'dall-e-3', prompt, n: 1, size },
       { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 60000 },
     );
-    const tempUrl: string = res.data?.data?.[0]?.url;
-    if (!tempUrl) throw new Error('DALL-E no devolvió URL de imagen');
-    return { tempUrl, model: 'dall-e-3' };
+    const item = res.data?.data?.[0];
+    if (!item) throw new Error('DALL-E no devolvió imagen');
+
+    // Service-account keys are routed to gpt-image-1 and always return base64
+    if (item.b64_json) {
+      if (!existsSync(IMAGE_UPLOAD_DIR)) mkdirSync(IMAGE_UPLOAD_DIR, { recursive: true });
+      const filename = `ai-${Date.now()}-${randomBytes(6).toString('hex')}.png`;
+      writeFileSync(join(IMAGE_UPLOAD_DIR, filename), Buffer.from(item.b64_json, 'base64'));
+      return { localUrl: `/uploads/content/${filename}`, model: 'dall-e-3' };
+    }
+
+    // Standard keys return a temporary URL → download and save locally
+    if (item.url) {
+      const localUrl = await this.downloadAndSave(item.url);
+      return { localUrl, model: 'dall-e-3' };
+    }
+
+    throw new Error('DALL-E no devolvió URL ni base64');
   }
 
   private async callStability(
