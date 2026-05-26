@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Query, Body, Res, HttpCode, Logger } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { WebhooksService } from './webhooks.service';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -14,6 +15,7 @@ import { DataSource } from 'typeorm';
  *
  * Subscribe to: messages, messaging_postbacks
  */
+@SkipThrottle()
 @Controller('meta/webhook')
 export class MetaWebhookController {
   private readonly logger = new Logger(MetaWebhookController.name);
@@ -58,20 +60,27 @@ export class MetaWebhookController {
   async receive(@Body() body: any) {
     try {
       const object: string = body?.object ?? '';
+      this.logger.log(`Meta webhook received: object=${object} entries=${body?.entry?.length ?? 0}`);
+
+      // Facebook Messenger sends object='page', Instagram sends object='instagram'
       const channel = object === 'instagram' ? 'instagram' : 'facebook';
 
       for (const entry of body?.entry ?? []) {
         const pageId = String(entry.id ?? '');
         if (!pageId) continue;
 
+        const messagingCount = entry?.messaging?.length ?? 0;
+        const changesCount   = entry?.changes?.length  ?? 0;
+        this.logger.log(`Meta entry: pageId=${pageId} channel=${channel} messaging=${messagingCount} changes=${changesCount}`);
+
         // Find the connection whose credentials.pageId matches this entry
         const conn = await this.findConnectionByPageId(pageId, channel);
         if (!conn) {
-          this.logger.warn(`No connection found for Meta pageId=${pageId} (${channel})`);
+          this.logger.warn(`No connection found for Meta pageId=${pageId} channel=${channel} — check that the FB connection exists and is active`);
           continue;
         }
 
-        // Route to existing webhook service (same logic as per-connection endpoints)
+        // Route to existing webhook service
         const fakeBody = { object, entry: [entry] };
         if (channel === 'instagram') {
           await this.webhooks.processInstagram(conn.id, fakeBody);
@@ -80,7 +89,7 @@ export class MetaWebhookController {
         }
       }
     } catch (err: any) {
-      this.logger.error(`Meta webhook error: ${err.message}`);
+      this.logger.error(`Meta webhook error: ${err.message}`, err.stack);
     }
     // Always return 200 so Meta doesn't retry
     return { ok: true };

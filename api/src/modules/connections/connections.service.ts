@@ -200,26 +200,27 @@ export class ConnectionsService {
             return { ok: false, error: `Meta API: ${data?.error?.message ?? 'token inválido'}` };
           }
 
-          // 2. Subscribe the page to webhook events (messages + postbacks)
+          // 2. Subscribe the page to webhook events
+          // Meta requires form-encoded body (not JSON) for this endpoint
+          const subscribeBody = new URLSearchParams({
+            subscribed_fields: 'messages,messaging_postbacks',
+            access_token: creds.accessToken,
+          });
           const subscribeRes = await (globalThis as any).fetch(
             `https://graph.facebook.com/v21.0/${creds.pageId}/subscribed_apps`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                subscribed_fields: 'messages,messaging_postbacks,messaging_optins,messaging_referrals',
-                access_token: creds.accessToken,
-              }),
+              body: subscribeBody,            // URLSearchParams → auto Content-Type: application/x-www-form-urlencoded
               signal: AbortSignal.timeout(8000),
             },
           );
           const subscribeData = await subscribeRes.json();
-          if (subscribeData.success) {
-            this.logger.log(`Meta page ${creds.pageId} subscribed to webhook events`);
-          } else {
-            // Subscription failure is non-fatal — token might not have pages_manage_metadata
-            this.logger.warn(`Meta page ${creds.pageId} webhook subscription warning: ${JSON.stringify(subscribeData)}`);
+          this.logger.log(`Meta subscribed_apps response for ${creds.pageId}: ${JSON.stringify(subscribeData)}`);
+          if (!subscribeData.success) {
+            const errMsg = subscribeData.error?.message ?? JSON.stringify(subscribeData);
+            return { ok: false, error: `Suscripción de webhook fallida: ${errMsg}` };
           }
+          this.logger.log(`Meta page ${creds.pageId} successfully subscribed: messages, messaging_postbacks`);
 
           return { ok: true };
         } catch (e: any) {

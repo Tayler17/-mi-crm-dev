@@ -1,10 +1,12 @@
 import { Controller, Get, Post, Param, Body, Query, Res, HttpCode } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { WebhooksService } from './webhooks.service';
 
 /**
  * Public webhook endpoints — NO auth guard (called by external services).
  */
+@SkipThrottle()
 @Controller('webhooks')
 export class WebhooksController {
   constructor(private readonly svc: WebhooksService) {}
