@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { NotificationsService } from '../notifications/notifications.service';
 
 interface FlowStep {
   id: string;
-  type: 'message' | 'menu' | 'input' | 'condition' | 'assign' | 'tag' | 'wait' | 'end';
+  type: 'message' | 'menu' | 'input' | 'condition' | 'assign' | 'tag' | 'wait' | 'end'
+      | 'note' | 'create_deal' | 'close_conversation' | 'http_request';
   label?: string;
   text?: string;
   nextStepId?: string;
@@ -25,6 +27,20 @@ interface FlowStep {
   tagName?: string;
   // wait
   seconds?: number;
+  // note (internal note — private message)
+  noteText?: string;
+  // create_deal
+  dealTitle?: string;
+  dealStageId?: string;
+  dealValue?: number;
+  // close_conversation
+  farewellText?: string;
+  // http_request
+  httpMethod?: string;
+  httpUrl?: string;
+  httpHeaders?: string;
+  httpBody?: string;
+  httpSaveAs?: string;
 }
 
 interface Session {
@@ -41,7 +57,10 @@ interface Session {
 export class FlowRunnerService {
   private readonly logger = new Logger(FlowRunnerService.name);
 
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   // ── Start a new session ───────────────────────────────────────────────────────
 
@@ -168,7 +187,7 @@ export class FlowRunnerService {
         const opts = step.options ?? [];
         const menuText = `${this.interpolate(step.text ?? '¿Cómo podemos ayudarte?', session.variables)}\n${opts.map((o, i) => `${i + 1}. ${o.label}`).join('\n')}`;
         await this.sendMessage(session.conversation_id, session.tenant_id, menuText);
-        // Set waiting flag
+        // Set waiting flag so next inbound message continues from here
         await this.updateSessionVars(session.id, { ...session.variables, _waiting_step_id: step.id });
         break;
       }
@@ -177,6 +196,16 @@ export class FlowRunnerService {
         const question = this.interpolate(step.text ?? '', session.variables);
         await this.sendMessage(session.conversation_id, session.tenant_id, question);
         await this.updateSessionVars(session.id, { ...session.variables, _waiting_step_id: step.id });
+        break;
+      }
+
+      // ── Note (private internal message visible only to agents) ──────────────
+      case 'note': {
+        const noteBody = this.interpolate(step.noteText ?? step.text ?? '', session.variables);
+        await this.sendMessage(session.conversation_id, session.tenant_id, noteBody, true);
+        const next = step.nextStepId ? allSteps.find((s) => s.id === step.nextStepId) : undefined;
+        if (!next || step.nextStepId === '__end__') { await this.completeSession(session.id); return; }
+        await this.runStep(session, allSteps, next, userInput, depth + 1);
         break;
       }
 
@@ -221,8 +250,81 @@ export class FlowRunnerService {
         break;
       }
 
+      // ── Create Deal ──────────────────────────────────────────────────────────
+      case 'create_deal': {
+        try {
+          const title = this.interpolate(step.dealTitle ?? 'Deal', session.variables);
+          await this.db.query(
+            `INSERT INTO deals (tenant_id, contact_id, title, stage_id, value, created_at, updated_at)
+             VALUES ($1,$2,$3,$4,$5,NOW(),NOW())`,
+            [session.tenant_id, session.contact_id, title, step.dealStageId || null, step.dealValue ?? 0],
+          );
+        } catch (e: any) {
+          this.logger.warn(`create_deal step failed: ${e.message}`);
+        }
+        const next = step.nextStepId ? allSteps.find((s) => s.id === step.nextStepId) : undefined;
+        if (!next || step.nextStepId === '__end__') { await this.completeSession(session.id); return; }
+        await this.runStep(session, allSteps, next, userInput, depth + 1);
+        break;
+      }
+
+      // ── Close Conversation ───────────────────────────────────────────────────
+      case 'close_conversation': {
+        if (step.farewellText) {
+          await this.sendMessage(session.conversation_id, session.tenant_id,
+            this.interpolate(step.farewellText, session.variables));
+        }
+        await this.db.query(
+          `UPDATE conversations SET status='resolved', updated_at=NOW() WHERE id=$1 AND tenant_id=$2`,
+          [session.conversation_id, session.tenant_id],
+        );
+        this.notifications.emit({
+          tenantId: session.tenant_id,
+          type: 'conversation_updated',
+          payload: { conversationId: session.conversation_id, status: 'resolved' },
+        });
+        await this.completeSession(session.id);
+        break;
+      }
+
+      // ── HTTP / Webhook ───────────────────────────────────────────────────────
+      case 'http_request': {
+        if (step.httpUrl) {
+          try {
+            let parsedHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+            try {
+              const extraHeaders = JSON.parse(this.interpolate(step.httpHeaders ?? '{}', session.variables));
+              parsedHeaders = { ...parsedHeaders, ...extraHeaders };
+            } catch { /* ignore malformed headers */ }
+
+            const rawBody = step.httpBody ? this.interpolate(step.httpBody, session.variables) : undefined;
+            const res = await (globalThis as any).fetch(step.httpUrl, {
+              method: step.httpMethod ?? 'POST',
+              headers: parsedHeaders,
+              body: rawBody || undefined,
+              signal: AbortSignal.timeout(10000),
+            });
+
+            if (step.httpSaveAs) {
+              try {
+                const data = await res.json();
+                const newVars = { ...session.variables, [step.httpSaveAs]: JSON.stringify(data) };
+                await this.updateSessionVars(session.id, newVars);
+                session.variables = newVars;
+              } catch { /* response not JSON */ }
+            }
+          } catch (e: any) {
+            this.logger.warn(`http_request step failed [${step.httpUrl}]: ${e.message}`);
+          }
+        }
+        const next = step.nextStepId ? allSteps.find((s) => s.id === step.nextStepId) : undefined;
+        if (!next || step.nextStepId === '__end__') { await this.completeSession(session.id); return; }
+        await this.runStep(session, allSteps, next, userInput, depth + 1);
+        break;
+      }
+
       case 'wait': {
-        // Immediate continuation (no true async wait in-process)
+        // Simple passthrough — a proper async wait would require a scheduled job
         const next = step.nextStepId ? allSteps.find((s) => s.id === step.nextStepId) : undefined;
         if (!next || step.nextStepId === '__end__') { await this.completeSession(session.id); return; }
         await this.runStep(session, allSteps, next, userInput, depth + 1);
@@ -247,16 +349,37 @@ export class FlowRunnerService {
     return (flow?.steps ?? []) as FlowStep[];
   }
 
-  private async sendMessage(conversationId: string, tenantId: string, body: string) {
+  /**
+   * Insert a message into the DB and push an SSE event so the inbox updates in real-time.
+   * Pass isPrivate=true for internal notes (visible to agents only, not sent to contact).
+   */
+  private async sendMessage(conversationId: string, tenantId: string, body: string, isPrivate = false) {
     await this.db.query(
       `INSERT INTO messages (tenant_id, conversation_id, body, content_type, direction, sender_type, is_private, created_at, updated_at)
-       VALUES ($1,$2,$3,'text','outbound','bot',false,NOW(),NOW())`,
-      [tenantId, conversationId, body],
+       VALUES ($1,$2,$3,'text','outbound','bot',$4,NOW(),NOW())`,
+      [tenantId, conversationId, body, isPrivate],
     );
     await this.db.query(
       `UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1`,
       [conversationId],
     );
+    // SSE push — inbox updates without refresh
+    this.notifications.emit({
+      tenantId,
+      type: 'message_created',
+      payload: {
+        conversationId,
+        message: {
+          conversationId,
+          body,
+          direction: 'outbound',
+          senderType: 'bot',
+          contentType: 'text',
+          isPrivate,
+          createdAt: new Date().toISOString(),
+        },
+      },
+    });
   }
 
   private async updateSessionVars(sessionId: string, vars: Record<string, any>) {
