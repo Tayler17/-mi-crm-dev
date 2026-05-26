@@ -8,6 +8,9 @@ import { NotificationsService } from '../notifications/notifications.service';
 export class WebhooksService {
   private readonly logger = new Logger(WebhooksService.name);
 
+  /** In-memory cache: "facebook:PSID" → real name. Cleared on restart, that's fine. */
+  private readonly metaNameCache = new Map<string, string>();
+
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly events: EventEmitter2,
@@ -60,6 +63,8 @@ export class WebhooksService {
       const conn = await this.getConnection(connectionId);
       if (!conn) return;
 
+      const accessToken = conn.credentials?.accessToken ?? '';
+
       for (const entry of body?.entry ?? []) {
         for (const event of entry?.messaging ?? []) {
           if (!event?.message) continue;           // ignore delivery/read receipts
@@ -67,10 +72,11 @@ export class WebhooksService {
 
           const senderId = String(event.sender?.id ?? '');
           const text = event.message.text ?? '(media)';
+          const contactName = await this.fetchMetaUserName(senderId, accessToken, 'facebook');
           await this.upsertMessage({
             tenantId: conn.tenant_id, connectionId,
             inboxId: conn.inbox_id, channel: 'facebook',
-            externalId: senderId, contactName: senderId, contactPhone: senderId,
+            externalId: senderId, contactName, contactPhone: senderId,
             messageExtId: event.message.mid ?? String(event.timestamp),
             body: text,
           });
@@ -88,6 +94,8 @@ export class WebhooksService {
       const conn = await this.getConnection(connectionId);
       if (!conn) return;
 
+      const accessToken = conn.credentials?.accessToken ?? '';
+
       for (const entry of body?.entry ?? []) {
         for (const event of entry?.messaging ?? []) {
           if (!event?.message) continue;
@@ -95,10 +103,11 @@ export class WebhooksService {
 
           const senderId = String(event.sender?.id ?? '');
           const text = event.message.text ?? '(media)';
+          const contactName = await this.fetchMetaUserName(senderId, accessToken, 'instagram');
           await this.upsertMessage({
             tenantId: conn.tenant_id, connectionId,
             inboxId: conn.inbox_id, channel: 'instagram',
-            externalId: senderId, contactName: senderId, contactPhone: senderId,
+            externalId: senderId, contactName, contactPhone: senderId,
             messageExtId: event.message.mid ?? String(event.timestamp),
             body: text,
           });
@@ -147,12 +156,19 @@ export class WebhooksService {
 
     // 1. Find or create contact
     const [existing] = await this.db.query(
-      `SELECT id FROM contacts WHERE tenant_id=$1 AND phone=$2 LIMIT 1`,
+      `SELECT id, full_name FROM contacts WHERE tenant_id=$1 AND phone=$2 LIMIT 1`,
       [tenantId, contactPhone],
     );
     let contactId: string;
     if (existing) {
       contactId = existing.id;
+      // If the contact was saved with just the numeric ID as name, update to real name now
+      if (contactName !== contactPhone && existing.full_name === contactPhone) {
+        await this.db.query(
+          `UPDATE contacts SET full_name=$1, updated_at=NOW() WHERE id=$2`,
+          [contactName, contactId],
+        ).catch(() => {});
+      }
     } else {
       const [newContact] = await this.db.query(
         `INSERT INTO contacts (tenant_id, full_name, phone, created_at, updated_at)
@@ -225,6 +241,32 @@ export class WebhooksService {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
+
+  /** Fetch the real display name for a Facebook/Instagram sender via Graph API.
+   *  Falls back to the raw senderId if the call fails or the token is missing. */
+  private async fetchMetaUserName(
+    senderId: string,
+    accessToken: string,
+    channel: 'facebook' | 'instagram',
+  ): Promise<string> {
+    if (!accessToken || !senderId) return senderId;
+    const cacheKey = `${channel}:${senderId}`;
+    if (this.metaNameCache.has(cacheKey)) return this.metaNameCache.get(cacheKey)!;
+    try {
+      const fields = channel === 'instagram' ? 'name,username' : 'name';
+      const res = await (globalThis as any).fetch(
+        `https://graph.facebook.com/v21.0/${senderId}?fields=${fields}&access_token=${accessToken}`,
+        { signal: AbortSignal.timeout(5000) },
+      );
+      if (!res.ok) return senderId;
+      const data = await res.json();
+      const name: string = data.name || (data.username ? `@${data.username}` : '') || senderId;
+      this.metaNameCache.set(cacheKey, name);
+      return name;
+    } catch {
+      return senderId; // network error or token expired → fall back to ID
+    }
+  }
 
   private async getConnection(connectionId: string) {
     const [conn] = await this.db.query(
