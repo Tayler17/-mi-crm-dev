@@ -26,6 +26,7 @@ const CATEGORIES = [
   { value: 'onboarding',    label: 'Onboarding',         icon: '👋' },
   { value: 'objections',    label: 'Manejo objeciones',  icon: '🛡' },
   { value: 'closing',       label: 'Cierre',             icon: '🏆' },
+  { value: 'marketing',     label: 'Marketing Content',  icon: '📣' },
 ];
 
 const TEMPLATE_PROMPTS: Partial<AiPrompt>[] = [
@@ -75,6 +76,19 @@ const TEMPLATE_PROMPTS: Partial<AiPrompt>[] = [
       { name: 'objections', description: 'Objeciones del cliente', example: 'Precio alto, necesita aprobación del CTO' },
     ],
     provider: 'openai', model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 600,
+  },
+  {
+    name: 'Post de marketing entrenado',
+    category: 'marketing',
+    description: 'Genera contenido de marketing con la voz y estilo de tu marca',
+    prompt_text: 'Eres el community manager de nuestra empresa. Tu tono es {tone} y conoces bien a nuestra audiencia.\n\nCrea una publicación para {channel} sobre el siguiente tema: {title}\nPalabras clave a incluir: {keywords}\n\nReglas:\n- Adapta el formato y longitud al canal\n- Usa emojis con moderación\n- Incluye un call-to-action claro al final\n- Escribe en español',
+    variables: [
+      { name: 'title', description: 'Tema del post', example: 'Lanzamiento de nuevo producto' },
+      { name: 'channel', description: 'Canal de publicación', example: 'instagram' },
+      { name: 'keywords', description: 'Palabras clave', example: 'innovación, calidad, oferta' },
+      { name: 'tone', description: 'Tono del mensaje', example: 'profesional' },
+    ],
+    provider: 'openai', model: 'gpt-4o-mini', temperature: 0.8, max_tokens: 600,
   },
 ];
 
