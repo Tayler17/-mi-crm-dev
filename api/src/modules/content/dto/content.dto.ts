@@ -94,6 +94,9 @@ export class GenerateContentDto {
 
   @IsOptional() @IsString()
   tone?: string;
+
+  @IsOptional() @IsString()
+  promptId?: string;
 }
 
 const IMAGE_SIZES     = ['1024x1024', '1792x1024', '1024x1792'] as const;

@@ -1755,7 +1755,7 @@ export const updateContentPost = (id: string, data: Partial<ContentPost>) =>
 
 export const deleteContentPost = (id: string) => apiDelete(`/content/${id}`);
 
-export const generateContentPost = (data: { title: string; channel: string; keywords?: string; tone?: string }) =>
+export const generateContentPost = (data: { title: string; channel: string; keywords?: string; tone?: string; promptId?: string }) =>
   apiPost<{ body: string; aiGenerated: boolean; promptName?: string }>('/content/generate', data);
 
 export const getContentPostSchedule = (id: string) =>

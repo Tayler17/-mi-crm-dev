@@ -197,19 +197,21 @@ export class ContentService {
     const platformAI = await this.platformSettings.getAI();
     if (!platformAI?.apiKey) return null;
 
-    // ── Look for a custom marketing prompt in AI Prompts ──────────────────────
-    // Users can create a prompt with category = 'marketing' to override the
-    // generic prompt. Supports variables: {title}, {channel}, {keywords}, {tone}
+    // ── Resolve the AI prompt to use ─────────────────────────────────────────
+    // Priority: (1) explicit promptId from request, (2) auto-pick active marketing prompt, (3) built-in prompt
     let prompt: string;
     let promptName: string | undefined;
 
     if (tenantId) {
-      const [customPrompt] = await this.db.query(
-        `SELECT id, name, prompt_text FROM ai_prompts
-         WHERE tenant_id = $1 AND category = 'marketing' AND is_active = true
-         ORDER BY updated_at DESC LIMIT 1`,
-        [tenantId],
-      ).catch(() => []);
+      // If a specific promptId was sent, use it directly
+      const lookupQuery = dto.promptId
+        ? `SELECT id, name, prompt_text FROM ai_prompts WHERE id = $2 AND tenant_id = $1 LIMIT 1`
+        : `SELECT id, name, prompt_text FROM ai_prompts
+           WHERE tenant_id = $1 AND category = 'marketing' AND is_active = true
+           ORDER BY updated_at DESC LIMIT 1`;
+
+      const queryParams = dto.promptId ? [tenantId, dto.promptId] : [tenantId];
+      const [customPrompt] = await this.db.query(lookupQuery, queryParams).catch(() => []);
 
       if (customPrompt?.prompt_text) {
         prompt = customPrompt.prompt_text

@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  ContentPost, AiImageGeneration,
+  ContentPost, AiImageGeneration, AiPrompt,
   getContentPosts, createContentPost, updateContentPost,
   deleteContentPost, generateContentPost, uploadContentMedia,
   generateContentImage, getContentImageHistory, getContentImageUsage,
+  getAiPrompts,
   API_URL,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
@@ -307,9 +308,11 @@ function PostModal({
   const [aiOpen,      setAiOpen]      = useState(false);
   const [aiKw,        setAiKw]        = useState('');
   const [aiTone,      setAiTone]      = useState('profesional');
-  const [aiLoading,   setAiLoading]   = useState(false);
-  const [aiGenerated, setAiGenerated] = useState<boolean | null>(null);
-  const [aiPromptName, setAiPromptName] = useState<string | undefined>(undefined);
+  const [aiLoading,      setAiLoading]      = useState(false);
+  const [aiGenerated,    setAiGenerated]    = useState<boolean | null>(null);
+  const [aiPromptName,   setAiPromptName]   = useState<string | undefined>(undefined);
+  const [mktPrompts,     setMktPrompts]     = useState<AiPrompt[]>([]);
+  const [selectedPromptId, setSelectedPromptId] = useState<string>('auto');
   const bodyRef  = useRef<HTMLTextAreaElement>(null);
   const fileRef  = useRef<HTMLInputElement>(null);
 
@@ -405,7 +408,9 @@ function PostModal({
     if (!title.trim()) { setError(i.contentTitleFirst); return; }
     setAiLoading(true); setError('');
     try {
-      const result = await generateContentPost({ title: title.trim(), channel, keywords: aiKw, tone: aiTone });
+      // 'auto' = let backend pick the most-recent active marketing prompt; otherwise send specific ID
+      const promptId = selectedPromptId === 'auto' ? undefined : selectedPromptId;
+      const result = await generateContentPost({ title: title.trim(), channel, keywords: aiKw, tone: aiTone, promptId });
       setBody(result.body);
       setAiGenerated(result.aiGenerated ?? false);
       setAiPromptName(result.promptName);
@@ -565,7 +570,17 @@ function PostModal({
                     )}
                     <button
                       type="button"
-                      onClick={() => setAiOpen((o) => !o)}
+                      onClick={() => {
+                        const opening = !aiOpen;
+                        setAiOpen(opening);
+                        if (opening && mktPrompts.length === 0) {
+                          getAiPrompts('marketing').then((list) => {
+                            const active = list.filter((p) => p.is_active);
+                            setMktPrompts(active);
+                            if (active.length === 1) setSelectedPromptId(active[0].id);
+                          }).catch(() => {});
+                        }
+                      }}
                       style={{
                         padding: '3px 10px', borderRadius: 6,
                         border: '1px solid #7c3aed', background: aiOpen ? '#7c3aed' : 'transparent',
@@ -585,6 +600,25 @@ function PostModal({
                     border: '1px solid #ddd6fe', borderBottom: 'none',
                     display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap',
                   }}>
+                    {/* Prompt selector — only shown when marketing prompts exist */}
+                    {mktPrompts.length > 0 && (
+                      <div style={{ flex: '1 1 100%', marginBottom: 2 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: '#7c3aed', marginBottom: 4 }}>🎯 Prompt entrenado</div>
+                        <select
+                          className="form-input"
+                          style={{ fontSize: 12 }}
+                          value={selectedPromptId}
+                          onChange={(e) => setSelectedPromptId(e.target.value)}
+                        >
+                          {mktPrompts.map((p) => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                          {mktPrompts.length > 1 && (
+                            <option value="auto">⚡ Auto (más reciente activo)</option>
+                          )}
+                        </select>
+                      </div>
+                    )}
                     <div style={{ flex: '2 1 160px' }}>
                       <div style={{ fontSize: 11, fontWeight: 600, color: '#7c3aed', marginBottom: 4 }}>{i.contentAiKeywords}</div>
                       <input
