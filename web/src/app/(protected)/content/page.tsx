@@ -309,6 +309,7 @@ function PostModal({
   const [aiTone,      setAiTone]      = useState('profesional');
   const [aiLoading,   setAiLoading]   = useState(false);
   const [aiGenerated, setAiGenerated] = useState<boolean | null>(null);
+  const [aiPromptName, setAiPromptName] = useState<string | undefined>(undefined);
   const bodyRef  = useRef<HTMLTextAreaElement>(null);
   const fileRef  = useRef<HTMLInputElement>(null);
 
@@ -407,6 +408,7 @@ function PostModal({
       const result = await generateContentPost({ title: title.trim(), channel, keywords: aiKw, tone: aiTone });
       setBody(result.body);
       setAiGenerated(result.aiGenerated ?? false);
+      setAiPromptName(result.promptName);
       setAiOpen(false);
     } catch {
       setError(i.error);
@@ -546,7 +548,12 @@ function PostModal({
 
                   {/* AI generate button */}
                   <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {aiGenerated === true && (
+                    {aiGenerated === true && aiPromptName && (
+                      <span title={`Prompt entrenado: "${aiPromptName}"`} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 10, background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', fontWeight: 600, cursor: 'help', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        🎯 {aiPromptName}
+                      </span>
+                    )}
+                    {aiGenerated === true && !aiPromptName && (
                       <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 10, background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe', fontWeight: 600 }}>
                         ✨ IA generado
                       </span>

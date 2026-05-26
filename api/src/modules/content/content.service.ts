@@ -175,11 +175,11 @@ export class ContentService {
 
   // ── AI content generator ──────────────────────────────────────────────────────
 
-  async generate(dto: GenerateContentDto): Promise<{ body: string; aiGenerated: boolean }> {
+  async generate(dto: GenerateContentDto, tenantId?: string): Promise<{ body: string; aiGenerated: boolean; promptName?: string }> {
     // Try real AI first
     try {
-      const aiBody = await this.generateWithAI(dto);
-      if (aiBody) return { body: aiBody, aiGenerated: true };
+      const aiResult = await this.generateWithAI(dto, tenantId);
+      if (aiResult) return { body: aiResult.body, aiGenerated: true, promptName: aiResult.promptName };
     } catch (e: any) {
       this.logger.warn(`[generate] AI call failed, falling back to template: ${e.message}`);
     }
@@ -190,12 +190,48 @@ export class ContentService {
 
   // ── AI generation ─────────────────────────────────────────────────────────────
 
-  private async generateWithAI(dto: GenerateContentDto): Promise<string | null> {
+  private async generateWithAI(
+    dto: GenerateContentDto,
+    tenantId?: string,
+  ): Promise<{ body: string; promptName?: string } | null> {
     const platformAI = await this.platformSettings.getAI();
     if (!platformAI?.apiKey) return null;
 
-    const prompt = this.buildGenerationPrompt(dto);
+    // ── Look for a custom marketing prompt in AI Prompts ──────────────────────
+    // Users can create a prompt with category = 'marketing' to override the
+    // generic prompt. Supports variables: {title}, {channel}, {keywords}, {tone}
+    let prompt: string;
+    let promptName: string | undefined;
 
+    if (tenantId) {
+      const [customPrompt] = await this.db.query(
+        `SELECT id, name, prompt_text FROM ai_prompts
+         WHERE tenant_id = $1 AND category = 'marketing' AND is_active = true
+         ORDER BY updated_at DESC LIMIT 1`,
+        [tenantId],
+      ).catch(() => []);
+
+      if (customPrompt?.prompt_text) {
+        prompt = customPrompt.prompt_text
+          .replace(/\{title\}/g,    dto.title)
+          .replace(/\{channel\}/g,  dto.channel)
+          .replace(/\{keywords\}/g, dto.keywords ?? '')
+          .replace(/\{tone\}/g,     dto.tone ?? 'profesional');
+        promptName = customPrompt.name;
+        // Track usage
+        this.db.query(
+          `UPDATE ai_prompts SET usage_count = usage_count + 1, updated_at = NOW() WHERE id = $1`,
+          [customPrompt.id],
+        ).catch(() => {});
+        this.logger.log(`[generate] Using custom marketing prompt: "${promptName}"`);
+      } else {
+        prompt = this.buildGenerationPrompt(dto);
+      }
+    } else {
+      prompt = this.buildGenerationPrompt(dto);
+    }
+
+    // ── Call the configured AI provider ──────────────────────────────────────
     if (platformAI.provider === 'openai') {
       const res = await axios.post(
         'https://api.openai.com/v1/chat/completions',
@@ -207,7 +243,8 @@ export class ContentService {
         },
         { headers: { Authorization: `Bearer ${platformAI.apiKey}` }, timeout: 25000 },
       );
-      return res.data.choices?.[0]?.message?.content?.trim() ?? null;
+      const body = res.data.choices?.[0]?.message?.content?.trim();
+      return body ? { body, promptName } : null;
     }
 
     if (platformAI.provider === 'anthropic') {
@@ -220,7 +257,8 @@ export class ContentService {
         },
         { headers: { 'x-api-key': platformAI.apiKey, 'anthropic-version': '2023-06-01' }, timeout: 25000 },
       );
-      return res.data.content?.[0]?.text?.trim() ?? null;
+      const body = res.data.content?.[0]?.text?.trim();
+      return body ? { body, promptName } : null;
     }
 
     if (platformAI.provider === 'gemini') {
@@ -229,7 +267,8 @@ export class ContentService {
         { contents: [{ parts: [{ text: prompt }] }] },
         { timeout: 25000 },
       );
-      return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
+      const body = res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      return body ? { body, promptName } : null;
     }
 
     return null;

@@ -27,8 +27,8 @@ export class ContentController {
   }
 
   @Post('generate')
-  generate(@Body() dto: GenerateContentDto) {
-    return this.svc.generate(dto);
+  generate(@Request() req: any, @Body() dto: GenerateContentDto) {
+    return this.svc.generate(dto, req.user.tenantId);
   }
 
   @Post('generate-image')
