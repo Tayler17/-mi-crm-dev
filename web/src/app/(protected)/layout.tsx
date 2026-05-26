@@ -31,7 +31,7 @@ const NAV_LABELS: Record<LangCode, Record<string, string>> = {
     'Planes & Billing': 'Plans & Billing', 'Configuración': 'Settings',
     'Plantillas': 'Templates', 'Centro de Ayuda': 'Help Center', 'Workspaces': 'Workspaces',
     'Webhooks': 'Webhooks', 'Campos Custom': 'Custom Fields',
-    'Mi Plan & Uso': 'My Plan & Usage',
+    'Mi Plan & Uso': 'My Plan & Usage', 'Estado del sistema': 'System Status',
   },
   pt: {
     'Dashboard': 'Dashboard', 'Contactos': 'Contatos', 'Empresas': 'Empresas',
@@ -44,7 +44,7 @@ const NAV_LABELS: Record<LangCode, Record<string, string>> = {
     'Usuarios': 'Usuários', 'Reportes': 'Relatórios', 'Anuncios': 'Anúncios',
     'Planes & Billing': 'Planos & Cobrança', 'Configuración': 'Configurações',
     'Plantillas': 'Modelos', 'Centro de Ayuda': 'Central de ajuda', 'Workspaces': 'Workspaces',
-    'Mi Plan & Uso': 'Meu Plano & Uso',
+    'Mi Plan & Uso': 'Meu Plano & Uso', 'Estado del sistema': 'Estado do sistema',
   },
   tr: {
     'Dashboard': 'Gösterge Paneli', 'Contactos': 'Kişiler', 'Empresas': 'Şirketler',
@@ -57,7 +57,7 @@ const NAV_LABELS: Record<LangCode, Record<string, string>> = {
     'Usuarios': 'Kullanıcılar', 'Reportes': 'Raporlar', 'Anuncios': 'Duyurular',
     'Planes & Billing': 'Planlar & Faturalama', 'Configuración': 'Ayarlar',
     'Plantillas': 'Şablonlar', 'Centro de Ayuda': 'Yardım Merkezi', 'Workspaces': 'Çalışma Alanları',
-    'Mi Plan & Uso': 'Planım & Kullanım',
+    'Mi Plan & Uso': 'Planım & Kullanım', 'Estado del sistema': 'Sistem Durumu',
   },
   ar: {
     'Dashboard': 'لوحة التحكم', 'Contactos': 'جهات الاتصال', 'Empresas': 'الشركات',
@@ -70,7 +70,7 @@ const NAV_LABELS: Record<LangCode, Record<string, string>> = {
     'Usuarios': 'المستخدمون', 'Reportes': 'التقارير', 'Anuncios': 'الإعلانات',
     'Planes & Billing': 'الخطط والفواتير', 'Configuración': 'الإعدادات',
     'Plantillas': 'القوالب', 'Centro de Ayuda': 'مركز المساعدة', 'Workspaces': 'مساحات العمل',
-    'Mi Plan & Uso': 'خطتي والاستخدام',
+    'Mi Plan & Uso': 'خطتي والاستخدام', 'Estado del sistema': 'حالة النظام',
   },
 };
 
@@ -130,6 +130,7 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   { group: '🏢 ADMIN',         href: '/reports',          label: 'Reportes',             icon: '📊', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/announcements',    label: 'Anuncios',             icon: '📢', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/settings',         label: 'Configuración',        icon: '🔧', minRole: 'admin' },
+  { group: '🏢 ADMIN',         href: '/status',           label: 'Estado del sistema',   icon: '🩺', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/tenants',          label: 'Workspaces',           icon: '🏗', minRole: 'owner' },
   { group: '🏢 ADMIN',         href: '/api-docs',         label: 'API Docs',             icon: '📖', minRole: 'owner' },
   // ── Sin grupo ──

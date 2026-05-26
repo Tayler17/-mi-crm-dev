@@ -1387,7 +1387,13 @@ export default function InboxPage() {
                   style={{ fontSize: 11, padding: '4px 10px', color: '#f59e0b', borderColor: '#f59e0b' }}
                   onClick={async () => {
                     try {
-                      await requestCsat(activeId!);
+                      const { surveyUrl } = await requestCsat(activeId!);
+                      // Send the survey link as a message so it reaches the customer via WhatsApp/FB/etc.
+                      const fullUrl = `${window.location.origin}${surveyUrl}`;
+                      const surveyMsg = `⭐ ¿Cómo fue tu experiencia con nosotros? Tu opinión nos ayuda a mejorar. Por favor califica nuestro servicio (toma 10 segundos):\n${fullUrl}`;
+                      await sendMessage(activeId!, surveyMsg);
+                      const [m, n] = await Promise.all([getMessages(activeId!), getNotes(activeId!)]);
+                      setMessages(m); setNotes(n);
                       setCsatSent((p) => ({ ...p, [activeId!]: true }));
                     } catch { alert(i.inbxErrSurvey); }
                   }}

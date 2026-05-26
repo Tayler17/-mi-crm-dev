@@ -49,6 +49,7 @@ import { OutboundWebhooksModule } from './modules/outbound-webhooks/outbound-web
 import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module';
 import { ContentModule } from './modules/content/content.module';
 import { VoicesModule } from './modules/voices/voices.module';
+import { HealthModule } from './modules/health/health.module';
 import { TenantMiddleware } from './common/middleware/tenant.middleware';
 
 @Module({
@@ -139,6 +140,7 @@ import { TenantMiddleware } from './common/middleware/tenant.middleware';
     CustomFieldsModule,
     ContentModule,
     VoicesModule,
+    HealthModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: CustomThrottlerGuard },
