@@ -364,7 +364,7 @@ REGLAS GENERALES:
   ): Promise<{ tempUrl: string; model: string }> {
     const res = await axios.post(
       'https://api.openai.com/v1/images/generations',
-      { model: 'dall-e-3', prompt, n: 1, size, style, response_format: 'url' },
+      { model: 'dall-e-3', prompt, n: 1, size, response_format: 'url' },
       { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 60000 },
     );
     const tempUrl: string = res.data?.data?.[0]?.url;
