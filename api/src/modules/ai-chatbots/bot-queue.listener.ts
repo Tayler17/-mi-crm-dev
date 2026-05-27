@@ -14,7 +14,7 @@ export class BotQueueListener {
   async onMessageReceived(payload: {
     tenantId: string;
     conversationId: string;
-    message: { body: string; direction: string; is_private: boolean };
+    message: { body: string; direction: string; is_private: boolean; content_type?: string };
   }) {
     const { tenantId, conversationId, message } = payload;
 

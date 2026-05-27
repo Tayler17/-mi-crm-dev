@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationsService } from '../notifications/notifications.service';
+import { WhatsappWebService } from '../connections/whatsapp-web.service';
 
 interface FlowStep {
   id: string;
@@ -60,6 +61,7 @@ export class FlowRunnerService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly notifications: NotificationsService,
+    private readonly waSvc: WhatsappWebService,
   ) {}
 
   // ── Start a new session ───────────────────────────────────────────────────────
@@ -101,7 +103,11 @@ export class FlowRunnerService {
     messageBody: string,
   ): Promise<void> {
     const [session] = await this.db.query(
-      `SELECT * FROM flow_sessions WHERE conversation_id=$1 AND status='active' LIMIT 1`,
+      `SELECT fs.* FROM flow_sessions fs
+       JOIN conversation_flows cf ON cf.id = fs.flow_id
+       WHERE fs.conversation_id=$1 AND fs.status='active'
+         AND cf.is_active = true
+       LIMIT 1`,
       [conversationId],
     );
     if (!session) return;
@@ -358,13 +364,13 @@ export class FlowRunnerService {
   }
 
   /**
-   * Insert a message into the DB and push an SSE event so the inbox updates in real-time.
+   * Insert a message into the DB, push SSE, and deliver via the conversation's channel.
    * Pass isPrivate=true for internal notes (visible to agents only, not sent to contact).
    */
   private async sendMessage(conversationId: string, tenantId: string, body: string, isPrivate = false) {
-    await this.db.query(
+    const [msg] = await this.db.query(
       `INSERT INTO messages (tenant_id, conversation_id, body, content_type, direction, sender_type, is_private, created_at, updated_at)
-       VALUES ($1,$2,$3,'text','outbound','bot',$4,NOW(),NOW())`,
+       VALUES ($1,$2,$3,'text','outbound','bot',$4,NOW(),NOW()) RETURNING id`,
       [tenantId, conversationId, body, isPrivate],
     );
     await this.db.query(
@@ -388,6 +394,31 @@ export class FlowRunnerService {
         },
       },
     });
+
+    // ── Deliver via channel (skip private notes — those are for agents only) ──
+    if (!isPrivate) {
+      try {
+        const [conv] = await this.db.query(
+          `SELECT c.channel_type, c.connection_id, c.external_id,
+                  cc.channel_type AS conn_channel_type
+           FROM conversations c
+           LEFT JOIN channel_connections cc ON cc.id = c.connection_id
+           WHERE c.id=$1 AND c.tenant_id=$2 LIMIT 1`,
+          [conversationId, tenantId],
+        );
+        if (conv) {
+          const channelType = conv.conn_channel_type ?? conv.channel_type;
+          if (channelType === 'whatsapp_web' && conv.external_id && conv.connection_id) {
+            const waId = await this.waSvc.sendMessage(conv.connection_id, conv.external_id, body);
+            if (waId && msg?.id) {
+              await this.db.query(`UPDATE messages SET external_id=$1 WHERE id=$2`, [waId, msg.id]).catch(() => {});
+            }
+          }
+        }
+      } catch (e: any) {
+        this.logger.warn(`[flow] Channel delivery failed for conv ${conversationId}: ${e.message}`);
+      }
+    }
   }
 
   private async updateSessionVars(sessionId: string, vars: Record<string, any>) {
