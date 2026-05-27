@@ -57,6 +57,16 @@ export class AiChatbotEngineService {
   // ── Core processing (called by BotQueueProcessor) ────────────────────────────
 
   async processMessage(tenantId: string, conversationId: string, inboundMsg: any) {
+    // 0. Skip if a conversation flow session is active — flow runner has priority
+    const [activeFlow] = await this.db.query(
+      `SELECT id FROM flow_sessions WHERE conversation_id=$1 AND status='active' LIMIT 1`,
+      [conversationId],
+    );
+    if (activeFlow) {
+      this.logger.debug(`[engine] Skipping AI chatbot — active flow session for conv ${conversationId}`);
+      return;
+    }
+
     // 1. Load conversation + linked inbox + current queue
     const [conv] = await this.db.query(
       `SELECT c.id, c.inbox_id, c.contact_id, c.connection_id, c.queue_id,

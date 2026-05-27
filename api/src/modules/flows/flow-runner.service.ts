@@ -116,6 +116,14 @@ export class FlowRunnerService {
     const currentStep = steps.find((s: FlowStep) => s.id === currentStepId);
     if (!currentStep) { await this.completeSession(session.id); return; }
 
+    // ── Ignore media messages while waiting for text input ──────────────────
+    // Media body format is "/uploads/messages/wa-xxx.jpg|filename.jpg" or "[Imagen]" etc.
+    const isMediaMessage = messageBody.startsWith('/uploads/') || messageBody.startsWith('[');
+    if (isMediaMessage && (currentStep.type === 'menu' || currentStep.type === 'input')) {
+      // Silently ignore — no "Opción no válida" for images/files/audio
+      return;
+    }
+
     let nextStepId: string | undefined;
 
     if (currentStep.type === 'menu') {
@@ -127,9 +135,9 @@ export class FlowRunnerService {
         : opts.find((o: any) => o.label.toLowerCase() === messageBody.trim().toLowerCase());
       nextStepId = matched?.nextStepId;
       if (!nextStepId) {
-        // Invalid selection — resend menu
+        // Invalid text selection — resend menu
         await this.sendMessage(session.conversation_id, session.tenant_id,
-          `Opción no válida. ${currentStep.text ?? ''}\n${opts.map((o: any, i: number) => `${i + 1}. ${o.label}`).join('\n')}`);
+          `${currentStep.text ?? ''}\n${opts.map((o: any, i: number) => `${i + 1}. ${o.label}`).join('\n')}`);
         return;
       }
     } else if (currentStep.type === 'input') {

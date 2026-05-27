@@ -1424,7 +1424,7 @@ export default function InboxPage() {
                       <div key={m.id} className="msg-activity">
                         <span className="msg-activity-label">{m.body}</span>
                         <span className="msg-activity-time">
-                          {new Date(m.createdAt).toLocaleString(i.locale, { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                          {m.createdAt ? new Date(m.createdAt).toLocaleString(i.locale, { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : ''}
                         </span>
                       </div>
                     );
@@ -1456,7 +1456,7 @@ export default function InboxPage() {
                         ) : renderBody(m.body)}
                       </div>
                       <div className="msg-time" style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: m.direction === 'outbound' ? 'flex-end' : 'flex-start' }}>
-                        {new Date(m.createdAt).toLocaleString(i.locale, { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                        {m.createdAt ? new Date(m.createdAt).toLocaleString(i.locale, { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : ''}
                         {m.direction === 'outbound' && conv?.channelType?.startsWith('whatsapp') && (
                           <span title={m.status} style={{ fontSize: 12, lineHeight: 1 }}>
                             {m.status === 'read'      ? <span style={{ color: '#3b82f6' }}>✓✓</span>
