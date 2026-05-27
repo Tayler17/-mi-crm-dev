@@ -661,6 +661,15 @@ export class WhatsappWebService implements OnModuleInit {
 
     const contentType = getContentType(msgContent);
 
+    // ── Skip system / protocol messages — never store them ──────────────────
+    const SYSTEM_TYPES = [
+      'protocolMessage',       // delivery receipts, revoke, etc.
+      'messageContextInfo',    // internal context, no user content
+      'senderKeyDistributionMessage', // encryption key rotation
+      'reactionMessage',       // emoji reactions (no text body)
+    ];
+    if (!contentType || SYSTEM_TYPES.includes(contentType)) return;
+
     // ── Media download ──────────────────────────────────────────────────────
     let dbContentType = 'text';
     let body          = '';

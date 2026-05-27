@@ -86,13 +86,21 @@ export class AiChatbotEngineService {
     // 2. Find active bot — prefer a bot that already has an active session for this
     // conversation (post-transfer state where dest bot's session was pre-created),
     // then fall back to inbox/queue matching for the initial message.
+    // NOTE: even when matching via session, we still verify the bot is assigned to
+    // this inbox/queue/team — if an admin disconnected the bot from the channel,
+    // the session should no longer be authoritative.
     let [bot] = await this.db.query(
       `SELECT b.* FROM ai_chatbots b
        INNER JOIN ai_chatbot_sessions s ON s.chatbot_id = b.id
        WHERE s.conversation_id = $1 AND s.status = 'active'
          AND b.tenant_id = $2 AND b.status = 'active'
+         AND (
+           $3::uuid = ANY(b.inbox_ids)
+           OR ($4::uuid IS NOT NULL AND $4::uuid = ANY(b.queue_ids))
+           OR ($5::uuid IS NOT NULL AND $5::uuid = ANY(b.team_ids))
+         )
        ORDER BY s.created_at DESC LIMIT 1`,
-      [conversationId, tenantId],
+      [conversationId, tenantId, effectiveInboxId, conv.queue_id ?? null, conv.team_id ?? null],
     );
     if (!bot) {
       [bot] = await this.db.query(

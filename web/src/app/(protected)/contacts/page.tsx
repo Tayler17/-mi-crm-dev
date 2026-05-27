@@ -119,6 +119,44 @@ export default function ContactsPage() {
   const [importing, setImporting]       = useState(false);
   const [importResult, setImportResult] = useState<CsvImportResult | null>(null);
 
+  // vCard import (contacts from phone)
+  const vcfInputRef = useRef<HTMLInputElement>(null);
+  const [vcfImporting, setVcfImporting] = useState(false);
+  const [vcfResult, setVcfResult]       = useState<{ created: number; skipped: number } | null>(null);
+
+  async function handleVcfChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setVcfImporting(true);
+    try {
+      const text = await file.text();
+      // Split into individual vCards
+      const cards = text.split(/(?=BEGIN:VCARD)/i).map((s) => s.trim()).filter(Boolean);
+      let created = 0, skipped = 0;
+      for (const card of cards) {
+        try {
+          const get = (key: string) => {
+            const re = new RegExp(`^${key}[^:]*:(.+)$`, 'im');
+            return card.match(re)?.[1]?.trim() ?? '';
+          };
+          const fullName = get('FN') || get('N').replace(/;/g, ' ').trim();
+          const phone = get('TEL').replace(/[^+\d]/g, '') || '';
+          const email = get('EMAIL') || '';
+          if (!fullName && !phone) { skipped++; continue; }
+          await createContact({ fullName: fullName || phone, phone, email, jobTitle: '' });
+          created++;
+        } catch { skipped++; }
+      }
+      setVcfResult({ created, skipped });
+      load();
+    } catch {
+      alert('Error al leer el archivo vCard');
+    } finally {
+      setVcfImporting(false);
+    }
+  }
+
   // Duplicates
   type DupGroup = { ids: string[]; names: string[]; email: string; phone: string; count: number };
   const [showDups, setShowDups]       = useState(false);
@@ -293,6 +331,11 @@ export default function ContactsPage() {
           <input ref={csvInputRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={handleCsvChange} />
           <button className="btn btn-secondary" disabled={importing} onClick={() => csvInputRef.current?.click()}>
             {importing ? `⏳ ${i.loading}` : `📥 ${i.importCSV}`}
+          </button>
+
+          <input ref={vcfInputRef} type="file" accept=".vcf,.vcard,text/vcard,text/x-vcard" style={{ display: 'none' }} onChange={handleVcfChange} />
+          <button className="btn btn-secondary" disabled={vcfImporting} title="Importa contactos desde tu teléfono exportándolos como archivo .vcf (vCard)" onClick={() => vcfInputRef.current?.click()}>
+            {vcfImporting ? `⏳ ${i.loading}` : '📱 Importar vCard'}
           </button>
 
           <button className="btn btn-secondary" onClick={() => { setShowDups(true); loadDups(); }}>
@@ -646,6 +689,36 @@ export default function ContactsPage() {
               </div>
             </div>
             <div className="modal-footer"><button className="btn btn-primary" onClick={() => setImportResult(null)}>{i.close}</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* vCard import result modal */}
+      {vcfResult && (
+        <div className="modal-overlay" onClick={() => setVcfResult(null)}>
+          <div className="modal" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">📱 Importar vCard — Resultado</h2>
+              <button className="modal-close" onClick={() => setVcfResult(null)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                <div style={{ textAlign: 'center', padding: '16px 8px', borderRadius: 8, background: '#d1fae5' }}>
+                  <div style={{ fontSize: 32, fontWeight: 700, color: '#065f46' }}>{vcfResult.created}</div>
+                  <div style={{ fontSize: 13, color: '#065f46', fontWeight: 500 }}>Contactos creados</div>
+                </div>
+                <div style={{ textAlign: 'center', padding: '16px 8px', borderRadius: 8, background: vcfResult.skipped > 0 ? '#fee2e2' : '#f3f4f6' }}>
+                  <div style={{ fontSize: 32, fontWeight: 700, color: vcfResult.skipped > 0 ? '#991b1b' : '#6b7280' }}>{vcfResult.skipped}</div>
+                  <div style={{ fontSize: 13, color: vcfResult.skipped > 0 ? '#991b1b' : '#6b7280', fontWeight: 500 }}>Omitidos / Error</div>
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '10px 12px', background: '#f8fafc', borderRadius: 8, border: '1px solid var(--border)' }}>
+                💡 Exporta los contactos de tu teléfono como archivo <strong>.vcf</strong> (vCard) desde la app de Contactos y luego impórtalos aquí.
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={() => setVcfResult(null)}>{i.close}</button>
+            </div>
           </div>
         </div>
       )}
