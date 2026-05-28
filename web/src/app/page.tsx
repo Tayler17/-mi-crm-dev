@@ -41,6 +41,13 @@ const CHANNELS = [
 
 function fmt(n: number, unlimited: string) { return n === -1 ? unlimited : n.toLocaleString(); }
 
+function currencySymbol(currency: string) {
+  const map: Record<string, string> = {
+    USD: '$', EUR: '€', GBP: '£', MXN: '$', COP: '$', ARS: '$', CLP: '$', PEN: 'S/', BRL: 'R$',
+  };
+  return map[(currency ?? 'USD').toUpperCase()] ?? '$';
+}
+
 function planFeatures(p: Plan, t: typeof LANDING['es']): string[] {
   const n = (v: number, sg: string, pl: string) => v === -1 ? `${t.p_unlimited} ${pl}` : `${v} ${v === 1 ? sg : pl}`;
   return [
@@ -439,7 +446,7 @@ export default function LandingPage() {
                   </div>
                   <div style={{ marginBottom: 24 }}>
                     <span style={{ fontSize: 52, fontWeight: 900, letterSpacing: '-2px', color: pop ? '#fff' : '#0f172a' }}>
-                      {plan.price === 0 ? t.plan_free : `$${plan.price}`}
+                      {plan.price === 0 ? t.plan_free : `${currencySymbol(plan.currency)}${plan.price}`}
                     </span>
                     {plan.price > 0 && <span style={{ fontSize: 14, color: pop ? 'rgba(255,255,255,0.65)' : '#94a3b8' }}>{t.plan_month}</span>}
                   </div>
