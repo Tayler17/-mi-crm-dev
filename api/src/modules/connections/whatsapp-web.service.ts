@@ -884,6 +884,11 @@ export class WhatsappWebService implements OnModuleInit {
 
     this.logger.log(`[whatsapp_web] ${pushName} → conv ${conversationId}: "${body.slice(0, 60)}"`);
 
+    // Mark the message as read on WhatsApp so the phone clears the unread indicator
+    if (sock && msg.key) {
+      try { await sock.readMessages([msg.key]); } catch {}
+    }
+
     // Build the new message object for SSE
     const newMessage = {
       id: msgId,
@@ -1056,6 +1061,11 @@ export class WhatsappWebService implements OnModuleInit {
     );
 
     this.logger.log(`[whatsapp_web][group] ${senderName} in ${groupName} → conv ${conversationId}`);
+
+    // Mark the group message as read on WhatsApp
+    if (sock && msg.key) {
+      try { await sock.readMessages([msg.key]); } catch {}
+    }
 
     const newMessage = {
       id: msgId, conversationId, body: prefixedBody,
