@@ -52,7 +52,9 @@ export class ContactListsService {
   async getContacts(listId: string, tenantId: string) {
     await this.findOne(listId, tenantId);
     return this.db.query(
-      `SELECT ct.id, ct.full_name, ct.email, ct.phone, clc.added_at
+      `SELECT ct.id, ct.full_name, ct.email,
+              CASE WHEN ct.phone LIKE 'lid:%' THEN NULL ELSE ct.phone END AS phone,
+              clc.added_at
        FROM contact_list_contacts clc
        JOIN contacts ct ON ct.id = clc.contact_id
        WHERE clc.list_id = $1
@@ -92,7 +94,8 @@ export class ContactListsService {
   async searchContacts(listId: string, tenantId: string, search?: string, tagIds?: string[]) {
     await this.findOne(listId, tenantId);
     let sql = `
-      SELECT ct.id, ct.full_name, ct.email, ct.phone
+      SELECT ct.id, ct.full_name, ct.email,
+             CASE WHEN ct.phone LIKE 'lid:%' THEN NULL ELSE ct.phone END AS phone
       FROM contacts ct
       WHERE ct.tenant_id = $1
         AND ct.id NOT IN (SELECT contact_id FROM contact_list_contacts WHERE list_id = $2)

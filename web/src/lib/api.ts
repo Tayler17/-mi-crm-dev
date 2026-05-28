@@ -1236,11 +1236,26 @@ export interface BackupLog {
   completed_at?: string;
 }
 
-export const getBackups     = () => apiGet<BackupLog[]>('/backups');
-export const triggerBackup  = () => apiPost<{ id: string }>('/backups/trigger', {});
-export const deleteBackup   = (id: string) => apiDelete(`/backups/${id}`);
-export const backupDownloadUrl = (filename: string) =>
-  `${(typeof window !== 'undefined' ? '' : process.env.NEXT_PUBLIC_API_URL) || 'http://localhost:4000'}/backups/${encodeURIComponent(filename)}/download`;
+export const getBackups    = () => apiGet<BackupLog[]>('/backups');
+export const triggerBackup = () => apiPost<{ id: string }>('/backups/trigger', {});
+export const deleteBackup  = (id: string) => apiDelete(`/backups/${id}`);
+
+export async function downloadBackup(filename: string): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/backups/${encodeURIComponent(filename)}/download`,
+    { headers: { Authorization: `Bearer ${getToken()}`, 'X-Tenant-ID': getTenantId() } },
+  );
+  if (!res.ok) throw new Error(`Error ${res.status}`);
+  const blob = await res.blob();
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
 
 // ── Automations ───────────────────────────────────────────────────────────────
 

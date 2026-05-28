@@ -1,11 +1,9 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { getBackups, triggerBackup, deleteBackup, type BackupLog } from '@/lib/api';
+import { getBackups, triggerBackup, deleteBackup, downloadBackup, type BackupLog } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
 import { APP } from '@/lib/i18n/app';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 function fmtDate(d: string | null | undefined, locale: string) {
   if (!d) return '—';
@@ -35,11 +33,12 @@ export default function BackupsPage() {
     pending: { label: i.connPending,   color: '#92400e', bg: '#fef3c7' },
   };
 
-  const [backups, setBackups]       = useState<BackupLog[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [triggering, setTriggering] = useState(false);
-  const [error, setError]           = useState('');
-  const [pollId, setPollId]         = useState<ReturnType<typeof setInterval> | null>(null);
+  const [backups, setBackups]         = useState<BackupLog[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [triggering, setTriggering]   = useState(false);
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const [error, setError]             = useState('');
+  const [pollId, setPollId]           = useState<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
     const data = await getBackups().catch(() => []);
@@ -72,6 +71,13 @@ export default function BackupsPage() {
     if (!confirm(`${i.delete} "${b.filename}"?`)) return;
     await deleteBackup(b.id);
     setBackups((prev) => prev.filter((x) => x.id !== b.id));
+  }
+
+  async function handleDownload(filename: string) {
+    setDownloading(filename);
+    try { await downloadBackup(filename); }
+    catch (e: any) { setError(e.message || 'Error al descargar'); }
+    finally { setDownloading(null); }
   }
 
   const successList = backups.filter((b) => b.status === 'success');
@@ -124,14 +130,14 @@ export default function BackupsPage() {
             </div>
           </div>
           {lastGood.storage === 'local' && (
-            <a
-              href={`${API_URL}/backups/${encodeURIComponent(lastGood.filename)}/download`}
-              download
+            <button
               className="btn btn-secondary"
-              style={{ fontSize: 13, textDecoration: 'none' }}
+              style={{ fontSize: 13 }}
+              disabled={downloading === lastGood.filename}
+              onClick={() => handleDownload(lastGood.filename)}
             >
-              ⬇ {i.download}
-            </a>
+              {downloading === lastGood.filename ? '...' : `⬇ ${i.download}`}
+            </button>
           )}
         </div>
       )}
@@ -189,12 +195,12 @@ export default function BackupsPage() {
                     <td style={{ padding: '10px 14px' }}>
                       <div style={{ display: 'flex', gap: 6 }}>
                         {b.status === 'success' && b.storage === 'local' && (
-                          <a
-                            href={`${API_URL}/backups/${encodeURIComponent(b.filename)}/download`}
-                            download
+                          <button
                             className="btn btn-ghost"
-                            style={{ padding: '3px 8px', fontSize: 11, textDecoration: 'none' }}
-                          >⬇</a>
+                            style={{ padding: '3px 8px', fontSize: 11 }}
+                            disabled={downloading === b.filename}
+                            onClick={() => handleDownload(b.filename)}
+                          >{downloading === b.filename ? '…' : '⬇'}</button>
                         )}
                         <button
                           className="btn btn-ghost"
