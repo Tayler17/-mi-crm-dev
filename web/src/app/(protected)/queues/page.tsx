@@ -129,11 +129,15 @@ function QueueDetail({ queue, onClose, onEdit }: { queue: Queue; onClose: () => 
   const unassigned = conversations.filter(c => !c.assigned_user_id && c.status === 'open');
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <>
+      {/* backdrop */}
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 1000 }} />
+      {/* drawer */}
       <div onClick={e => e.stopPropagation()} style={{
         position: 'fixed', right: 0, top: 0, bottom: 0, width: 480,
-        background: 'var(--bg-card)', borderLeft: '1px solid var(--border)',
+        background: 'var(--surface)', borderLeft: '1px solid var(--border)',
         display: 'flex', flexDirection: 'column', overflowY: 'auto',
+        zIndex: 1001, boxShadow: '-4px 0 24px rgba(0,0,0,0.2)',
       }}>
         <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
@@ -195,7 +199,7 @@ function QueueDetail({ queue, onClose, onEdit }: { queue: Queue; onClose: () => 
           ))}
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

@@ -114,7 +114,7 @@ export class WhatsappWebService implements OnModuleInit {
   }
 
   /** Send a media file through an active WhatsApp Web session */
-  async sendFile(connectionId: string, remoteJid: string, fileUrl: string, contentType: string): Promise<string | false> {
+  async sendFile(connectionId: string, remoteJid: string, fileUrl: string, contentType: string, caption?: string): Promise<string | false> {
     const session = this.sessions.get(connectionId);
     if (!session?.sock || session.status !== 'connected') {
       this.logger.warn(`sendFile: no active session for ${connectionId}`);
@@ -141,13 +141,13 @@ export class WhatsappWebService implements OnModuleInit {
 
       let result: any;
       if (contentType === 'image') {
-        result = await session.sock.sendMessage(remoteJid, { image: buffer, mimetype, caption: '' });
+        result = await session.sock.sendMessage(remoteJid, { image: buffer, mimetype, caption: caption ?? '' });
       } else if (contentType === 'audio') {
         result = await session.sock.sendMessage(remoteJid, { audio: buffer, mimetype, ptt: ext === 'ogg' });
       } else if (contentType === 'video') {
-        result = await session.sock.sendMessage(remoteJid, { video: buffer, mimetype });
+        result = await session.sock.sendMessage(remoteJid, { video: buffer, mimetype, caption: caption ?? '' });
       } else {
-        result = await session.sock.sendMessage(remoteJid, { document: buffer, mimetype, fileName: filename });
+        result = await session.sock.sendMessage(remoteJid, { document: buffer, mimetype, fileName: filename, caption: caption ?? '' });
       }
       return result?.key?.id ?? true as any;
     } catch (e: any) {
@@ -333,7 +333,16 @@ export class WhatsappWebService implements OnModuleInit {
         markOnlineOnConnect: false,
         syncFullHistory: false,
         retryRequestDelayMs: 500,
-        getMessage: async () => undefined,
+        getMessage: async (key) => {
+          try {
+            const [msg] = await this.db.query(
+              `SELECT body FROM messages WHERE external_id=$1 LIMIT 1`,
+              [key.id],
+            );
+            if (msg?.body) return { conversation: msg.body };
+          } catch {}
+          return undefined;
+        },
       });
 
       this.sessions.set(connectionId, { status: 'starting', qr: null, sock });
@@ -783,9 +792,9 @@ export class WhatsappWebService implements OnModuleInit {
     const inboxId = conn.inbox_id ?? null;
     const tId     = tenantId || conn.tenant_id;
 
-    // 1. Find or create contact — look up by cleanPhone, normalizedJid, or the old lid: prefix
+    // 1. Find or create contact — look up by cleanPhone, normalizedJid, old lid: prefix, or +prefix variant
     const [existingContact] = await this.db.query(
-      `SELECT id FROM contacts WHERE tenant_id=$1 AND (phone=$2 OR phone=$3 OR phone=$4) LIMIT 1`,
+      `SELECT id FROM contacts WHERE tenant_id=$1 AND (phone=$2 OR phone=$3 OR phone=$4 OR phone='+' || $2) LIMIT 1`,
       [tId, cleanPhone, normalizedJid, `lid:${rawDigits}`],
     );
     let contactId: string;

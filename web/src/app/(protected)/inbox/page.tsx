@@ -245,15 +245,22 @@ function AiPromptsDrawer({
   const byCategory: Record<string, AiPrompt[]> = {};
   filtered.forEach((p) => { (byCategory[p.category] ??= []).push(p); });
 
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
   return (
-    <div style={{
-      position: 'fixed', top: 0, right: 360, bottom: 0, zIndex: 200,
-      display: 'flex', justifyContent: 'flex-end', pointerEvents: 'none',
-    }}>
+    <>
+      {/* backdrop */}
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 298 }} />
       <div style={{
-        width: 380, height: '100%', background: 'var(--card-bg)', borderLeft: '1px solid var(--border)',
-        display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 24px rgba(0,0,0,0.12)',
-        pointerEvents: 'auto',
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: 400,
+        background: 'var(--surface)', borderLeft: '1px solid var(--border)',
+        display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 24px rgba(0,0,0,0.18)',
+        zIndex: 299,
       }} onClick={(e) => e.stopPropagation()}>
 
         {/* Header */}
@@ -370,7 +377,7 @@ function AiPromptsDrawer({
           </div>
         )}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -495,6 +502,10 @@ export default function InboxPage() {
 
   // AI prompts drawer
   const [showAiPrompts, setShowAiPrompts] = useState(false);
+
+  // File attachment with caption
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [fileCaption, setFileCaption] = useState('');
 
   // Conversation tags
   const [convTags, setConvTags] = useState<Tag[]>([]);
@@ -743,17 +754,24 @@ export default function InboxPage() {
     finally { setSending(false); }
   }
 
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !activeId) return;
+    setPendingFile(file);
+    setFileCaption('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  async function handleFileSend() {
+    if (!pendingFile || !activeId) return;
     setSending(true);
     try {
-      await uploadMessageFile(activeId, file);
+      await uploadMessageFile(activeId, pendingFile, fileCaption.trim() || undefined);
       const [m, n] = await Promise.all([getMessages(activeId), getNotes(activeId)]);
       setMessages(m); setNotes(n);
       loadList();
     } catch (err: unknown) { alert(err instanceof Error ? err.message : i.inbxErrUpload); }
-    finally { setSending(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
+    finally { setSending(false); setPendingFile(null); setFileCaption(''); }
   }
 
   async function handleCancelScheduled(schedId: string) {
@@ -2160,6 +2178,39 @@ export default function InboxPage() {
                 <button type="submit" className="btn btn-primary" disabled={creating}>{creating ? i.creating : i.create}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* File caption dialog */}
+      {pendingFile && (
+        <div className="modal-overlay" onClick={() => { setPendingFile(null); setFileCaption(''); }}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <div className="modal-header">
+              <h2 className="modal-title">📎 {pendingFile.name}</h2>
+              <button className="modal-close" onClick={() => { setPendingFile(null); setFileCaption(''); }}>✕</button>
+            </div>
+            <div style={{ padding: '4px 0 16px', fontSize: 12, color: 'var(--text-muted)' }}>
+              {(pendingFile.size / 1024).toFixed(1)} KB · {pendingFile.type || i.inbxAttach}
+            </div>
+            <div>
+              <label className="form-label">{i.inbxMsgHint} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(opcional)</span></label>
+              <textarea
+                className="form-input"
+                rows={3}
+                placeholder={i.inbxMsgHint}
+                value={fileCaption}
+                onChange={e => setFileCaption(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleFileSend(); } }}
+                autoFocus
+              />
+            </div>
+            <div className="modal-footer" style={{ marginTop: 16 }}>
+              <button className="btn btn-secondary" onClick={() => { setPendingFile(null); setFileCaption(''); }}>{i.cancel}</button>
+              <button className="btn btn-primary" disabled={sending} onClick={handleFileSend}>
+                {sending ? '...' : '📤 ' + i.send}
+              </button>
+            </div>
           </div>
         </div>
       )}

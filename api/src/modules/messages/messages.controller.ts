@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, UseGuards, Request, UploadedFile, UseInterceptors, UsePipes, ValidationPipe, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, UseGuards, Request, UploadedFile, UseInterceptors, UsePipes, ValidationPipe, BadRequestException, Query } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
@@ -171,8 +171,13 @@ export class MessagesController {
     const fileUrl = `/uploads/${file.filename}`;
     const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.originalname);
     const isAudio = /\.(mp3|ogg|wav|m4a|opus)$/i.test(file.originalname);
-    const contentType = isImage ? 'image' : isAudio ? 'audio' : 'file';
-    const body = `${fileUrl}|${file.originalname}`;
+    const isVideo = /\.(mp4|mov|avi|webm)$/i.test(file.originalname);
+    const contentType = isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : 'file';
+    // caption comes via multipart field
+    const caption: string = (req.body?.caption ?? '').trim();
+    const body = caption
+      ? `${fileUrl}|${file.originalname}|${caption}`
+      : `${fileUrl}|${file.originalname}`;
 
     const [msg] = await this.db.query(
       `INSERT INTO messages
@@ -186,7 +191,7 @@ export class MessagesController {
     );
     this.notifications.emit({ tenantId, type: 'message_created', payload: { conversationId: cid, message: msg } });
     // Deliver file through the channel
-    await this.deliverOutbound(cid, tenantId, body, contentType);
+    await this.deliverOutbound(cid, tenantId, body, contentType, msg.id);
     return msg;
   }
 
@@ -229,8 +234,8 @@ export class MessagesController {
           if (!remoteJid || !connectionId) return;
           let waId: string | false = false;
           if (contentType === 'image' || contentType === 'audio' || contentType === 'video' || contentType === 'file') {
-            const [fileUrl] = text.split('|');
-            waId = await this.waSvc.sendFile(connectionId, remoteJid, fileUrl, contentType);
+            const [fileUrl, , fileCaption] = text.split('|');
+            waId = await this.waSvc.sendFile(connectionId, remoteJid, fileUrl, contentType, fileCaption || undefined);
           } else {
             waId = await this.waSvc.sendMessage(connectionId, remoteJid, text);
           }
