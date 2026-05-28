@@ -5,7 +5,8 @@ import Link from 'next/link';
 import {
   getContacts, createContact, deleteContact, importContactsCsv, addContactTag, getTags,
   getContactDuplicates, mergeContacts,
-  type Contact, type CsvImportResult, type Tag, type ContactsPage,
+  getContactLists, addContactListContacts,
+  type Contact, type CsvImportResult, type Tag, type ContactsPage, type ContactList,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
 import { APP } from '@/lib/i18n/app';
@@ -101,7 +102,8 @@ export default function ContactsPage() {
   const [loading,  setLoading]  = useState(true);
   const [error,    setError]    = useState('');
   const [search,   setSearch]   = useState('');
-  const [tags, setTags]         = useState<Tag[]>([]);
+  const [tags, setTags]                 = useState<Tag[]>([]);
+  const [contactLists, setContactLists] = useState<ContactList[]>([]);
 
   // Bulk selection
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -110,6 +112,12 @@ export default function ContactsPage() {
   const [showBulkTag, setShowBulkTag] = useState(false);
   const [bulkTagId, setBulkTagId]     = useState('');
   const [tagging, setTagging]         = useState(false);
+
+  // Bulk add to list modal
+  const [showBulkList, setShowBulkList]   = useState(false);
+  const [bulkListId, setBulkListId]       = useState('');
+  const [addingToList, setAddingToList]   = useState(false);
+  const [listAddResult, setListAddResult] = useState<number | null>(null);
 
   // Create modal
   const [showCreate, setShowCreate]   = useState(false);
@@ -247,6 +255,7 @@ export default function ContactsPage() {
   useEffect(() => {
     load(1, '');
     getTags().then(setTags).catch(() => {});
+    getContactLists().then(setContactLists).catch(() => {});
   }, []);
 
   function openCreate() {
@@ -303,6 +312,19 @@ export default function ContactsPage() {
     setTagging(false);
     setShowBulkTag(false);
     setBulkTagId('');
+  }
+
+  async function handleBulkAddToList(e: React.FormEvent) {
+    e.preventDefault();
+    if (!bulkListId) return;
+    setAddingToList(true);
+    try {
+      const result = await addContactListContacts(bulkListId, [...selected]);
+      setListAddResult(result.added);
+      setShowBulkList(false);
+      setBulkListId('');
+    } catch { alert('Error al agregar contactos a la lista'); }
+    finally { setAddingToList(false); }
   }
 
   // ─── CSV import ────────────────────────────────────────────────────────────
@@ -479,6 +501,13 @@ export default function ContactsPage() {
               🏷 {i.tagLabel}
             </button>
             <button
+              className="btn btn-secondary"
+              style={{ fontSize: 12, padding: '4px 12px' }}
+              onClick={() => { setBulkListId(''); setShowBulkList(true); }}
+            >
+              📋 Añadir a lista
+            </button>
+            <button
               className="btn btn-danger"
               style={{ fontSize: 12, padding: '4px 12px' }}
               onClick={handleBulkDelete}
@@ -647,6 +676,82 @@ export default function ContactsPage() {
                 <button type="submit" className="btn btn-primary" disabled={tagging || !bulkTagId}>{tagging ? i.applying : i.applyTag}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk add to list modal */}
+      {showBulkList && (
+        <div className="modal-overlay" onClick={() => setShowBulkList(false)}>
+          <div className="modal" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">📋 Añadir a lista de contactos</h2>
+              <button className="modal-close" onClick={() => setShowBulkList(false)}>×</button>
+            </div>
+            <form onSubmit={handleBulkAddToList}>
+              <div className="modal-body">
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+                  {selected.size} {i.contacts.toLowerCase()} seleccionados
+                </p>
+                {contactLists.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>
+                    <div style={{ fontSize: 28, marginBottom: 8 }}>📋</div>
+                    No tienes listas de contactos creadas.{' '}
+                    <a href="/contact-lists" style={{ color: 'var(--primary)' }}>Crear una lista</a>
+                  </div>
+                ) : (
+                  <div className="form-group">
+                    <label className="form-label">Seleccionar lista</label>
+                    <select
+                      className="form-input"
+                      value={bulkListId}
+                      onChange={(e) => setBulkListId(e.target.value)}
+                      required
+                    >
+                      <option value="">— Elige una lista —</option>
+                      {contactLists.map((l) => (
+                        <option key={l.id} value={l.id}>{l.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowBulkList(false)}>{i.cancel}</button>
+                {contactLists.length > 0 && (
+                  <button type="submit" className="btn btn-primary" disabled={addingToList || !bulkListId}>
+                    {addingToList ? '⏳ Agregando…' : `📋 Añadir ${selected.size}`}
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add to list result toast/modal */}
+      {listAddResult !== null && (
+        <div className="modal-overlay" onClick={() => setListAddResult(null)}>
+          <div className="modal" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">✅ Contactos añadidos</h2>
+              <button className="modal-close" onClick={() => setListAddResult(null)}>×</button>
+            </div>
+            <div className="modal-body" style={{ textAlign: 'center', padding: '24px 20px' }}>
+              <div style={{ fontSize: 48, marginBottom: 8 }}>📋</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary)', marginBottom: 4 }}>
+                {listAddResult}
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                {listAddResult === 1 ? 'contacto añadido' : 'contactos añadidos'} a la lista
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+                (Los que ya estaban en la lista no se duplicaron)
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={() => setListAddResult(null)}>{i.close}</button>
+            </div>
           </div>
         </div>
       )}
