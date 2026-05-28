@@ -279,7 +279,4 @@ tr:hover td { background: var(--bg); }
   .page-header { padding: 16px 16px 0; }
   .page-body   { padding: 16px; }
 
-  /* Content post modal — hide preview on mobile so form is usable */
-  .content-preview-panel { display: none !important; }
-  .content-modal-body    { flex-direction: column !important; overflow-y: auto !important; overflow-x: hidden !important; }
 }
