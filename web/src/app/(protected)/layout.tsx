@@ -130,7 +130,7 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   { group: '🏢 ADMIN',         href: '/reports',          label: 'Reportes',             icon: '📊', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/announcements',    label: 'Anuncios',             icon: '📢', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/settings',         label: 'Configuración',        icon: '🔧', minRole: 'admin' },
-  { group: '🏢 ADMIN',         href: '/status',           label: 'Estado del sistema',   icon: '🩺', minRole: 'admin' },
+  { group: '🏢 ADMIN',         href: '/status',           label: 'Estado del sistema',   icon: '🩺', minRole: 'owner' },
   { group: '🏢 ADMIN',         href: '/tenants',          label: 'Workspaces',           icon: '🏗', minRole: 'owner' },
   { group: '🏢 ADMIN',         href: '/api-docs',         label: 'API Docs',             icon: '📖', minRole: 'owner' },
   // ── Sin grupo ──

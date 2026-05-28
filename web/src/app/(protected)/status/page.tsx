@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { apiGet } from '@/lib/api';
 
 interface HealthCheck {
@@ -54,9 +55,25 @@ function Row({ label, value, sub }: { label: string; value: React.ReactNode; sub
 }
 
 export default function StatusPage() {
+  const router = useRouter();
   const [data, setData]       = useState<HealthCheck | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState('');
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+
+  // Guard: only owner role can view this page
+  useEffect(() => {
+    try {
+      const user = JSON.parse(localStorage.getItem('user') ?? '{}');
+      if (user?.role === 'owner') {
+        setAllowed(true);
+      } else {
+        router.replace('/dashboard');
+      }
+    } catch {
+      router.replace('/dashboard');
+    }
+  }, [router]);
 
   async function load() {
     try {
@@ -71,12 +88,16 @@ export default function StatusPage() {
   }
 
   useEffect(() => {
+    if (!allowed) return;
     load();
     const interval = setInterval(load, 30_000); // auto-refresh every 30s
     return () => clearInterval(interval);
-  }, []);
+  }, [allowed]);
 
   const overall = data?.ok ?? false;
+
+  // Waiting for role check or redirect
+  if (!allowed) return null;
 
   return (
     <div style={{ padding: 32, maxWidth: 680, margin: '0 auto' }}>
