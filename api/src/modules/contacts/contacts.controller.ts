@@ -240,6 +240,34 @@ export class ContactsController {
     return { data, total, page: p, limit: l };
   }
 
+  /** Export ALL contacts (no pagination) matching optional search — used for CSV download */
+  @Get('export')
+  async exportAll(
+    @TenantId() tenantId: string,
+    @Query('search') search = '',
+  ) {
+    const s = (search ?? '').trim();
+    const baseParams: any[] = [tenantId];
+    let where = 'WHERE tenant_id = $1';
+    if (s) {
+      baseParams.push(`%${s}%`);
+      const n = baseParams.length;
+      where += ` AND (full_name ILIKE $${n} OR email ILIKE $${n} OR phone ILIKE $${n} OR job_title ILIKE $${n})`;
+    }
+    return this.db.query(
+      `SELECT full_name  AS "fullName",
+              email,
+              CASE WHEN phone LIKE 'lid:%' THEN '' ELSE COALESCE(phone, '') END AS phone,
+              job_title  AS "jobTitle",
+              location,
+              created_at AS "createdAt"
+       FROM contacts ${where}
+       ORDER BY created_at DESC
+       LIMIT 50000`,
+      baseParams,
+    );
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @TenantId() tenantId: string) {
     return this.service.findOne(id, tenantId);

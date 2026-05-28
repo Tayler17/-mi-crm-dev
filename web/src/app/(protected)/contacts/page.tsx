@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-  getContacts, createContact, deleteContact, importContactsCsv, addContactTag, getTags,
+  getContacts, exportAllContacts, createContact, deleteContact, importContactsCsv, addContactTag, getTags,
   getContactDuplicates, mergeContacts,
   getContactLists, addContactListContacts,
   type Contact, type CsvImportResult, type Tag, type ContactsPage, type ContactList,
@@ -79,13 +79,13 @@ export default function ContactsPage() {
     { value: 'company',   label: i.companies.replace(/s$/, '') }, // singular: "Empresa" from "Empresas"
   ];
 
-  function exportCsv(contacts: Contact[]) {
+  function buildAndDownloadCsv(rows: { fullName: string; email?: string; phone?: string; jobTitle?: string; location?: string; createdAt: string }[]) {
     const header = 'full_name,email,phone,job_title,location,created_at';
-    const rows = contacts.map((c) => [
-      c.fullName, c.email || '', c.phone?.startsWith('lid:') ? '' : (c.phone || ''),
+    const lines = rows.map((c) => [
+      c.fullName, c.email || '', c.phone || '',
       c.jobTitle || '', c.location || '', new Date(c.createdAt).toLocaleDateString(i.locale),
     ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
-    const csv  = [header, ...rows].join('\n');
+    const csv  = [header, ...lines].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -96,12 +96,13 @@ export default function ContactsPage() {
   const PAGE_SIZE = 100;
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [page,     setPage]     = useState(1);
-  const [total,    setTotal]    = useState(0);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState('');
-  const [search,   setSearch]   = useState('');
+  const [contacts,  setContacts]  = useState<Contact[]>([]);
+  const [page,      setPage]      = useState(1);
+  const [total,     setTotal]     = useState(0);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState('');
+  const [search,    setSearch]    = useState('');
+  const [exporting, setExporting] = useState(false);
   const [tags, setTags]                 = useState<Tag[]>([]);
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
 
@@ -395,11 +396,18 @@ export default function ContactsPage() {
 
           <button
             className="btn btn-secondary"
-            title={i.exportCSV}
-            onClick={() => exportCsv(contacts)}
-            disabled={contacts.length === 0}
+            title={`${i.exportCSV} (todos)`}
+            disabled={exporting || total === 0}
+            onClick={async () => {
+              setExporting(true);
+              try {
+                const all = await exportAllContacts(search);
+                buildAndDownloadCsv(all);
+              } catch { alert(i.error); }
+              finally { setExporting(false); }
+            }}
           >
-            📤 {i.exportCSV}
+            {exporting ? `⏳ ${i.loading}` : `📤 ${i.exportCSV}${total > 0 ? ` (${total.toLocaleString()})` : ''}`}
           </button>
 
           <input ref={csvInputRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={handleCsvChange} />

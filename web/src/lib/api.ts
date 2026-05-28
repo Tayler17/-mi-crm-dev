@@ -166,6 +166,13 @@ export const getContacts = (page = 1, limit = 100, search = '') => {
   if (search) p.set('search', search);
   return apiGet<ContactsPage>(`/contacts?${p}`);
 };
+export const exportAllContacts = (search = '') => {
+  const p = new URLSearchParams();
+  if (search) p.set('search', search);
+  return apiGet<Pick<Contact, 'fullName' | 'email' | 'phone' | 'jobTitle' | 'location' | 'createdAt'>[]>(
+    `/contacts/export${p.toString() ? `?${p}` : ''}`,
+  );
+};
 export const getContact = (id: string) => apiGet<Contact>(`/contacts/${id}`);
 export const getContactProfile = (id: string) => apiGet<ContactProfile>(`/contacts/${id}/profile`);
 export const createContact = (data: Partial<Contact>) => apiPost<Contact>('/contacts', data);
