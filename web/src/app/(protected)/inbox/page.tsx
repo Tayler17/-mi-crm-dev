@@ -206,6 +206,7 @@ function AiPromptsDrawer({
   const [selected, setSelected] = useState<AiPrompt | null>(null);
   const [variables, setVariables] = useState<Record<string, string>>({});
   const [result, setResult] = useState('');
+  const [aiError, setAiError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -229,10 +230,12 @@ function AiPromptsDrawer({
   async function handleRun() {
     if (!selected) return;
     setRunning(true);
+    setAiError(null);
     try {
       const res = await runAiPrompt(selected.id, variables);
       setResult(res.result);
-    } catch { setResult(i.inbxAiTitle + ' — error'); }
+      if (res.ai_error) setAiError(res.ai_error);
+    } catch { setResult(''); setAiError('Error al conectar con la IA'); }
     finally { setRunning(false); }
   }
 
@@ -306,10 +309,21 @@ function AiPromptsDrawer({
                 {running ? `⏳ ${i.inbxGenerating}` : `✨ ${i.inbxGenerate}`}
               </button>
 
+              {/* AI Error banner */}
+              {aiError && (
+                <div style={{ padding: '8px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, fontSize: 12, color: '#b91c1c' }}>
+                  ⚠️ {aiError}
+                </div>
+              )}
+
               {/* Result */}
               {result && (
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>{i.inbxResult}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {i.inbxResult}
+                    {!aiError && <span style={{ fontSize: 10, background: '#dcfce7', color: '#15803d', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>✨ IA</span>}
+                    {aiError && <span style={{ fontSize: 10, background: '#fef9c3', color: '#854d0e', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>📋 Template</span>}
+                  </div>
                   <div style={{
                     padding: '12px 14px', background: 'var(--bg-secondary)', borderRadius: 8,
                     fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
@@ -440,6 +454,14 @@ function PeekPreview({ conversationId, onOpen }: { conversationId: string; onOpe
 export default function InboxPage() {
   const { lang } = useLangCtx();
   const i = APP[lang];
+
+  // Current user role (for admin-only actions)
+  const currentUserRole = (() => {
+    if (typeof window === 'undefined') return '';
+    try { return JSON.parse(localStorage.getItem('user') ?? '{}').role ?? ''; } catch { return ''; }
+  })();
+  const isAdmin = currentUserRole === 'owner' || currentUserRole === 'admin';
+
   const statusLabels: Record<string, string> = {
     open: i.inbxServing, pending: i.inbxWaiting, resolved: i.inbxResolvedLabel, snoozed: i.inbxSnoozed,
   };
@@ -862,6 +884,18 @@ export default function InboxPage() {
     } finally { setBulkWorking(false); }
   }
 
+  async function bulkDelete() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`¿Eliminar permanentemente ${selectedIds.size} conversación(es)? Esta acción no se puede deshacer.`)) return;
+    setBulkWorking(true);
+    try {
+      await Promise.all([...selectedIds].map((id) => deleteConversation(id)));
+      setConversations((prev) => prev.filter((c) => !selectedIds.has(c.id)));
+      if (activeId && selectedIds.has(activeId)) setActiveId(null);
+      setSelectedIds(new Set());
+    } finally { setBulkWorking(false); }
+  }
+
   async function bulkAssignQueue(queueId: string) {
     if (selectedIds.size === 0 || !queueId) return;
     setBulkWorking(true);
@@ -1047,6 +1081,14 @@ export default function InboxPage() {
                     disabled={bulkWorking}
                     onClick={() => bulkAction('open')}
                   >{i.inbxOpenBtn}</button>
+                  {isAdmin && (
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: 11, padding: '3px 8px', color: '#ef4444', borderColor: '#ef444433' }}
+                      disabled={bulkWorking}
+                      onClick={bulkDelete}
+                    >🗑 {i.delete}</button>
+                  )}
                   {agents.length > 0 && (
                     <select
                       className="form-input"
@@ -1960,7 +2002,7 @@ export default function InboxPage() {
                   {i.inbxSnooze}
                 </button>
               )}
-              {conv.status === 'resolved' && (
+              {conv.status === 'resolved' && isAdmin && (
                 <button
                   className="btn btn-secondary"
                   style={{ fontSize: 12, justifyContent: 'center', color: '#ef4444', borderColor: '#ef444433' }}

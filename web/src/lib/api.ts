@@ -1375,7 +1375,7 @@ export const updateAiPrompt = (id: string, data: Partial<AiPrompt>) => apiPatch<
 export const deleteAiPrompt = (id: string) => apiDelete(`/ai-prompts/${id}`);
 export const duplicateAiPrompt = (id: string) => apiPost<AiPrompt>(`/ai-prompts/${id}/duplicate`, {});
 export const runAiPrompt = (id: string, variables: Record<string, string>, conversationContext?: string) =>
-  apiPost<{ result: string; filled_prompt: string; ai_generated: boolean; provider: string; model: string }>(
+  apiPost<{ result: string; filled_prompt: string; ai_generated: boolean; ai_error?: string | null; provider: string; model: string }>(
     `/ai-prompts/${id}/run`, { variables, conversationContext });
 
 // ── AI Chatbots ───────────────────────────────────────────────────────────────
