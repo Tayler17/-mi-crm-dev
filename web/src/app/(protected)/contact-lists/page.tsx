@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   getContactLists, createContactList, updateContactList, deleteContactList,
   getContactListContacts, searchContactListContacts, addContactListContacts,
@@ -70,7 +70,9 @@ function ListDetail({ list, onClose, onRefresh }: { list: ContactList; onClose: 
   const [available, setAvailable] = useState<any[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [tab, setTab] = useState<'contacts' | 'add'>('contacts');
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -84,6 +86,8 @@ function ListDetail({ list, onClose, onRefresh }: { list: ContactList; onClose: 
 
   useEffect(() => {
     if (tab !== 'add') return;
+    // Only query when the user has typed something or selected a tag filter
+    if (!search && filterTagIds.length === 0) { setAvailable([]); return; }
     setSearching(true);
     searchContactListContacts(list.id, search || undefined, filterTagIds.length ? filterTagIds : undefined)
       .then(setAvailable).catch(() => {}).finally(() => setSearching(false));
@@ -153,7 +157,17 @@ function ListDetail({ list, onClose, onRefresh }: { list: ContactList; onClose: 
 
           {tab === 'add' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <input className="form-input" placeholder={`${i.search}…`} value={search} onChange={(e) => setSearch(e.target.value)} />
+              <input
+                className="form-input"
+                placeholder={`${i.search}…`}
+                value={searchInput}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSearchInput(v);
+                  if (searchTimer.current) clearTimeout(searchTimer.current);
+                  searchTimer.current = setTimeout(() => setSearch(v), 350);
+                }}
+              />
               {tags.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                   <span style={{ fontSize: 11, color: 'var(--text-muted)', alignSelf: 'center' }}>{i.tagLabel}:</span>
@@ -165,14 +179,23 @@ function ListDetail({ list, onClose, onRefresh }: { list: ContactList; onClose: 
                   ))}
                 </div>
               )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-muted)' }}>
-                <span>{searching ? i.searching : `${available.length} ${i.contactPlural}`}{selected.size > 0 && <span style={{ color: 'var(--primary)', fontWeight: 600 }}> · {selected.size} {i.selectedItems}</span>}</span>
-                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => setSelected(selected.size === available.length && available.length > 0 ? new Set() : new Set(available.map((c) => c.id)))}>
-                  {selected.size === available.length && available.length > 0 ? i.deselectAll : i.selectAll}
-                </button>
-              </div>
-              <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {available.length === 0 ? (
+              {(search || filterTagIds.length > 0) && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-muted)' }}>
+                  <span>{searching ? i.searching : `${available.length} ${i.contactPlural}`}{selected.size > 0 && <span style={{ color: 'var(--primary)', fontWeight: 600 }}> · {selected.size} {i.selectedItems}</span>}</span>
+                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => setSelected(selected.size === available.length && available.length > 0 ? new Set() : new Set(available.map((c) => c.id)))}>
+                    {selected.size === available.length && available.length > 0 ? i.deselectAll : i.selectAll}
+                  </button>
+                </div>
+              )}
+              <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {!search && filterTagIds.length === 0 ? (
+                  <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: '32px 16px' }}>
+                    <div style={{ fontSize: 28, marginBottom: 8 }}>🔍</div>
+                    Escribe un nombre, email o teléfono para buscar entre tus contactos, o filtra por etiqueta.
+                  </div>
+                ) : searching ? (
+                  <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 20 }}>{i.searching}</div>
+                ) : available.length === 0 ? (
                   <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 20 }}>{i.noContacts}</div>
                 ) : available.map((c) => (
                   <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 6, cursor: 'pointer', background: selected.has(c.id) ? '#ede9fe' : 'var(--bg-secondary)', fontSize: 13 }}>

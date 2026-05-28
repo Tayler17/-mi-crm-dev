@@ -106,7 +106,7 @@ export class ContactListsService {
       params.push(tagIds);
       sql += ` AND ct.id IN (SELECT contact_id FROM contact_tags WHERE tag_id = ANY($${params.length}::uuid[]))`;
     }
-    sql += ` ORDER BY ct.full_name LIMIT 200`;
+    sql += ` ORDER BY ct.full_name LIMIT 500`;
     return this.db.query(sql, params);
   }
 }
