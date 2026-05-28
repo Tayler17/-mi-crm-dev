@@ -6,7 +6,7 @@ import { APP } from '@/lib/i18n/app';
 import { useLangCtx } from '@/lib/lang-context';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import {
-  getConversations, getConversation, createConversation, updateConversation,
+  getConversations, getConversation, createConversation, updateConversation, deleteConversation,
   getMessages, getNotes, sendMessage, sendNote,
   getScheduledMessages, scheduleMessage, cancelScheduledMessage,
   getContacts, getInboxes, getCannedResponses, getTags, getAgents,
@@ -231,7 +231,7 @@ function AiPromptsDrawer({
     setRunning(true);
     try {
       const res = await runAiPrompt(selected.id, variables);
-      setResult(res.filled_prompt);
+      setResult(res.result);
     } catch { setResult(i.inbxAiTitle + ' — error'); }
     finally { setRunning(false); }
   }
@@ -257,7 +257,7 @@ function AiPromptsDrawer({
       {/* backdrop */}
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 298 }} />
       <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, width: 400,
+        position: 'fixed', top: 52, right: 0, bottom: 0, width: 400,
         background: 'var(--surface)', borderLeft: '1px solid var(--border)',
         display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 24px rgba(0,0,0,0.18)',
         zIndex: 299,
@@ -503,9 +503,8 @@ export default function InboxPage() {
   // AI prompts drawer
   const [showAiPrompts, setShowAiPrompts] = useState(false);
 
-  // File attachment with caption
+  // File attachment staged (caption uses the main body textarea)
   const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [fileCaption, setFileCaption] = useState('');
 
   // Conversation tags
   const [convTags, setConvTags] = useState<Tag[]>([]);
@@ -758,20 +757,23 @@ export default function InboxPage() {
     const file = e.target.files?.[0];
     if (!file || !activeId) return;
     setPendingFile(file);
-    setFileCaption('');
+    // Don't clear caption — user may have already typed
     if (fileInputRef.current) fileInputRef.current.value = '';
+    // Focus textarea so user can type caption naturally
+    setTimeout(() => textareaRef.current?.focus(), 50);
   }
 
   async function handleFileSend() {
     if (!pendingFile || !activeId) return;
     setSending(true);
     try {
-      await uploadMessageFile(activeId, pendingFile, fileCaption.trim() || undefined);
+      await uploadMessageFile(activeId, pendingFile, body.trim() || undefined);
+      setBody('');
       const [m, n] = await Promise.all([getMessages(activeId), getNotes(activeId)]);
       setMessages(m); setNotes(n);
       loadList();
     } catch (err: unknown) { alert(err instanceof Error ? err.message : i.inbxErrUpload); }
-    finally { setSending(false); setPendingFile(null); setFileCaption(''); }
+    finally { setSending(false); setPendingFile(null); }
   }
 
   async function handleCancelScheduled(schedId: string) {
@@ -1604,6 +1606,26 @@ export default function InboxPage() {
                   ))}
                 </div>
               )}
+              {/* File chip — shown when a file is staged */}
+              {pendingFile && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6,
+                  background: 'var(--bg-hover, #f1f5f9)', border: '1px solid var(--border)',
+                  borderRadius: 8, padding: '6px 10px',
+                }}>
+                  <span style={{ fontSize: 18 }}>
+                    {/\.(jpg|jpeg|png|gif|webp)$/i.test(pendingFile.name) ? '🖼️'
+                      : /\.(mp3|ogg|wav|m4a|opus)$/i.test(pendingFile.name) ? '🎵'
+                      : /\.(mp4|mov|avi|webm)$/i.test(pendingFile.name) ? '🎬'
+                      : /\.pdf$/i.test(pendingFile.name) ? '📄' : '📎'}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pendingFile.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{(pendingFile.size / 1024).toFixed(1)} KB</div>
+                  </div>
+                  <button type="button" onClick={() => setPendingFile(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, padding: '2px 4px' }}>✕</button>
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                 {/* Hidden file input */}
                 <input ref={fileInputRef} type="file" accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt" style={{ display: 'none' }} onChange={handleFileUpload} />
@@ -1654,7 +1676,9 @@ export default function InboxPage() {
                     background: scheduleMode ? '#fefce8' : composerTab === 'note' ? '#fefce8' : undefined,
                     borderColor: scheduleMode ? '#f59e0b' : composerTab === 'note' ? '#fde047' : undefined,
                   }}
-                  placeholder={composerTab === 'message'
+                  placeholder={pendingFile
+                    ? (composerTab === 'message' ? 'Escribe un mensaje con el archivo… (opcional)' : i.inbxNoteHint)
+                    : composerTab === 'message'
                     ? (scheduleMode ? i.inbxScheduleMsg : i.inbxMsgHint)
                     : i.inbxNoteHint}
                   value={body}
@@ -1666,7 +1690,7 @@ export default function InboxPage() {
                       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertMention(mentionSuggestions[mentionCursor]); return; }
                       if (e.key === 'Escape') { setMentionQuery(null); return; }
                     }
-                    if (e.key === 'Enter' && !e.shiftKey && !scheduleMode) { e.preventDefault(); handleSend(e as any); }
+                    if (e.key === 'Enter' && !e.shiftKey && !scheduleMode) { e.preventDefault(); if (pendingFile) handleFileSend(); else handleSend(e as any); }
                     if (e.key === 'Escape') setShowCanned(false);
                   }}
                 />
@@ -1686,10 +1710,11 @@ export default function InboxPage() {
                     >🕐</button>
                   )}
                   <button
-                    type="submit"
+                    type={pendingFile ? 'button' : 'submit'}
                     className="btn btn-primary"
-                    disabled={sending || !body.trim() || (scheduleMode && !scheduledAt)}
+                    disabled={sending || (!pendingFile && (!body.trim() || (scheduleMode && !scheduledAt)))}
                     style={{ fontSize: 12, padding: '6px 12px' }}
+                    onClick={pendingFile ? handleFileSend : undefined}
                   >{sending ? '…' : scheduleMode ? i.inbxScheduleBtn : i.send}</button>
                 </div>
               </div>
@@ -1935,6 +1960,19 @@ export default function InboxPage() {
                   {i.inbxSnooze}
                 </button>
               )}
+              {conv.status === 'resolved' && (
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12, justifyContent: 'center', color: '#ef4444', borderColor: '#ef444433' }}
+                  onClick={async () => {
+                    if (!activeId) return;
+                    if (!confirm('¿Eliminar esta conversación permanentemente? Esta acción no se puede deshacer.')) return;
+                    await deleteConversation(activeId);
+                    setActiveId(null);
+                    loadList();
+                  }}
+                >🗑 {'Eliminar conversación'}</button>
+              )}
             </div>
           </div>
 
@@ -2178,39 +2216,6 @@ export default function InboxPage() {
                 <button type="submit" className="btn btn-primary" disabled={creating}>{creating ? i.creating : i.create}</button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* File caption dialog */}
-      {pendingFile && (
-        <div className="modal-overlay" onClick={() => { setPendingFile(null); setFileCaption(''); }}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
-            <div className="modal-header">
-              <h2 className="modal-title">📎 {pendingFile.name}</h2>
-              <button className="modal-close" onClick={() => { setPendingFile(null); setFileCaption(''); }}>✕</button>
-            </div>
-            <div style={{ padding: '4px 0 16px', fontSize: 12, color: 'var(--text-muted)' }}>
-              {(pendingFile.size / 1024).toFixed(1)} KB · {pendingFile.type || i.inbxAttach}
-            </div>
-            <div>
-              <label className="form-label">{i.inbxMsgHint} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(opcional)</span></label>
-              <textarea
-                className="form-input"
-                rows={3}
-                placeholder={i.inbxMsgHint}
-                value={fileCaption}
-                onChange={e => setFileCaption(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleFileSend(); } }}
-                autoFocus
-              />
-            </div>
-            <div className="modal-footer" style={{ marginTop: 16 }}>
-              <button className="btn btn-secondary" onClick={() => { setPendingFile(null); setFileCaption(''); }}>{i.cancel}</button>
-              <button className="btn btn-primary" disabled={sending} onClick={handleFileSend}>
-                {sending ? '...' : '📤 ' + i.send}
-              </button>
-            </div>
           </div>
         </div>
       )}

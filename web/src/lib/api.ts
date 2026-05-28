@@ -379,6 +379,7 @@ export const getConversation = (id: string) => apiGet<Conversation>(`/conversati
 export const createConversation = (data: Partial<Conversation>) => apiPost<Conversation>('/conversations', data);
 export const updateConversation = (id: string, data: Partial<Conversation>) =>
   apiPatch<Conversation>(`/conversations/${id}`, data);
+export const deleteConversation = (id: string) => apiDelete(`/conversations/${id}`);
 export const getConversationTags = (id: string) => apiGet<Tag[]>(`/conversations/${id}/tags`);
 export const addConversationTag = (id: string, tagId: string) => apiPost(`/conversations/${id}/tags/${tagId}`, {});
 export const removeConversationTag = (id: string, tagId: string) => apiDelete(`/conversations/${id}/tags/${tagId}`);
@@ -1374,7 +1375,7 @@ export const updateAiPrompt = (id: string, data: Partial<AiPrompt>) => apiPatch<
 export const deleteAiPrompt = (id: string) => apiDelete(`/ai-prompts/${id}`);
 export const duplicateAiPrompt = (id: string) => apiPost<AiPrompt>(`/ai-prompts/${id}/duplicate`, {});
 export const runAiPrompt = (id: string, variables: Record<string, string>, conversationContext?: string) =>
-  apiPost<{ filled_prompt: string; provider: string; model: string; temperature: number; max_tokens: number }>(
+  apiPost<{ result: string; filled_prompt: string; ai_generated: boolean; provider: string; model: string }>(
     `/ai-prompts/${id}/run`, { variables, conversationContext });
 
 // ── AI Chatbots ───────────────────────────────────────────────────────────────

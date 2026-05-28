@@ -2,12 +2,15 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { AiPrompt } from './ai-prompt.entity';
+import { PlatformSettingsService } from '../settings/platform-settings.service';
+import axios from 'axios';
 
 @Injectable()
 export class AiPromptsService {
   constructor(
     @InjectRepository(AiPrompt) private readonly repo: Repository<AiPrompt>,
     @InjectDataSource() private readonly db: DataSource,
+    private readonly platformSettings: PlatformSettingsService,
   ) {}
 
   findAll(tenantId: string, category?: string) {
@@ -47,7 +50,7 @@ export class AiPromptsService {
     return this.repo.save(this.repo.create({ ...rest, name: `${p.name} (copia)`, is_active: false, tenant_id: tenantId, created_by: userId }));
   }
 
-  // Run prompt with variable substitution and call AI provider
+  // Run prompt with variable substitution and actually call the AI provider
   async runPrompt(id: string, tenantId: string, variableValues: Record<string, string>, conversationContext?: string) {
     const prompt = await this.findOne(id, tenantId);
 
@@ -63,14 +66,58 @@ export class AiPromptsService {
     // Increment usage count
     await this.repo.update(id, { usage_count: () => 'usage_count + 1' } as any);
 
-    // Return the prepared prompt (actual AI call happens client-side or via future AI gateway)
+    // Resolve API key: use prompt-level tenant key first, then platform key
+    const platformAI = await this.platformSettings.getAI().catch(() => null);
+    const [tenantRow] = await this.db.query(
+      `SELECT settings FROM tenants WHERE id=$1 LIMIT 1`,
+      [tenantId],
+    ).catch(() => [null]);
+    const tenantKeys: Record<string, string> = tenantRow?.settings?.aiKeys ?? {};
+
+    const provider = prompt.provider || platformAI?.provider || 'openai';
+    const apiKey = tenantKeys[provider] || (platformAI?.provider === provider ? platformAI?.apiKey : null) || platformAI?.apiKey;
+    const model = prompt.model || platformAI?.model || 'gpt-4o-mini';
+    const temperature = prompt.temperature ?? 0.7;
+    const maxTokens = prompt.max_tokens ?? 500;
+
+    let result: string | null = null;
+
+    if (apiKey) {
+      try {
+        if (provider === 'openai') {
+          const res = await axios.post(
+            'https://api.openai.com/v1/chat/completions',
+            { model, messages: [{ role: 'user', content: filledPrompt }], temperature, max_tokens: maxTokens },
+            { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, timeout: 25000 },
+          );
+          result = res.data?.choices?.[0]?.message?.content?.trim() ?? null;
+        } else if (provider === 'anthropic') {
+          const res = await axios.post(
+            'https://api.anthropic.com/v1/messages',
+            { model, max_tokens: maxTokens, messages: [{ role: 'user', content: filledPrompt }] },
+            { headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }, timeout: 25000 },
+          );
+          result = res.data?.content?.[0]?.text?.trim() ?? null;
+        } else if (provider === 'gemini') {
+          const res = await axios.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            { contents: [{ parts: [{ text: filledPrompt }] }], generationConfig: { temperature, maxOutputTokens: maxTokens } },
+            { headers: { 'Content-Type': 'application/json' }, timeout: 25000 },
+          );
+          result = res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
+        }
+      } catch {
+        // Fall through — return filled_prompt so UI can still show something
+      }
+    }
+
     return {
       prompt_id: id,
-      filled_prompt: filledPrompt,
-      provider: prompt.provider,
-      model: prompt.model,
-      temperature: prompt.temperature,
-      max_tokens: prompt.max_tokens,
+      result: result ?? filledPrompt,           // AI response or filled template as fallback
+      filled_prompt: filledPrompt,              // kept for reference
+      ai_generated: result !== null,
+      provider,
+      model,
     };
   }
 

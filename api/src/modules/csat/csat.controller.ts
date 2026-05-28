@@ -21,7 +21,10 @@ export class CsatController {
     @Param('conversationId') conversationId: string,
     @TenantId() tenantId: string,
   ) {
-    const token = randomBytes(32).toString('hex');
+    // 10-char URL-safe token (base62: 0-9 A-Z a-z) — short enough for WhatsApp links
+    const CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+    const raw = randomBytes(10);
+    const token = Array.from(raw).map(b => CHARS[b % CHARS.length]).join('');
     const [row] = await this.db.query(
       `INSERT INTO csat_responses (tenant_id, conversation_id, contact_id, token, created_at)
        SELECT $1, $2, contact_id, $3, NOW()
