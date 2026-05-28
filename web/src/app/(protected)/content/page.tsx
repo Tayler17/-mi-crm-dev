@@ -449,7 +449,7 @@ function PostModal({
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
           {/* Two-column body */}
-          <div className="modal-body" style={{ display: 'flex', gap: 0, padding: 0, flex: 1, overflow: 'hidden' }}>
+          <div className="modal-body content-modal-body" style={{ display: 'flex', gap: 0, padding: 0, flex: 1, overflow: 'hidden' }}>
 
             {/* ── LEFT: Form ─────────────────────────────────────────── */}
             <div style={{ flex: 1, minWidth: 0, padding: '20px 20px 20px 24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -908,7 +908,7 @@ function PostModal({
             </div>
 
             {/* ── RIGHT: Preview ──────────────────────────────────────── */}
-            <div style={{
+            <div className="content-preview-panel" style={{
               width: 320, flexShrink: 0,
               borderLeft: '1px solid var(--border)',
               padding: '20px 20px',
