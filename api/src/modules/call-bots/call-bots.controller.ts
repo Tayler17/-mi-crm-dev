@@ -49,11 +49,39 @@ export class CallBotsController {
   @Post()
   async create(@Body() dto: CreateCallBotDto, @TenantId() tenantId: string, @Request() req: any) {
     await checkPlanLimit(this.db, tenantId, 'call_bots');
+    // If a phone number is being assigned, check whether it's a new (not yet used) number for this tenant
+    if (dto.phoneNumber) {
+      const [existing] = await this.db.query(
+        `SELECT COUNT(*)::int AS cnt FROM call_bots WHERE tenant_id::text=$1 AND phone_number=$2`,
+        [tenantId, dto.phoneNumber],
+      );
+      if (existing.cnt === 0) {
+        // Number is new for this tenant — verify plan allows it
+        await checkPlanLimit(this.db, tenantId, 'phone_numbers');
+      }
+    }
     return this.svc.create(dto, tenantId, req.user?.id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateCallBotDto, @TenantId() tenantId: string) {
+  async update(@Param('id') id: string, @Body() dto: UpdateCallBotDto, @TenantId() tenantId: string) {
+    // If a phone number is being changed, verify plan allows the new number
+    if (dto.phoneNumber) {
+      const [bot] = await this.db.query(
+        `SELECT phone_number FROM call_bots WHERE id=$1 AND tenant_id::text=$2`,
+        [id, tenantId],
+      );
+      if (bot && bot.phone_number !== dto.phoneNumber) {
+        // Number is changing — check if the new number is already used by another bot
+        const [existing] = await this.db.query(
+          `SELECT COUNT(*)::int AS cnt FROM call_bots WHERE tenant_id::text=$1 AND phone_number=$2 AND id!=$3`,
+          [tenantId, dto.phoneNumber, id],
+        );
+        if (existing.cnt === 0) {
+          await checkPlanLimit(this.db, tenantId, 'phone_numbers');
+        }
+      }
+    }
     return this.svc.update(id, dto, tenantId);
   }
 

@@ -1085,6 +1085,7 @@ export interface Plan {
   max_ai_chatbots: number;
   max_messages_month: number;
   max_call_minutes: number;
+  max_phone_numbers: number;
   has_call_bots: boolean;
   has_ai_chatbots: boolean;
   has_automations: boolean;

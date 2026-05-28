@@ -1,7 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 
-type Resource = 'users' | 'contacts' | 'inboxes' | 'call_minutes' | 'ai_chatbots' | 'call_bots' | 'campaigns' | 'automations' | 'flows';
+type Resource = 'users' | 'contacts' | 'inboxes' | 'call_minutes' | 'ai_chatbots' | 'call_bots' | 'campaigns' | 'automations' | 'flows' | 'phone_numbers';
 
 export async function checkPlanLimit(
   db: DataSource,
@@ -14,6 +14,7 @@ export async function checkPlanLimit(
     `SELECT
        p.max_users, p.max_contacts, p.max_inboxes, p.max_call_minutes,
        p.max_ai_chatbots, p.max_call_bots, p.max_campaigns, p.max_automations, p.max_flows,
+       p.max_phone_numbers,
        p.allow_overage,
        t.stripe_subscription_status, t.plan_expires_at,
        (SELECT COUNT(*)::int FROM users            WHERE tenant_id::text=$1 AND is_active=true)  AS users_count,
@@ -24,6 +25,8 @@ export async function checkPlanLimit(
        (SELECT COUNT(*)::int FROM campaigns        WHERE tenant_id::text=$1)                     AS campaigns_count,
        (SELECT COUNT(*)::int FROM automation_rules WHERE tenant_id::text=$1)                     AS automations_count,
        (SELECT COUNT(*)::int FROM conversation_flows WHERE tenant_id::text=$1)                   AS flows_count,
+       (SELECT COUNT(DISTINCT phone_number)::int FROM call_bots
+        WHERE tenant_id::text=$1 AND phone_number IS NOT NULL)                                   AS phone_numbers_count,
        COALESCE((
          SELECT SUM(duration)::int FROM call_logs
          WHERE tenant_id::text=$1 AND created_at >= date_trunc('month', NOW())
@@ -51,20 +54,22 @@ export async function checkPlanLimit(
     max_users: 2, max_contacts: 500, max_inboxes: 1,
     max_ai_chatbots: 0, max_call_bots: 0, max_call_minutes: 0,
     max_campaigns: 2, max_automations: 5, max_flows: 2,
+    max_phone_numbers: 1,
   };
   const lim = (col: string, fallback: number) =>
     useFree ? (FREE[col] ?? fallback) : (row[col] != null ? Number(row[col]) : (FREE[col] ?? fallback));
 
   const checks: Record<Resource, { limit: number; count: number; label: string }> = {
-    users:        { limit: lim('max_users', 2),         count: row.users_count,                        label: 'usuarios' },
-    contacts:     { limit: lim('max_contacts', 500),    count: row.contacts_count,                     label: 'contactos' },
-    inboxes:      { limit: lim('max_inboxes', 1),       count: row.inboxes_count,                      label: 'inboxes' },
-    ai_chatbots:  { limit: lim('max_ai_chatbots', 0),   count: row.ai_chatbots_count,                  label: 'AI chatbots' },
-    call_bots:    { limit: lim('max_call_bots', 0),     count: row.call_bots_count,                    label: 'call bots' },
-    campaigns:    { limit: lim('max_campaigns', 2),     count: row.campaigns_count,                    label: 'campañas' },
-    automations:  { limit: lim('max_automations', 5),   count: row.automations_count,                  label: 'automatizaciones' },
-    flows:        { limit: lim('max_flows', 2),         count: row.flows_count,                        label: 'flujos de conversación' },
-    call_minutes: { limit: lim('max_call_minutes', 0),  count: Math.ceil(row.call_seconds_count / 60), label: 'minutos de llamada este mes' },
+    users:         { limit: lim('max_users', 2),          count: row.users_count,                        label: 'usuarios' },
+    contacts:      { limit: lim('max_contacts', 500),     count: row.contacts_count,                     label: 'contactos' },
+    inboxes:       { limit: lim('max_inboxes', 1),        count: row.inboxes_count,                      label: 'inboxes' },
+    ai_chatbots:   { limit: lim('max_ai_chatbots', 0),    count: row.ai_chatbots_count,                  label: 'AI chatbots' },
+    call_bots:     { limit: lim('max_call_bots', 0),      count: row.call_bots_count,                    label: 'call bots' },
+    campaigns:     { limit: lim('max_campaigns', 2),      count: row.campaigns_count,                    label: 'campañas' },
+    automations:   { limit: lim('max_automations', 5),    count: row.automations_count,                  label: 'automatizaciones' },
+    flows:         { limit: lim('max_flows', 2),          count: row.flows_count,                        label: 'flujos de conversación' },
+    call_minutes:  { limit: lim('max_call_minutes', 0),   count: Math.ceil(row.call_seconds_count / 60), label: 'minutos de llamada este mes' },
+    phone_numbers: { limit: lim('max_phone_numbers', 1),  count: row.phone_numbers_count,                label: 'números de teléfono Twilio' },
   };
 
   const { limit, count, label } = checks[resource];

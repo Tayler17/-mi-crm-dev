@@ -21,7 +21,7 @@ type PlanForm = {
   billingPeriod: string; position: number; color: string;
   maxUsers: number; maxContacts: number; maxInboxes: number; maxCampaigns: number;
   maxAutomations: number; maxFlows: number; maxCallBots: number; maxAiChatbots: number;
-  maxMessagesMonth: number; maxCallMinutes: number;
+  maxMessagesMonth: number; maxCallMinutes: number; maxPhoneNumbers: number;
   hasCallBots: boolean; hasAiChatbots: boolean; hasAutomations: boolean;
   hasFlows: boolean; hasReports: boolean; hasApiAccess: boolean; hasWebhooks: boolean;
   allowOwnApiKeys: boolean; allowOwnTwilio: boolean; allowOverage: boolean;
@@ -42,6 +42,7 @@ function planToForm(p: Plan | null): PlanForm {
     maxAutomations: p?.max_automations ?? 10, maxFlows: p?.max_flows ?? 5,
     maxCallBots: p?.max_call_bots ?? 0, maxAiChatbots: p?.max_ai_chatbots ?? 0,
     maxMessagesMonth: p?.max_messages_month ?? 1000, maxCallMinutes: p?.max_call_minutes ?? 0,
+    maxPhoneNumbers: p?.max_phone_numbers ?? -1,
     hasCallBots: p?.has_call_bots ?? false, hasAiChatbots: p?.has_ai_chatbots ?? false,
     hasAutomations: p?.has_automations ?? true, hasFlows: p?.has_flows ?? true,
     hasReports: p?.has_reports ?? false, hasApiAccess: p?.has_api_access ?? false,
@@ -208,11 +209,12 @@ function PlanModal({ plan, onSave, onClose }: { plan: Plan | null; onSave: (f: P
               <LimitField label="Campañas"         field="maxCampaigns" />
               <LimitField label="Automatizaciones" field="maxAutomations" />
               <LimitField label="Flujos"           field="maxFlows" />
-              <LimitField label="Call Bots"          field="maxCallBots" />
-              <LimitField label="AI Chatbots"        field="maxAiChatbots" />
-              <LimitField label="Mensajes IA/mes"    field="maxMessagesMonth" />
-              <LimitField label="Minutos llamada/mes" field="maxCallMinutes" />
-              <LimitField label="🎨 Imágenes IA/mes" field="maxImageGenMonth" />
+              <LimitField label="Call Bots"            field="maxCallBots" />
+              <LimitField label="AI Chatbots"          field="maxAiChatbots" />
+              <LimitField label="Mensajes IA/mes"      field="maxMessagesMonth" />
+              <LimitField label="Minutos llamada/mes"  field="maxCallMinutes" />
+              <LimitField label="📞 Números Twilio"   field="maxPhoneNumbers" />
+              <LimitField label="🎨 Imágenes IA/mes"  field="maxImageGenMonth" />
             </div>
           )}
 

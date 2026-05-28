@@ -111,8 +111,9 @@ export class PlansController {
          has_api_access, has_webhooks, allow_own_api_keys, allow_own_twilio, allow_overage,
          extra_message_price, extra_call_minute_price,
          has_image_gen, max_image_gen_month,
-         is_active, is_public, stripe_price_id, has_stripe_connect)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)
+         is_active, is_public, stripe_price_id, has_stripe_connect,
+         max_phone_numbers)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37)
        RETURNING *`,
       [
         dto.name, dto.slug, dto.description ?? null, dto.price ?? 0, dto.currency ?? 'USD',
@@ -129,6 +130,7 @@ export class PlansController {
         dto.hasImageGen ?? false, dto.maxImageGenMonth ?? 0,
         dto.isActive ?? true, dto.isPublic ?? true,
         dto.stripePriceId ?? null, dto.hasStripeConnect ?? false,
+        dto.maxPhoneNumbers ?? -1,
       ],
     );
     return plan;
@@ -152,7 +154,7 @@ export class PlansController {
       hasImageGen: 'has_image_gen', maxImageGenMonth: 'max_image_gen_month',
       extraMessagePrice: 'extra_message_price', extraCallMinutePrice: 'extra_call_minute_price',
       isActive: 'is_active', isPublic: 'is_public', stripePriceId: 'stripe_price_id',
-      hasStripeConnect: 'has_stripe_connect',
+      hasStripeConnect: 'has_stripe_connect', maxPhoneNumbers: 'max_phone_numbers',
     };
     for (const [k, col] of Object.entries(map)) {
       if (dto[k] !== undefined) { values.push(dto[k]); fields.push(`${col}=$${values.length}`); }
