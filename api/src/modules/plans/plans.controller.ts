@@ -36,7 +36,7 @@ export class PlansController {
               p.extra_message_price, p.extra_call_minute_price,
               p.has_call_bots, p.has_ai_chatbots,
               p.has_automations, p.has_flows, p.has_reports, p.has_api_access,
-              p.has_webhooks, p.allow_own_twilio, p.price, p.billing_period, p.color,
+              p.has_webhooks, p.allow_own_twilio, p.price, p.currency, p.billing_period, p.color,
               p.has_stripe_connect
        FROM tenants t
        LEFT JOIN plans p ON p.id = t.plan_id

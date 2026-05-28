@@ -15,6 +15,7 @@ interface PlanData {
     billing_email: string | null;
     billing_notes: string | null;
     price: number;
+    currency: string;
     billing_period: string;
     color: string;
     max_users: number;
@@ -164,7 +165,7 @@ export default function BillingPage() {
           </div>
           {tenant.price != null && (
             <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>
-              ${Number(tenant.price).toFixed(2)} / mes
+              {new Intl.NumberFormat('en', { style: 'currency', currency: tenant.currency || 'USD', minimumFractionDigits: 2 }).format(Number(tenant.price))} / mes
             </div>
           )}
           {tenant.billing_email && (

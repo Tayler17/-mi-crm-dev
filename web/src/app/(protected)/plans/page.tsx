@@ -65,8 +65,8 @@ function PlanModal({ plan, onSave, onClose }: { plan: Plan | null; onSave: (f: P
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  function currency(val: number) {
-    return new Intl.NumberFormat(i.locale, { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(val);
+  function currency(val: number, cur = 'USD') {
+    return new Intl.NumberFormat(i.locale, { style: 'currency', currency: cur, minimumFractionDigits: 0 }).format(val);
   }
 
   function n(k: keyof PlanForm) {
@@ -294,8 +294,8 @@ function AssignModal({ tenant, plans, onSave, onClose }: {
     return i.perLifetime;
   }
 
-  function currency(val: number) {
-    return new Intl.NumberFormat(i.locale, { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(val);
+  function currency(val: number, cur = 'USD') {
+    return new Intl.NumberFormat(i.locale, { style: 'currency', currency: cur, minimumFractionDigits: 0 }).format(val);
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -320,7 +320,7 @@ function AssignModal({ tenant, plans, onSave, onClose }: {
               <option value="">{i.noPlan}</option>
               {plans.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} — {currency(p.price)}{periodLabel(p.billing_period)}
+                  {p.name} — {currency(p.price, p.currency)}{periodLabel(p.billing_period)}
                 </option>
               ))}
             </select>
@@ -353,8 +353,8 @@ export default function PlansPage() {
   const { lang } = useLangCtx();
   const i = APP[lang];
 
-  function currency(val: number) {
-    return new Intl.NumberFormat(i.locale, { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(val);
+  function currency(val: number, cur = 'USD') {
+    return new Intl.NumberFormat(i.locale, { style: 'currency', currency: cur, minimumFractionDigits: 0 }).format(val);
   }
 
   function fmtDate(d?: string | null) {
@@ -523,7 +523,7 @@ export default function PlansPage() {
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.slug}</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: p.color }}>{currency(p.price)}</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: p.color }}>{currency(p.price, p.currency)}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{periodLabel(p.billing_period)}</div>
                   </div>
                 </div>
