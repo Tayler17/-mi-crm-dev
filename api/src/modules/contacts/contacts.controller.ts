@@ -30,7 +30,7 @@ export class ContactsController {
       if (!ok) return cb(new BadRequestException('Solo se aceptan archivos CSV'), false);
       cb(null, true);
     },
-    limits: { fileSize: 5 * 1024 * 1024 },
+    limits: { fileSize: 20 * 1024 * 1024 },
   }))
   async importCsv(
     @UploadedFile() file: { buffer: Buffer; originalname: string; mimetype: string } | undefined,
@@ -63,65 +63,131 @@ export class ContactsController {
     const notesIdx    = idx(['notes', 'notas', 'comentarios', 'note']);
     const companyIdx  = idx(['company', 'empresa', 'company_name']);
 
-    let created = 0, updated = 0;
+    const userId = req.user?.sub ?? req.user?.id ?? null;
+
+    // ── 1. Parse all rows into typed objects ────────────────────────────────
+    type ParsedRow = {
+      fullName: string; email: string | null; phone: string | null;
+      jobTitle: string | null; location: string | null; notes: string | null; company: string | null;
+    };
+    const parsed: ParsedRow[] = [];
     const errors: { row: number; reason: string }[] = [];
 
     for (let i = 0; i < dataRows.length; i++) {
       const row = dataRows[i];
-      const rowNum = (isHeader ? i + 2 : i + 1);
-      try {
-        let fullName = nameIdx >= 0 ? (row[nameIdx] ?? '').trim() : '';
-        if (!fullName && firstIdx >= 0) {
-          const first2 = (row[firstIdx] ?? '').trim();
-          const last   = lastIdx >= 0 ? (row[lastIdx] ?? '').trim() : '';
-          fullName = [first2, last].filter(Boolean).join(' ');
-        }
-        if (!fullName) { errors.push({ row: rowNum, reason: 'Nombre requerido' }); continue; }
+      const rowNum = isHeader ? i + 2 : i + 1;
+      let fullName = nameIdx >= 0 ? (row[nameIdx] ?? '').trim() : '';
+      if (!fullName && firstIdx >= 0) {
+        const fn = (row[firstIdx] ?? '').trim();
+        const ln = lastIdx >= 0 ? (row[lastIdx] ?? '').trim() : '';
+        fullName = [fn, ln].filter(Boolean).join(' ');
+      }
+      if (!fullName) { errors.push({ row: rowNum, reason: 'Nombre requerido' }); continue; }
+      parsed.push({
+        fullName,
+        email:    emailIdx    >= 0 ? ((row[emailIdx]    ?? '').trim() || null) : null,
+        phone:    phoneIdx    >= 0 ? ((row[phoneIdx]    ?? '').trim() || null) : null,
+        jobTitle: jobIdx      >= 0 ? ((row[jobIdx]      ?? '').trim() || null) : null,
+        location: locationIdx >= 0 ? ((row[locationIdx] ?? '').trim() || null) : null,
+        notes:    notesIdx    >= 0 ? ((row[notesIdx]    ?? '').trim() || null) : null,
+        company:  companyIdx  >= 0 ? ((row[companyIdx]  ?? '').trim() || null) : null,
+      });
+    }
 
-        const email    = emailIdx    >= 0 ? ((row[emailIdx]    ?? '').trim() || null) : null;
-        const phone    = phoneIdx    >= 0 ? ((row[phoneIdx]    ?? '').trim() || null) : null;
-        const jobTitle = jobIdx      >= 0 ? ((row[jobIdx]      ?? '').trim() || null) : null;
-        const location = locationIdx >= 0 ? ((row[locationIdx] ?? '').trim() || null) : null;
-        const notes    = notesIdx    >= 0 ? ((row[notesIdx]    ?? '').trim() || null) : null;
-        const company  = companyIdx  >= 0 ? ((row[companyIdx]  ?? '').trim() || null) : null;
+    // ── 2. Single batch query to find all existing emails ───────────────────
+    const emailsToCheck = [...new Set(parsed.map(r => r.email).filter(Boolean) as string[])];
+    const existingMap = new Map<string, string>(); // email → id
+    if (emailsToCheck.length > 0) {
+      const existing = await this.db.query(
+        `SELECT id, email FROM contacts WHERE tenant_id=$1 AND email = ANY($2::text[])`,
+        [tenantId, emailsToCheck],
+      );
+      for (const row of existing) existingMap.set(row.email, row.id);
+    }
 
-        // Upsert by email if present
-        if (email) {
-          const [existing] = await this.db.query(
-            `SELECT id FROM contacts WHERE tenant_id=$1 AND email=$2 LIMIT 1`,
-            [tenantId, email],
-          );
-          if (existing) {
-            await this.db.query(
-              `UPDATE contacts SET full_name=$1, phone=COALESCE($2,phone), job_title=COALESCE($3,job_title),
-               location=COALESCE($4,location), notes=COALESCE($5,notes), updated_at=NOW()
-               WHERE id=$6`,
-              [fullName, phone, jobTitle, location, notes, existing.id],
-            );
-            updated++;
-            continue;
-          }
-        }
+    // ── 3. Split into inserts vs updates (deduplicate within CSV by email) ──
+    type UpdateRow = ParsedRow & { id: string };
+    const toInsert: ParsedRow[] = [];
+    const toUpdate: UpdateRow[] = [];
+    const insertEmailsSeen = new Set<string>();
 
-        await this.db.query(
-          `INSERT INTO contacts (tenant_id,full_name,email,phone,job_title,location,notes,created_by,created_at,updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),NOW())`,
-          [tenantId, fullName, email, phone, jobTitle, location, notes, req.user?.sub ?? req.user?.id ?? null],
-        );
-        if (company) {
-          // Best-effort company linkage (ignore errors)
-          this.db.query(
-            `UPDATE contacts SET company_id=(SELECT id FROM companies WHERE tenant_id=$1 AND LOWER(name)=LOWER($2) LIMIT 1) WHERE tenant_id=$1 AND email=$3 AND full_name=$4`,
-            [tenantId, company, email, fullName],
-          ).catch(() => {});
-        }
-        created++;
-      } catch (e: any) {
-        errors.push({ row: rowNum, reason: e.message ?? 'Error desconocido' });
+    for (const row of parsed) {
+      if (row.email && existingMap.has(row.email)) {
+        toUpdate.push({ ...row, id: existingMap.get(row.email)! });
+      } else {
+        // Skip CSV-internal duplicates (keep first occurrence)
+        if (row.email && insertEmailsSeen.has(row.email)) continue;
+        if (row.email) insertEmailsSeen.add(row.email);
+        toInsert.push(row);
       }
     }
 
-    return { created, updated, skipped: errors.length, errors: errors.slice(0, 20), total: dataRows.length };
+    // ── 4. Bulk INSERT in chunks of 500 via UNNEST ──────────────────────────
+    const CHUNK = 500;
+    for (let i = 0; i < toInsert.length; i += CHUNK) {
+      const chunk = toInsert.slice(i, i + CHUNK);
+      await this.db.query(
+        `INSERT INTO contacts
+           (tenant_id, full_name, email, phone, job_title, location, notes, created_by, created_at, updated_at)
+         SELECT $1, unnest($2::text[]), unnest($3::text[]), unnest($4::text[]),
+                unnest($5::text[]), unnest($6::text[]), unnest($7::text[]), $8, NOW(), NOW()`,
+        [
+          tenantId,
+          chunk.map(r => r.fullName),
+          chunk.map(r => r.email),
+          chunk.map(r => r.phone),
+          chunk.map(r => r.jobTitle),
+          chunk.map(r => r.location),
+          chunk.map(r => r.notes),
+          userId,
+        ],
+      );
+    }
+
+    // ── 5. Bulk UPDATE in chunks of 500 via UNNEST ──────────────────────────
+    for (let i = 0; i < toUpdate.length; i += CHUNK) {
+      const chunk = toUpdate.slice(i, i + CHUNK);
+      await this.db.query(
+        `UPDATE contacts SET
+           full_name  = u.name,
+           phone      = COALESCE(u.phone,     contacts.phone),
+           job_title  = COALESCE(u.job_title, contacts.job_title),
+           location   = COALESCE(u.location,  contacts.location),
+           notes      = COALESCE(u.notes,     contacts.notes),
+           updated_at = NOW()
+         FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::text[]) AS name,
+                      unnest($3::text[]) AS phone, unnest($4::text[]) AS job_title,
+                      unnest($5::text[]) AS location, unnest($6::text[]) AS notes) u
+         WHERE contacts.id = u.id AND contacts.tenant_id = $7`,
+        [
+          chunk.map(r => r.id),
+          chunk.map(r => r.fullName),
+          chunk.map(r => r.phone),
+          chunk.map(r => r.jobTitle),
+          chunk.map(r => r.location),
+          chunk.map(r => r.notes),
+          tenantId,
+        ],
+      );
+    }
+
+    // ── 6. Best-effort company linkage (async, non-blocking) ────────────────
+    const withCompany = [...toInsert, ...toUpdate].filter(r => r.company && r.email);
+    for (const r of withCompany) {
+      this.db.query(
+        `UPDATE contacts SET company_id=(SELECT id FROM companies WHERE tenant_id=$1 AND LOWER(name)=LOWER($2) LIMIT 1)
+         WHERE tenant_id=$1 AND email=$3`,
+        [tenantId, r.company, r.email],
+      ).catch(() => {});
+    }
+
+    return {
+      created: toInsert.length,
+      updated: toUpdate.length,
+      skipped: errors.length,
+      errors:  errors.slice(0, 20),
+      total:   dataRows.length,
+    };
   }
 
   @Post()
