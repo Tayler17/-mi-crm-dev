@@ -347,7 +347,7 @@ export default function AppointmentsPage() {
     setLoading(true);
     try {
       const [appts, cts, st, inbs] = await Promise.all([getAppointments(), getContacts(), getAppointmentStats(), getInboxes().catch(() => [])]);
-      setAppointments(appts); setContacts(cts); setStats(st); setInboxes(inbs);
+      setAppointments(appts); setContacts(cts.data); setStats(st); setInboxes(inbs);
     } catch {} finally { setLoading(false); }
   }, []);
 

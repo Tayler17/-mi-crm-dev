@@ -78,7 +78,7 @@ export default function TasksPage() {
 
   useEffect(() => {
     load();
-    getContacts().then(setContacts).catch(() => {});
+    getContacts().then((r) => setContacts(r.data)).catch(() => {});
     getDeals().then(setDeals).catch(() => {});
   }, []);
 

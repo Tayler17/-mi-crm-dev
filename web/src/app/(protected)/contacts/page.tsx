@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   getContacts, createContact, deleteContact, importContactsCsv, addContactTag, getTags,
   getContactDuplicates, mergeContacts,
-  type Contact, type CsvImportResult, type Tag,
+  type Contact, type CsvImportResult, type Tag, type ContactsPage,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
 import { APP } from '@/lib/i18n/app';
@@ -55,6 +55,12 @@ function buildRemappedCsv(rows: string[][], mapping: string[]): File {
   return new File([blob], 'contacts.csv', { type: 'text/csv' });
 }
 
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+function i18nPage(page: number, total: number) {
+  return `Página ${page} de ${total}`;
+}
+
 // ── component ─────────────────────────────────────────────────────────────────
 
 export default function ContactsPage() {
@@ -86,10 +92,15 @@ export default function ContactsPage() {
     a.click(); URL.revokeObjectURL(url);
   }
 
+  const PAGE_SIZE = 100;
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState('');
-  const [search, setSearch]     = useState('');
+  const [page,     setPage]     = useState(1);
+  const [total,    setTotal]    = useState(0);
+  const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState('');
+  const [search,   setSearch]   = useState('');
   const [tags, setTags]         = useState<Tag[]>([]);
 
   // Bulk selection
@@ -193,7 +204,7 @@ export default function ContactsPage() {
         skipped: result.skipped + skippedParse,
         total: cards.length,
       });
-      load();
+      load(1, '');
     } catch {
       alert('Error al leer el archivo vCard');
     } finally {
@@ -219,19 +230,22 @@ export default function ContactsPage() {
     try {
       await mergeContacts(keepId, mergeId);
       await loadDups();
-      load();
+      load(page, search);
     } catch { alert('Error'); }
     finally { setMergingId(null); }
   }
 
-  function load() {
+  function load(p: number, q: string) {
     setLoading(true);
     setSelected(new Set());
-    getContacts().then(setContacts).catch((e) => setError(e.message)).finally(() => setLoading(false));
+    getContacts(p, PAGE_SIZE, q)
+      .then((res: ContactsPage) => { setContacts(res.data); setPage(res.page); setTotal(res.total); })
+      .catch((e: any) => setError(e.message))
+      .finally(() => setLoading(false));
   }
 
   useEffect(() => {
-    load();
+    load(1, '');
     getTags().then(setTags).catch(() => {});
   }, []);
 
@@ -246,13 +260,13 @@ export default function ContactsPage() {
     setCreating(true); setCreateError('');
     try {
       await createContact({ fullName: fullName.trim(), email: email || undefined, phone: phone || undefined, jobTitle: jobTitle || undefined });
-      setShowCreate(false); load();
+      setShowCreate(false); load(1, search);
     } catch (e: unknown) { setCreateError(e instanceof Error ? e.message : 'Error'); } finally { setCreating(false); }
   }
 
   async function handleDelete(c: Contact) {
     if (!confirm(`${i.delete} "${c.fullName}"?`)) return;
-    try { await deleteContact(c.id); load(); } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Error'); }
+    try { await deleteContact(c.id); load(page, search); } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Error'); }
   }
 
   // ─── bulk operations ───────────────────────────────────────────────────────
@@ -266,10 +280,10 @@ export default function ContactsPage() {
   }
 
   function toggleSelectAll() {
-    if (selected.size === filtered.length) {
+    if (selected.size === contacts.length) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(filtered.map((c) => c.id)));
+      setSelected(new Set(contacts.map((c) => c.id)));
     }
   }
 
@@ -277,7 +291,7 @@ export default function ContactsPage() {
     if (!confirm(`${i.delete} ${selected.size} ${i.contacts.toLowerCase()}?`)) return;
     const ids = [...selected];
     await Promise.all(ids.map((id) => deleteContact(id).catch(() => {})));
-    load();
+    load(page, search);
   }
 
   async function handleBulkTag(e: React.FormEvent) {
@@ -322,27 +336,16 @@ export default function ContactsPage() {
       const file = buildRemappedCsv(csvRows, mapping);
       const result = await importContactsCsv(file);
       setImportResult(result);
-      load();
+      load(1, '');
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : i.error);
     } finally { setImporting(false); }
   }
 
-  // ─── filtered list ─────────────────────────────────────────────────────────
+  // ─── pagination helpers ────────────────────────────────────────────────────
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    if (!q) return contacts;
-    return contacts.filter((c) =>
-      c.fullName?.toLowerCase().includes(q) ||
-      c.email?.toLowerCase().includes(q) ||
-      c.phone?.toLowerCase().includes(q) ||
-      c.jobTitle?.toLowerCase().includes(q) ||
-      c.location?.toLowerCase().includes(q)
-    );
-  }, [contacts, search]);
-
-  const allSelected  = filtered.length > 0 && selected.size === filtered.length;
+  const totalPages   = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const allSelected  = contacts.length > 0 && selected.size === contacts.length;
   const someSelected = selected.size > 0;
 
   // ─── render ────────────────────────────────────────────────────────────────
@@ -359,15 +362,20 @@ export default function ContactsPage() {
               style={{ paddingLeft: 32, width: 220 }}
               placeholder={`${i.name}, ${i.email}, ${i.phone}…`}
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                const q = e.target.value;
+                setSearch(q);
+                if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+                searchTimerRef.current = setTimeout(() => load(1, q), 350);
+              }}
             />
           </div>
 
           <button
             className="btn btn-secondary"
             title={i.exportCSV}
-            onClick={() => exportCsv(filtered)}
-            disabled={filtered.length === 0}
+            onClick={() => exportCsv(contacts)}
+            disabled={contacts.length === 0}
           >
             📤 {i.exportCSV}
           </button>
@@ -489,7 +497,7 @@ export default function ContactsPage() {
 
         {loading ? (
           <div className="loading">{i.loading}</div>
-        ) : filtered.length === 0 ? (
+        ) : contacts.length === 0 ? (
           <div className="empty">
             <div className="empty-icon">👥</div>
             <p>{search ? i.noResults : i.noContacts}</p>
@@ -502,9 +510,16 @@ export default function ContactsPage() {
           </div>
         ) : (
           <>
-            <div style={{ marginBottom: 10, fontSize: 13, color: 'var(--text-muted)' }}>
-              {filtered.length} {i.contacts.toLowerCase()}
-              {search && ` · ${i.filteredOf} ${contacts.length}`}
+            <div style={{ marginBottom: 10, fontSize: 13, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span>
+                <strong>{total.toLocaleString()}</strong> {i.contacts.toLowerCase()}
+                {search && ` · "${search}"`}
+              </span>
+              {totalPages > 1 && (
+                <span style={{ fontSize: 12 }}>
+                  — {i18nPage(page, totalPages)}
+                </span>
+              )}
             </div>
             <div className="card">
               <div className="table-wrap">
@@ -529,7 +544,7 @@ export default function ContactsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((c) => (
+                    {contacts.map((c) => (
                       <tr key={c.id} style={{ background: selected.has(c.id) ? '#f5f3ff' : undefined }}>
                         <td>
                           <input
@@ -566,6 +581,23 @@ export default function ContactsPage() {
                 </table>
               </div>
             </div>
+
+            {/* Pagination bar */}
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: '16px 0', marginTop: 4 }}>
+                <button className="btn btn-secondary" style={{ fontSize: 12, padding: '5px 14px' }}
+                  disabled={page <= 1} onClick={() => load(1, search)}>«</button>
+                <button className="btn btn-secondary" style={{ fontSize: 12, padding: '5px 14px' }}
+                  disabled={page <= 1} onClick={() => load(page - 1, search)}>‹ Anterior</button>
+                <span style={{ fontSize: 13, color: 'var(--text-muted)', minWidth: 100, textAlign: 'center' }}>
+                  {page} / {totalPages}
+                </span>
+                <button className="btn btn-secondary" style={{ fontSize: 12, padding: '5px 14px' }}
+                  disabled={page >= totalPages} onClick={() => load(page + 1, search)}>Siguiente ›</button>
+                <button className="btn btn-secondary" style={{ fontSize: 12, padding: '5px 14px' }}
+                  disabled={page >= totalPages} onClick={() => load(totalPages, search)}>»</button>
+              </div>
+            )}
           </>
         )}
       </div>

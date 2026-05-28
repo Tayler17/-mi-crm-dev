@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request,
-  UseInterceptors, UploadedFile, BadRequestException,
+  UseInterceptors, UploadedFile, BadRequestException, Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -197,8 +197,47 @@ export class ContactsController {
   }
 
   @Get()
-  findAll(@TenantId() tenantId: string) {
-    return this.service.findAll(tenantId);
+  async findAll(
+    @TenantId() tenantId: string,
+    @Query('page')   page   = '1',
+    @Query('limit')  limit  = '100',
+    @Query('search') search = '',
+  ) {
+    const p      = Math.max(1, parseInt(page)  || 1);
+    const l      = Math.min(500, Math.max(1, parseInt(limit) || 100));
+    const s      = (search ?? '').trim();
+    const offset = (p - 1) * l;
+
+    const baseParams: any[] = [tenantId];
+    let where = 'WHERE tenant_id = $1';
+    if (s) {
+      baseParams.push(`%${s}%`);
+      const n = baseParams.length;
+      where += ` AND (full_name ILIKE $${n} OR email ILIKE $${n} OR phone ILIKE $${n} OR job_title ILIKE $${n})`;
+    }
+
+    const [{ total }] = await this.db.query(
+      `SELECT COUNT(*)::int AS total FROM contacts ${where}`,
+      baseParams,
+    );
+
+    const dataParams = [...baseParams, l, offset];
+    const data = await this.db.query(
+      `SELECT id,
+              full_name  AS "fullName",
+              email, phone,
+              job_title  AS "jobTitle",
+              location, website, notes,
+              company_id AS "companyId",
+              created_at AS "createdAt",
+              updated_at AS "updatedAt"
+       FROM contacts ${where}
+       ORDER BY created_at DESC
+       LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+      dataParams,
+    );
+
+    return { data, total, page: p, limit: l };
   }
 
   @Get(':id')

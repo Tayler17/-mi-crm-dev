@@ -74,7 +74,7 @@ function EditModal({ deal, onSave, onClose }: { deal: any; onSave: (d: any) => P
   const [error, setError] = useState('');
 
   useEffect(() => {
-    getContacts().then((list: any[]) => setContacts(list)).catch(() => {});
+    getContacts().then((r) => setContacts(r.data)).catch(() => {});
     getCompanies().then((list: any[]) => setCompanies(list)).catch(() => {});
   }, []);
 

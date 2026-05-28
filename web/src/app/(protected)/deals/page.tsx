@@ -57,7 +57,7 @@ export default function DealsPage() {
 
   useEffect(() => {
     load();
-    getContacts().then(setContacts).catch(() => {});
+    getContacts().then((r) => setContacts(r.data)).catch(() => {});
     getPipelines().then(async (ps) => {
       setPipelines(ps);
       const map: Record<string, string> = {};

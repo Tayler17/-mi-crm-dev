@@ -160,7 +160,12 @@ export interface ContactProfile {
   activities: any[];
 }
 
-export const getContacts = () => apiGet<Contact[]>('/contacts');
+export interface ContactsPage { data: Contact[]; total: number; page: number; limit: number; }
+export const getContacts = (page = 1, limit = 100, search = '') => {
+  const p = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (search) p.set('search', search);
+  return apiGet<ContactsPage>(`/contacts?${p}`);
+};
 export const getContact = (id: string) => apiGet<Contact>(`/contacts/${id}`);
 export const getContactProfile = (id: string) => apiGet<ContactProfile>(`/contacts/${id}/profile`);
 export const createContact = (data: Partial<Contact>) => apiPost<Contact>('/contacts', data);

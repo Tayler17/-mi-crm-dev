@@ -627,7 +627,7 @@ export default function InboxPage() {
 
   // ── Aux data ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    getContacts().then(setContacts).catch(() => {});
+    getContacts().then((r) => setContacts(r.data)).catch(() => {});
     getInboxes().then(setInboxes).catch(() => {});
     getCannedResponses().then(setCannedResponses).catch(() => {});
     getTags().then(setTags).catch(() => {});
