@@ -122,7 +122,7 @@ export default function ContactsPage() {
   // vCard import (contacts from phone)
   const vcfInputRef = useRef<HTMLInputElement>(null);
   const [vcfImporting, setVcfImporting] = useState(false);
-  const [vcfResult, setVcfResult]       = useState<{ created: number; skipped: number } | null>(null);
+  const [vcfResult, setVcfResult]       = useState<{ created: number; updated: number; skipped: number; total: number } | null>(null);
 
   async function handleVcfChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -131,24 +131,68 @@ export default function ContactsPage() {
     setVcfImporting(true);
     try {
       const text = await file.text();
-      // Split into individual vCards
+
+      // ── Parse all vCards client-side ────────────────────────────────────
       const cards = text.split(/(?=BEGIN:VCARD)/i).map((s) => s.trim()).filter(Boolean);
-      let created = 0, skipped = 0;
+      const csvRows: string[] = ['full_name,phone,email'];
+      let skippedParse = 0;
+
       for (const card of cards) {
         try {
-          const get = (key: string) => {
-            const re = new RegExp(`^${key}[^:]*:(.+)$`, 'im');
-            return card.match(re)?.[1]?.trim() ?? '';
+          // Unfold multi-line vCard values (RFC 6350: CRLF + whitespace = continuation)
+          const unfolded = card.replace(/\r?\n[ \t]/g, '');
+
+          const get = (key: string): string => {
+            // Match KEY or KEY;param=value: content
+            const re = new RegExp(`^${key}(?:;[^:]*)?:(.+)$`, 'im');
+            return unfolded.match(re)?.[1]?.trim() ?? '';
           };
-          const fullName = get('FN') || get('N').replace(/;/g, ' ').trim();
-          const phone = get('TEL').replace(/[^+\d]/g, '') || '';
-          const email = get('EMAIL') || '';
-          if (!fullName && !phone) { skipped++; continue; }
-          await createContact({ fullName: fullName || phone, phone, email, jobTitle: '' });
-          created++;
-        } catch { skipped++; }
+          // Some vCards have multiple TEL/EMAIL lines — grab first non-empty
+          const getFirst = (key: string): string => {
+            const re = new RegExp(`^${key}(?:;[^:]*)?:(.+)$`, 'igm');
+            let m: RegExpExecArray | null;
+            while ((m = re.exec(unfolded)) !== null) {
+              const v = m[1].trim();
+              if (v) return v;
+            }
+            return '';
+          };
+
+          // Build full name: prefer FN, fall back to N (Last;First;Middle;Prefix;Suffix)
+          let fullName = get('FN');
+          if (!fullName) {
+            const n = get('N');
+            // N format: Last;First;Middle;Prefix;Suffix
+            fullName = n.split(';').map(p => p.trim()).filter(Boolean).reverse().join(' ');
+          }
+          // Clean encoding artifacts (QUOTED-PRINTABLE names sometimes have =XX)
+          fullName = fullName.replace(/=[0-9A-Fa-f]{2}/g, '').replace(/;/g, ' ').trim();
+
+          const phone = getFirst('TEL').replace(/[^+\d]/g, '');
+          const email = getFirst('EMAIL').replace(/[^a-zA-Z0-9@._+\-]/g, '');
+
+          if (!fullName && !phone) { skippedParse++; continue; }
+
+          const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+          csvRows.push([esc(fullName || phone), esc(phone), esc(email)].join(','));
+        } catch { skippedParse++; }
       }
-      setVcfResult({ created, skipped });
+
+      if (csvRows.length <= 1) {
+        setVcfResult({ created: 0, updated: 0, skipped: skippedParse, total: cards.length });
+        return;
+      }
+
+      // ── Send as a single CSV to the bulk import endpoint ────────────────
+      const csvBlob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+      const csvFile = new File([csvBlob], 'contacts.csv', { type: 'text/csv' });
+      const result = await importContactsCsv(csvFile);
+      setVcfResult({
+        created: result.created,
+        updated: result.updated,
+        skipped: result.skipped + skippedParse,
+        total: cards.length,
+      });
       load();
     } catch {
       alert('Error al leer el archivo vCard');
@@ -696,21 +740,26 @@ export default function ContactsPage() {
       {/* vCard import result modal */}
       {vcfResult && (
         <div className="modal-overlay" onClick={() => setVcfResult(null)}>
-          <div className="modal" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">📱 Importar vCard — Resultado</h2>
               <button className="modal-close" onClick={() => setVcfResult(null)}>×</button>
             </div>
             <div className="modal-body">
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-                <div style={{ textAlign: 'center', padding: '16px 8px', borderRadius: 8, background: '#d1fae5' }}>
-                  <div style={{ fontSize: 32, fontWeight: 700, color: '#065f46' }}>{vcfResult.created}</div>
-                  <div style={{ fontSize: 13, color: '#065f46', fontWeight: 500 }}>Contactos creados</div>
-                </div>
-                <div style={{ textAlign: 'center', padding: '16px 8px', borderRadius: 8, background: vcfResult.skipped > 0 ? '#fee2e2' : '#f3f4f6' }}>
-                  <div style={{ fontSize: 32, fontWeight: 700, color: vcfResult.skipped > 0 ? '#991b1b' : '#6b7280' }}>{vcfResult.skipped}</div>
-                  <div style={{ fontSize: 13, color: vcfResult.skipped > 0 ? '#991b1b' : '#6b7280', fontWeight: 500 }}>Omitidos / Error</div>
-                </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+                {[
+                  { label: 'Creados',  value: vcfResult.created, bg: '#d1fae5', color: '#065f46' },
+                  { label: 'Actualizados', value: vcfResult.updated, bg: '#dbeafe', color: '#1e40af' },
+                  { label: 'Omitidos', value: vcfResult.skipped, bg: vcfResult.skipped > 0 ? '#fee2e2' : '#f3f4f6', color: vcfResult.skipped > 0 ? '#991b1b' : '#6b7280' },
+                ].map((s) => (
+                  <div key={s.label} style={{ textAlign: 'center', padding: '14px 6px', borderRadius: 8, background: s.bg }}>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: s.color }}>{s.value}</div>
+                    <div style={{ fontSize: 12, color: s.color, fontWeight: 500 }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
+                Total en archivo: <strong>{vcfResult.total}</strong>
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '10px 12px', background: '#f8fafc', borderRadius: 8, border: '1px solid var(--border)' }}>
                 💡 Exporta los contactos de tu teléfono como archivo <strong>.vcf</strong> (vCard) desde la app de Contactos y luego impórtalos aquí.
