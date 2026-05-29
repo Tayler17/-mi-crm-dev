@@ -574,8 +574,10 @@ export default function InboxPage() {
   }, [unreadMap]);
 
   // ── Load list ────────────────────────────────────────────────────────────────
-  const loadList = useCallback(() => {
-    setLoadingList(true); setListError('');
+  // silent=true → refresh data in background without replacing the list with a spinner
+  const loadList = useCallback((silent = false) => {
+    if (!silent) setLoadingList(true);
+    setListError('');
     getConversations({
       status:     tab !== 'all' ? tab : filterStatus || undefined,
       assignedTo: filterAgent  || undefined,
@@ -587,6 +589,11 @@ export default function InboxPage() {
       .catch((e) => setListError(e.message))
       .finally(() => setLoadingList(false));
   }, [tab, filterStatus, filterAgent, filterInbox, filterTag, filterQueue]);
+
+  // Stable ref so the SSE handler can call the latest loadList without being
+  // listed as a dependency (which would reopen the SSE connection on every filter change)
+  const loadListRef = useRef(loadList);
+  useEffect(() => { loadListRef.current = loadList; }, [loadList]);
 
   useEffect(() => { loadList(); }, [loadList]);
 
@@ -662,8 +669,8 @@ export default function InboxPage() {
         setConversations((prev) => {
           const idx = prev.findIndex((c) => c.id === convId);
           if (idx === -1) {
-            // New conversation — reload list
-            loadList();
+            // New conversation — silently reload the list (no spinner flash)
+            loadListRef.current(true);
             return prev;
           }
           const updated = { ...prev[idx], last_message_at: new Date().toISOString() };
@@ -701,7 +708,7 @@ export default function InboxPage() {
       }
     });
     return () => es.close();
-  }, [activeId, loadList]);
+  }, [activeId]); // loadList intentionally omitted — use loadListRef to keep SSE stable
 
   // ── Computed filtered list ───────────────────────────────────────────────────
   const currentUserId = (() => {
@@ -764,7 +771,7 @@ export default function InboxPage() {
         setBody('');
         const [m, n] = await Promise.all([getMessages(activeId), getNotes(activeId)]);
         setMessages(m); setNotes(n);
-        loadList();
+        loadList(true); // silent — SSE already handles the optimistic update
       } else {
         await sendNote(activeId, body.trim());
         setBody(''); setMentionQuery(null);
@@ -793,7 +800,7 @@ export default function InboxPage() {
       setBody('');
       const [m, n] = await Promise.all([getMessages(activeId), getNotes(activeId)]);
       setMessages(m); setNotes(n);
-      loadList();
+      loadList(true);
     } catch (err: unknown) { alert(err instanceof Error ? err.message : i.inbxErrUpload); }
     finally { setSending(false); setPendingFile(null); }
   }
@@ -810,7 +817,7 @@ export default function InboxPage() {
       await updateConversation(activeId, { status });
       setConv((p) => p ? { ...p, status } : p);
       setConversations((prev) => prev.map((c) => c.id === activeId ? { ...c, status } : c));
-      if (tab !== 'all' && tab !== status) loadList();
+      if (tab !== 'all' && tab !== status) loadList(true);
     } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Error'); }
   }
 
@@ -1226,7 +1233,9 @@ export default function InboxPage() {
 
         {/* Conversation list */}
         <div className="inbox-conv-list">
-          {loadingList ? (
+          {/* Only blank out the list on the very first load (no conversations yet).
+              While silently refreshing in background, keep the existing list visible. */}
+          {loadingList && conversations.length === 0 ? (
             <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{i.loading}</div>
           ) : listError ? (
             <div style={{ padding: 16, color: 'var(--danger)', fontSize: 12 }}>{listError}</div>
