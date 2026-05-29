@@ -907,10 +907,11 @@ export class WhatsappWebService implements OnModuleInit {
 
     let cleanPhone: string;
     let resolvedJid = normalizedJid; // JID used for routing replies
+    let realPhone: string | undefined; // set when LID resolves to a real phone number
 
     if (isLid) {
       // 1st: check in-memory map (populated by contacts.upsert)
-      let realPhone = lidMap?.get(rawDigits);
+      realPhone = lidMap?.get(rawDigits);
 
       // 2nd: if not in memory, check persistent DB map (survives restarts)
       if (!realPhone) {
@@ -919,7 +920,7 @@ export class WhatsappWebService implements OnModuleInit {
           [connectionId, rawDigits],
         ).catch(() => [null]);
         if (dbRow?.phone) {
-          realPhone = dbRow.phone;
+          realPhone = dbRow.phone as string;
           lidMap?.set(rawDigits, realPhone); // warm up memory map
         }
       }
@@ -973,6 +974,56 @@ export class WhatsappWebService implements OnModuleInit {
         [tId, pushName || cleanPhone, cleanPhone],
       );
       contactId = newContact.id;
+    }
+
+    // 1b. Ghost-contact merge — runs whenever a LID finally resolves to a real phone.
+    // If a 'lid:rawDigits' ghost contact was created earlier (before the LID→phone
+    // mapping was available), move all its conversations to the now-resolved contact
+    // and delete the ghost so the inbox stops showing two separate chats for the
+    // same person.
+    if (isLid && realPhone) {
+      try {
+        const [ghost] = await this.db.query(
+          `SELECT id FROM contacts WHERE tenant_id=$1 AND phone=$2 AND id!=$3 LIMIT 1`,
+          [tId, `lid:${rawDigits}`, contactId],
+        );
+        if (ghost) {
+          await this.db.query(
+            `UPDATE conversations SET contact_id=$1, updated_at=NOW() WHERE contact_id=$2 AND tenant_id=$3`,
+            [contactId, ghost.id, tId],
+          );
+          await this.db.query(`DELETE FROM contacts WHERE id=$1`, [ghost.id]).catch(() => {});
+          this.logger.log(`[wa_web] Ghost LID contact ${ghost.id} merged → ${contactId}`);
+        }
+      } catch (e: any) {
+        this.logger.warn(`[wa_web] Ghost-merge failed: ${e.message}`);
+      }
+    }
+
+    // Also handle the reverse: a message arrives via real phone JID and a 'lid:' ghost
+    // contact may exist for this same person (found via wa_lid_map). Merge it too.
+    if (!isLid) {
+      try {
+        const ghosts = await this.db.query(
+          `SELECT c.id FROM contacts c
+           INNER JOIN wa_lid_map m
+             ON c.phone = 'lid:' || m.lid_digits
+            AND m.connection_id = $1
+            AND m.phone = $2
+           WHERE c.tenant_id = $3 AND c.id != $4`,
+          [connectionId, cleanPhone, tId, contactId],
+        );
+        for (const g of ghosts) {
+          await this.db.query(
+            `UPDATE conversations SET contact_id=$1, updated_at=NOW() WHERE contact_id=$2 AND tenant_id=$3`,
+            [contactId, g.id, tId],
+          );
+          await this.db.query(`DELETE FROM contacts WHERE id=$1`, [g.id]).catch(() => {});
+          this.logger.log(`[wa_web] Ghost phone contact ${g.id} merged → ${contactId}`);
+        }
+      } catch (e: any) {
+        this.logger.warn(`[wa_web] Ghost-merge (phone) failed: ${e.message}`);
+      }
     }
 
     // 2. Find or create open conversation.
