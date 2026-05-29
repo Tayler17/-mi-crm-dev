@@ -78,6 +78,9 @@ services:
     volumes:
       - ./api:/app
       - /app/node_modules
+      # Named volume keeps uploaded media (voice notes, images, files) safe across
+      # container recreations and git-clean operations
+      - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -136,6 +139,8 @@ services:
 
 volumes:
   postgres_data:
+  # Persists uploaded media files (voice notes, images) independently of source code
+  uploads_data:
 
 networks:
   crm_network:

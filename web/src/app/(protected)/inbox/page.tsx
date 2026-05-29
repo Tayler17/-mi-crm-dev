@@ -1504,7 +1504,23 @@ export default function InboxPage() {
                             <img src={`${API_URL}${fileUrl}`} alt={fileName} style={{ maxWidth: 220, maxHeight: 200, borderRadius: 6, display: 'block' }} />
                           </a>
                         ) : m.contentType === 'audio' && fileUrl ? (
-                          <audio controls src={`${API_URL}${fileUrl}`} style={{ maxWidth: 220 }} />
+                          <audio
+                            key={`audio-${m.id}`}
+                            controls
+                            src={`${API_URL}${fileUrl}`}
+                            style={{ maxWidth: 220 }}
+                            preload="metadata"
+                            onError={(e) => {
+                              // If the file fails to load, swap src to force a fresh fetch
+                              const el = e.currentTarget;
+                              if (!el.dataset.retried) {
+                                el.dataset.retried = '1';
+                                const orig = el.src;
+                                el.src = '';
+                                setTimeout(() => { el.src = orig; el.load(); }, 800);
+                              }
+                            }}
+                          />
                         ) : m.contentType === 'video' && fileUrl ? (
                           <video controls src={`${API_URL}${fileUrl}`} style={{ maxWidth: 220, borderRadius: 6 }} />
                         ) : m.contentType === 'file' && fileUrl && /\.(jpe?g|png|gif|webp|bmp|heic)$/i.test(fileName) ? (
