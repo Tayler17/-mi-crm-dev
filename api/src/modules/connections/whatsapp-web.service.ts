@@ -22,6 +22,11 @@ export class WhatsappWebService implements OnModuleInit {
   private cachedWaVersion: number[] | null = null;
   /** Monotonic counter — each new Baileys socket gets a unique ID for log correlation */
   private socketSeq = 0;
+  /**
+   * Stores the last inbound message key per (connectionId → remoteJid) so we can
+   * mark it as read on WhatsApp only when a bot/agent actually replies.
+   */
+  private readonly pendingReadKeys = new Map<string, Map<string, any>>();
 
   constructor(
     @InjectDataSource() private readonly db: DataSource,
@@ -85,6 +90,7 @@ export class WhatsappWebService implements OnModuleInit {
     if (s?.sock) { try { s.sock.end(undefined); } catch {} }
     this.sessions.delete(connectionId);
     this.reconnectCount.delete(connectionId);
+    this.pendingReadKeys.delete(connectionId);
     await Promise.all([
       this.db.query(`UPDATE channel_connections SET status='disconnected', updated_at=NOW() WHERE id=$1`, [connectionId]).catch(() => {}),
       this.db.query(`DELETE FROM wa_session_creds WHERE connection_id=$1`, [connectionId]).catch(() => {}),
@@ -106,6 +112,13 @@ export class WhatsappWebService implements OnModuleInit {
     }
     try {
       const result = await session.sock.sendMessage(remoteJid, { text });
+      // Mark the last inbound message from this JID as read now that we've replied
+      const pending = this.pendingReadKeys.get(connectionId);
+      if (pending?.has(remoteJid)) {
+        const key = pending.get(remoteJid)!;
+        pending.delete(remoteJid);
+        try { await session.sock.readMessages([key]); } catch {}
+      }
       return result?.key?.id ?? true as any;
     } catch (e: any) {
       this.logger.error(`sendMessage failed for ${connectionId}: ${e.message}`);
@@ -634,6 +647,146 @@ export class WhatsappWebService implements OnModuleInit {
         }
       });
 
+      // ── Missed WhatsApp call detection ───────────────────────────────────
+      sock.ev.on('call', async (calls: any[]) => {
+        for (const call of calls) {
+          // 'offer' = incoming call ring; ignore status updates for calls already handled
+          if (call.status !== 'offer') continue;
+          const callerRaw: string = call.from ?? '';
+          if (!callerRaw) continue;
+          const callerNorm = jidNormalizedUser(callerRaw);
+          // Skip groups and unresolved LID callers
+          if (callerNorm.endsWith('@g.us') || callerNorm.endsWith('@lid')) continue;
+          const callerPhone = callerNorm.replace(/@s\.whatsapp\.net$/, '');
+          if (!callerPhone) continue;
+
+          this.logger.log(`[whatsapp_web] Missed WA call from ${callerPhone} on ${connectionId}`);
+
+          try {
+            // Reject so the caller sees it as a missed call immediately
+            await sock.rejectCall(call.id, call.from).catch(() => {});
+
+            const [conn] = await this.db.query(
+              `SELECT inbox_id, tenant_id FROM channel_connections WHERE id=$1 LIMIT 1`,
+              [connectionId],
+            );
+            if (!conn) continue;
+            const tId = tenantId || conn.tenant_id;
+            const resolvedCallJid = `${callerPhone}@s.whatsapp.net`;
+
+            // Find or create contact
+            const [existingContact] = await this.db.query(
+              `SELECT id FROM contacts WHERE tenant_id=$1 AND (phone=$2 OR phone='+' || $2) LIMIT 1`,
+              [tId, callerPhone],
+            );
+            let contactId: string;
+            if (existingContact) {
+              contactId = existingContact.id;
+            } else {
+              const [newContact] = await this.db.query(
+                `INSERT INTO contacts (tenant_id, full_name, phone, created_at, updated_at)
+                 VALUES ($1,$2,$3,NOW(),NOW()) RETURNING id`,
+                [tId, callerPhone, callerPhone],
+              );
+              contactId = newContact.id;
+            }
+
+            // Find or create open conversation
+            const [existingConv] = await this.db.query(
+              `SELECT id FROM conversations
+               WHERE tenant_id=$1 AND connection_id=$3 AND status != 'resolved'
+               AND (contact_id=$2 OR external_id=$4)
+               ORDER BY created_at DESC LIMIT 1`,
+              [tId, contactId, connectionId, resolvedCallJid],
+            );
+            let conversationId: string;
+            if (existingConv) {
+              conversationId = existingConv.id;
+            } else {
+              const [newConv] = await this.db.query(
+                `INSERT INTO conversations
+                   (tenant_id, contact_id, inbox_id, connection_id, external_id,
+                    channel_type, status, subject, created_at, updated_at)
+                 VALUES ($1,$2,$3,$4,$5,'whatsapp_web','open',$6,NOW(),NOW()) RETURNING id`,
+                [tId, contactId, conn.inbox_id, connectionId, resolvedCallJid, callerPhone],
+              );
+              conversationId = newConv.id;
+            }
+
+            // Dedup: skip if we already logged this specific call
+            const fakeMsgId = `call-${call.id ?? Date.now()}`;
+            const [dupCall] = await this.db.query(
+              `SELECT id FROM messages WHERE external_id=$1 AND conversation_id=$2 LIMIT 1`,
+              [fakeMsgId, conversationId],
+            );
+            if (dupCall) continue;
+
+            // Insert system note visible in the CRM inbox
+            const missedCallBody = '📞 Llamada de WhatsApp perdida — el cliente intentó llamar.';
+            await this.db.query(
+              `INSERT INTO messages
+                 (tenant_id, conversation_id, body, content_type, direction, sender_type,
+                  is_private, external_id, created_at, updated_at)
+               VALUES ($1,$2,$3,'text','inbound','system',false,$4,NOW(),NOW())`,
+              [tId, conversationId, missedCallBody, fakeMsgId],
+            );
+            await this.db.query(
+              `UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1`,
+              [conversationId],
+            );
+
+            this.notifications.emit({
+              tenantId: tId,
+              type: 'message_created',
+              payload: {
+                conversationId,
+                message: {
+                  id: fakeMsgId, conversationId,
+                  body: missedCallBody, direction: 'inbound',
+                  senderType: 'system', contentType: 'text',
+                  isPrivate: false, createdAt: new Date().toISOString(),
+                },
+              },
+            });
+
+            // Auto-reply so the caller knows we're chat-only
+            const autoReply = '¡Hola! Vimos que intentaste llamarnos por WhatsApp 📱. Por el momento solo atendemos por mensajes. ¿En qué podemos ayudarte?';
+            try {
+              const sentResult = await sock.sendMessage(resolvedCallJid, { text: autoReply });
+              const outMsgExtId: string | undefined = sentResult?.key?.id;
+              const [outMsg] = await this.db.query(
+                `INSERT INTO messages
+                   (tenant_id, conversation_id, body, content_type, direction, sender_type,
+                    is_private, external_id, created_at, updated_at)
+                 VALUES ($1,$2,$3,'text','outbound','bot',false,$4,NOW(),NOW()) RETURNING id`,
+                [tId, conversationId, autoReply, outMsgExtId ?? null],
+              );
+              await this.db.query(
+                `UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1`,
+                [conversationId],
+              );
+              this.notifications.emit({
+                tenantId: tId,
+                type: 'message_created',
+                payload: {
+                  conversationId,
+                  message: {
+                    id: outMsg?.id, conversationId,
+                    body: autoReply, direction: 'outbound',
+                    senderType: 'bot', contentType: 'text',
+                    isPrivate: false, createdAt: new Date().toISOString(),
+                  },
+                },
+              });
+            } catch (sendErr: any) {
+              this.logger.warn(`[call handler] Auto-reply send failed: ${sendErr.message}`);
+            }
+          } catch (e: any) {
+            this.logger.warn(`[call handler] Error processing missed call: ${e.message}`);
+          }
+        }
+      });
+
       return { qr: null, status: 'starting' };
     } catch (e: any) {
       this.sessions.delete(connectionId);
@@ -822,12 +975,16 @@ export class WhatsappWebService implements OnModuleInit {
       contactId = newContact.id;
     }
 
-    // 2. Find or create open conversation — keyed by connectionId + remoteJid
+    // 2. Find or create open conversation.
+    // Check by contact_id first; also fall back to external_id match so that if the
+    // same sender previously used a different JID type (phone vs LID) the existing
+    // open conversation is reused instead of spawning a duplicate.
     const [existingConv] = await this.db.query(
       `SELECT id FROM conversations
-       WHERE tenant_id=$1 AND contact_id=$2 AND connection_id=$3 AND status != 'resolved'
+       WHERE tenant_id=$1 AND connection_id=$3 AND status != 'resolved'
+       AND (contact_id=$2 OR external_id=$4 OR external_id=$5)
        ORDER BY created_at DESC LIMIT 1`,
-      [tId, contactId, connectionId],
+      [tId, contactId, connectionId, normalizedJid, resolvedJid],
     );
     let conversationId: string;
     let isNew = false;
@@ -884,9 +1041,10 @@ export class WhatsappWebService implements OnModuleInit {
 
     this.logger.log(`[whatsapp_web] ${pushName} → conv ${conversationId}: "${body.slice(0, 60)}"`);
 
-    // Mark the message as read on WhatsApp so the phone clears the unread indicator
-    if (sock && msg.key) {
-      try { await sock.readMessages([msg.key]); } catch {}
+    // Store key so we can mark as read when the bot/agent actually replies
+    if (msg.key) {
+      if (!this.pendingReadKeys.has(connectionId)) this.pendingReadKeys.set(connectionId, new Map());
+      this.pendingReadKeys.get(connectionId)!.set(resolvedJid, msg.key);
     }
 
     // Build the new message object for SSE
@@ -1062,9 +1220,10 @@ export class WhatsappWebService implements OnModuleInit {
 
     this.logger.log(`[whatsapp_web][group] ${senderName} in ${groupName} → conv ${conversationId}`);
 
-    // Mark the group message as read on WhatsApp
-    if (sock && msg.key) {
-      try { await sock.readMessages([msg.key]); } catch {}
+    // Store key so we can mark as read when the bot/agent replies to this group message
+    if (msg.key) {
+      if (!this.pendingReadKeys.has(connectionId)) this.pendingReadKeys.set(connectionId, new Map());
+      this.pendingReadKeys.get(connectionId)!.set(groupJid, msg.key);
     }
 
     const newMessage = {
