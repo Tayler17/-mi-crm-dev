@@ -777,6 +777,59 @@ function SchedulesTab() {
   );
 }
 
+// ── SMTP test button ──────────────────────────────────────────────────────────
+
+function SmtpTestButton() {
+  const [state, setState] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+  const [msg, setMsg]     = useState('');
+
+  async function run() {
+    setState('loading'); setMsg('');
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/settings/platform/test-smtp`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('token') ?? '' : ''}`,
+            'X-Tenant-ID':  typeof window !== 'undefined' ? localStorage.getItem('tenantId') ?? '' : '',
+          },
+          body: JSON.stringify({}),
+        },
+      );
+      const data = await res.json();
+      if (data.ok) { setState('ok');    setMsg(data.message); }
+      else         { setState('error'); setMsg(data.error);   }
+    } catch (e: any) {
+      setState('error'); setMsg(e.message);
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <button
+        className="btn btn-secondary"
+        disabled={state === 'loading'}
+        onClick={run}
+        style={{ minWidth: 160 }}
+      >
+        {state === 'loading' ? '⏳ Enviando...' : '📧 Enviar email de prueba'}
+      </button>
+      {msg && (
+        <span style={{
+          fontSize: 12, padding: '4px 10px', borderRadius: 6,
+          background: state === 'ok' ? '#dcfce7' : '#fee2e2',
+          color: state === 'ok' ? '#15803d' : '#dc2626',
+          maxWidth: 400, wordBreak: 'break-word',
+        }}>
+          {state === 'ok' ? '✅ ' : '❌ '}{msg}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -1833,6 +1886,9 @@ export default function SettingsPage() {
                 value={platformForm['smtp.from']}
                 onChange={(e) => setPlatformForm((p) => ({ ...p, 'smtp.from': e.target.value }))}
                 placeholder="AutoMarkIQ <noreply@tuempresa.com>" />
+            </Row>
+            <Row label="Probar configuración">
+              <SmtpTestButton />
             </Row>
           </Section>
 

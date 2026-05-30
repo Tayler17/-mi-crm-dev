@@ -3,6 +3,7 @@ import { SettingsService } from './settings.service';
 import { PlatformSettingsService } from './platform-settings.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantId } from '../../common/decorators/tenant.decorator';
+import * as nodemailer from 'nodemailer';
 
 @Controller('settings')
 @UseGuards(JwtAuthGuard)
@@ -25,6 +26,36 @@ export class SettingsController {
     if (req.user?.role !== 'owner') throw new ForbiddenException();
     await this.platformSettings.setMultiple(dto);
     return this.platformSettings.getAll();
+  }
+
+  /** Send a test email using the current platform SMTP settings */
+  @Post('platform/test-smtp')
+  async testSmtp(@Body() body: { to?: string }, @Request() req: any) {
+    if (req.user?.role !== 'owner') throw new ForbiddenException();
+    const smtp = await this.platformSettings.getSMTP().catch(() => null);
+    if (!smtp?.host || smtp.host === 'mailhog') {
+      return { ok: false, error: 'No hay SMTP configurado en Platform Settings. Configura host, user y password primero.' };
+    }
+    try {
+      const transport = nodemailer.createTransport({
+        host:   smtp.host,
+        port:   smtp.port,
+        secure: smtp.secure,
+        auth:   smtp.user ? { user: smtp.user, pass: smtp.password } : undefined,
+        tls:    { rejectUnauthorized: false },
+      });
+      await transport.verify();
+      const to = body.to || smtp.user || smtp.from;
+      await transport.sendMail({
+        from:    smtp.from || smtp.user,
+        to,
+        subject: '✅ Prueba SMTP — AutoMarkIQ',
+        html:    `<p>El servidor SMTP está correctamente configurado.<br><br><b>Host:</b> ${smtp.host}:${smtp.port}<br><b>Usuario:</b> ${smtp.user}</p>`,
+      });
+      return { ok: true, message: `Email de prueba enviado a ${to}` };
+    } catch (e: any) {
+      return { ok: false, error: e.message };
+    }
   }
 
   // ── Tenant settings ───────────────────────────────────────────────────────────
