@@ -192,16 +192,31 @@ export class ConnectionsService {
         try {
           // 1. Verify the page/token is valid
           const pageRes = await (globalThis as any).fetch(
-            `https://graph.facebook.com/v21.0/${creds.pageId}?fields=id,name&access_token=${creds.accessToken}`,
+            `https://graph.facebook.com/v21.0/${creds.pageId}?fields=id,name,instagram_business_account&access_token=${creds.accessToken}`,
             { signal: AbortSignal.timeout(8000) },
           );
           if (!pageRes.ok) {
             const data = await pageRes.json();
             return { ok: false, error: `Meta API: ${data?.error?.message ?? 'token inválido'}` };
           }
+          const pageData = await pageRes.json();
+
+          // 1b. For Instagram connections, resolve and persist the Instagram Business
+          //     Account ID so the webhook router can match entry.id correctly.
+          //     Instagram Business Messaging sends entry.id = igAccountId (NOT pageId).
+          if (conn.channelType === 'instagram') {
+            const igAccountId: string | undefined = pageData?.instagram_business_account?.id;
+            if (igAccountId && igAccountId !== creds.igAccountId) {
+              conn.credentials = { ...creds, igAccountId };
+              await this.repo.save(conn);
+              this.logger.log(`Instagram connection ${conn.id}: stored igAccountId=${igAccountId} for page=${creds.pageId}`);
+            }
+          }
 
           // 2. Subscribe the page to webhook events
-          // Meta requires form-encoded body (not JSON) for this endpoint
+          // Meta requires form-encoded body (not JSON) for this endpoint.
+          // For Instagram Business API, the global app webhook handles message routing
+          // and per-page subscribed_apps may return error #3 — that is expected and safe.
           const subscribeBody = new URLSearchParams({
             subscribed_fields: 'messages,messaging_postbacks',
             access_token: creds.accessToken,
@@ -210,14 +225,24 @@ export class ConnectionsService {
             `https://graph.facebook.com/v21.0/${creds.pageId}/subscribed_apps`,
             {
               method: 'POST',
-              body: subscribeBody,            // URLSearchParams → auto Content-Type: application/x-www-form-urlencoded
+              body: subscribeBody,
               signal: AbortSignal.timeout(8000),
             },
           );
           const subscribeData = await subscribeRes.json();
           this.logger.log(`Meta subscribed_apps response for ${creds.pageId}: ${JSON.stringify(subscribeData)}`);
+
           if (!subscribeData.success) {
+            const errCode: number = subscribeData.error?.code ?? 0;
             const errMsg = subscribeData.error?.message ?? JSON.stringify(subscribeData);
+
+            if (conn.channelType === 'instagram' && errCode === 3) {
+              // Instagram Business API uses global app-level webhook subscription.
+              // Per-page subscribed_apps is not required and returns #3 for IG accounts.
+              // Global webhook is already configured → messages still arrive → treat as connected.
+              this.logger.warn(`Instagram ${creds.pageId}: subscribed_apps returned #3 (expected for Business API — global webhook is active)`);
+              return { ok: true };
+            }
             return { ok: false, error: `Suscripción de webhook fallida: ${errMsg}` };
           }
           this.logger.log(`Meta page ${creds.pageId} successfully subscribed: messages, messaging_postbacks`);

@@ -73,12 +73,19 @@ export class MetaWebhookController {
         const changesCount   = entry?.changes?.length  ?? 0;
         this.logger.log(`Meta entry: pageId=${pageId} channel=${channel} messaging=${messagingCount} changes=${changesCount}`);
 
-        // Find the connection whose credentials.pageId matches this entry
+        // Find the connection whose credentials.pageId OR credentials.igAccountId matches.
+        // Instagram Business Messaging sends entry.id = Instagram Business Account ID,
+        // while Facebook Messenger sends entry.id = Facebook Page ID.
         const conn = await this.findConnectionByPageId(pageId, channel);
         if (!conn) {
-          this.logger.warn(`No connection found for Meta pageId=${pageId} channel=${channel} — check that the FB connection exists and is active`);
+          this.logger.warn(`No connection found for Meta pageId/igAccountId=${pageId} channel=${channel} — check connection credentials`);
           continue;
         }
+
+        // Log matched routing for diagnostics
+        this.logger.log(
+          `Meta routing: entryId=${pageId} channel=${channel} → conn=${conn.id} tenant=${conn.tenant_id} inbox=${conn.inbox_id}`,
+        );
 
         // Route to existing webhook service
         const fakeBody = { object, entry: [entry] };
@@ -96,12 +103,21 @@ export class MetaWebhookController {
   }
 
   private async findConnectionByPageId(pageId: string, channel: string) {
+    // Match by Facebook Page ID (credentials->>'pageId') first,
+    // then fall back to Instagram Business Account ID (credentials->>'igAccountId').
+    // Instagram Business Messaging sends entry.id = igAccountId, not pageId.
     const [conn] = await this.db.query(
       `SELECT id, tenant_id, inbox_id, channel_type, credentials
        FROM channel_connections
        WHERE channel_type = $1
-         AND credentials->>'pageId' = $2
          AND is_active = true
+         AND (
+           credentials->>'pageId'     = $2
+           OR credentials->>'igAccountId' = $2
+         )
+       ORDER BY
+         -- prefer exact pageId match over igAccountId match
+         CASE WHEN credentials->>'pageId' = $2 THEN 0 ELSE 1 END
        LIMIT 1`,
       [channel, pageId],
     );
