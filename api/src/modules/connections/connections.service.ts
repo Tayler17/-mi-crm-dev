@@ -190,26 +190,45 @@ export class ConnectionsService {
           return { ok: false, error: 'Faltan credenciales: pageId y accessToken son requeridos' };
         }
         try {
-          // 1. Verify the page/token is valid
+          // 1. Verify the page/token is valid (basic fields only — works for both
+          //    Facebook Page IDs and Instagram Business Account IDs)
           const pageRes = await (globalThis as any).fetch(
-            `https://graph.facebook.com/v21.0/${creds.pageId}?fields=id,name,instagram_business_account&access_token=${creds.accessToken}`,
+            `https://graph.facebook.com/v21.0/${creds.pageId}?fields=id,name&access_token=${creds.accessToken}`,
             { signal: AbortSignal.timeout(8000) },
           );
           if (!pageRes.ok) {
             const data = await pageRes.json();
             return { ok: false, error: `Meta API: ${data?.error?.message ?? 'token inválido'}` };
           }
-          const pageData = await pageRes.json();
 
           // 1b. For Instagram connections, resolve and persist the Instagram Business
           //     Account ID so the webhook router can match entry.id correctly.
           //     Instagram Business Messaging sends entry.id = igAccountId (NOT pageId).
+          //     Two cases:
+          //     a) pageId is a Facebook Page ID → fetch instagram_business_account field
+          //     b) pageId is already an Instagram Business Account ID → igAccountId = pageId
           if (conn.channelType === 'instagram') {
-            const igAccountId: string | undefined = pageData?.instagram_business_account?.id;
+            let igAccountId: string | undefined;
+
+            const igRes = await (globalThis as any).fetch(
+              `https://graph.facebook.com/v21.0/${creds.pageId}?fields=instagram_business_account&access_token=${creds.accessToken}`,
+              { signal: AbortSignal.timeout(8000) },
+            );
+            const igData = await igRes.json();
+
+            if (igData?.instagram_business_account?.id) {
+              // Case a: pageId is a Facebook Page — resolved IG account from it
+              igAccountId = igData.instagram_business_account.id;
+            } else if (igData?.error?.code === 100) {
+              // Case b: pageId is already an Instagram Business Account ID
+              igAccountId = creds.pageId;
+              this.logger.log(`Instagram connection ${conn.id}: pageId=${creds.pageId} is already an IG account ID`);
+            }
+
             if (igAccountId && igAccountId !== creds.igAccountId) {
               conn.credentials = { ...creds, igAccountId };
               await this.repo.save(conn);
-              this.logger.log(`Instagram connection ${conn.id}: stored igAccountId=${igAccountId} for page=${creds.pageId}`);
+              this.logger.log(`Instagram connection ${conn.id}: stored igAccountId=${igAccountId} for pageId=${creds.pageId}`);
             }
           }
 
