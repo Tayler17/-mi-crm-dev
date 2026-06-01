@@ -52,8 +52,13 @@ export class CreateCallBotDto {
   @IsUUID('4') @IsOptional()
   voiceCatalogId?: string;
 
+  // Accept both camelCase (TS convention) and snake_case (sent by frontend)
   @IsObject() @IsOptional()
   visualConfig?: Record<string, any>;
+
+  @IsObject() @IsOptional()
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  visual_config?: Record<string, any>;
 }
 
 export class UpdateCallBotDto {
@@ -113,4 +118,8 @@ export class UpdateCallBotDto {
 
   @IsObject() @IsOptional()
   visualConfig?: Record<string, any>;
+
+  @IsObject() @IsOptional()
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  visual_config?: Record<string, any>;
 }

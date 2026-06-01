@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import Link from 'next/link';
 import {
   getContacts, exportAllContacts, createContact, deleteContact, importContactsCsv, addContactTag, getTags,
@@ -103,6 +103,13 @@ export default function ContactsPage() {
   const [error,     setError]     = useState('');
   const [search,    setSearch]    = useState('');
   const [exporting, setExporting] = useState(false);
+
+  // Only admin/owner can export the full contact database
+  const isAgent = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    try { return JSON.parse(localStorage.getItem('user') ?? '{}').role === 'agent'; } catch { return false; }
+  }, []);
+
   const [tags, setTags]                 = useState<Tag[]>([]);
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
 
@@ -394,21 +401,23 @@ export default function ContactsPage() {
             />
           </div>
 
-          <button
-            className="btn btn-secondary"
-            title={`${i.exportCSV} (todos)`}
-            disabled={exporting || total === 0}
-            onClick={async () => {
-              setExporting(true);
-              try {
-                const all = await exportAllContacts(search);
-                buildAndDownloadCsv(all);
-              } catch { alert(i.error); }
-              finally { setExporting(false); }
-            }}
-          >
-            {exporting ? `⏳ ${i.loading}` : `📤 ${i.exportCSV}${total > 0 ? ` (${total.toLocaleString()})` : ''}`}
-          </button>
+          {!isAgent && (
+            <button
+              className="btn btn-secondary"
+              title={`${i.exportCSV} (todos)`}
+              disabled={exporting || total === 0}
+              onClick={async () => {
+                setExporting(true);
+                try {
+                  const all = await exportAllContacts(search);
+                  buildAndDownloadCsv(all);
+                } catch { alert(i.error); }
+                finally { setExporting(false); }
+              }}
+            >
+              {exporting ? `⏳ ${i.loading}` : `📤 ${i.exportCSV}${total > 0 ? ` (${total.toLocaleString()})` : ''}`}
+            </button>
+          )}
 
           <input ref={csvInputRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={handleCsvChange} />
           <button className="btn btn-secondary" disabled={importing} onClick={() => csvInputRef.current?.click()}>
