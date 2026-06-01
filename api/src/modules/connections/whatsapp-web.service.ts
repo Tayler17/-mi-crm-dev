@@ -994,6 +994,18 @@ export class WhatsappWebService implements OnModuleInit {
           );
           await this.db.query(`DELETE FROM contacts WHERE id=$1`, [ghost.id]).catch(() => {});
           this.logger.log(`[wa_web] Ghost LID contact ${ghost.id} merged → ${contactId}`);
+          // After merging, deduplicate: if real contact now has >1 open conversation for this
+          // connection, resolve the older ones so only the most recent stays open.
+          await this.db.query(
+            `UPDATE conversations SET status='resolved', updated_at=NOW()
+             WHERE contact_id=$1 AND tenant_id=$2 AND connection_id=$3 AND status != 'resolved'
+             AND id != (
+               SELECT id FROM conversations
+               WHERE contact_id=$1 AND tenant_id=$2 AND connection_id=$3 AND status != 'resolved'
+               ORDER BY updated_at DESC LIMIT 1
+             )`,
+            [contactId, tId, connectionId],
+          ).catch(() => {});
         }
       } catch (e: any) {
         this.logger.warn(`[wa_web] Ghost-merge failed: ${e.message}`);
@@ -1020,6 +1032,17 @@ export class WhatsappWebService implements OnModuleInit {
           );
           await this.db.query(`DELETE FROM contacts WHERE id=$1`, [g.id]).catch(() => {});
           this.logger.log(`[wa_web] Ghost phone contact ${g.id} merged → ${contactId}`);
+          // Deduplicate open conversations after merge
+          await this.db.query(
+            `UPDATE conversations SET status='resolved', updated_at=NOW()
+             WHERE contact_id=$1 AND tenant_id=$2 AND connection_id=$3 AND status != 'resolved'
+             AND id != (
+               SELECT id FROM conversations
+               WHERE contact_id=$1 AND tenant_id=$2 AND connection_id=$3 AND status != 'resolved'
+               ORDER BY updated_at DESC LIMIT 1
+             )`,
+            [contactId, tId, connectionId],
+          ).catch(() => {});
         }
       } catch (e: any) {
         this.logger.warn(`[wa_web] Ghost-merge (phone) failed: ${e.message}`);

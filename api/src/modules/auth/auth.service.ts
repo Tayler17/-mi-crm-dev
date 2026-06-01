@@ -248,6 +248,17 @@ export class AuthService {
     return { availability };
   }
 
+  async updateMe(userId: string, tenantId: string, dto: { fullName?: string; avatarUrl?: string }) {
+    const update: Record<string, any> = {};
+    if (dto.fullName?.trim())        update.fullName  = dto.fullName.trim();
+    if (dto.avatarUrl !== undefined)  update.avatarUrl = dto.avatarUrl ?? null;
+    if (Object.keys(update).length)  await this.userRepo.update({ id: userId, tenantId }, update);
+    return this.userRepo.findOne({
+      where: { id: userId, tenantId },
+      select: ['id', 'fullName', 'email', 'role'] as any,
+    });
+  }
+
   // ── Users CRUD ────────────────────────────────────────────────────────────
 
   getUsers(tenantId: string) {

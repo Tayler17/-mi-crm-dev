@@ -240,12 +240,16 @@ export class ContactsController {
     return { data, total, page: p, limit: l };
   }
 
-  /** Export ALL contacts (no pagination) matching optional search — used for CSV download */
+  /** Export ALL contacts (no pagination) — admin/owner only, agents cannot download the database */
   @Get('export')
   async exportAll(
     @TenantId() tenantId: string,
     @Query('search') search = '',
+    @Request() req: any,
   ) {
+    if (req.user?.role === 'agent') {
+      throw new BadRequestException('Los agentes no tienen permiso para exportar contactos.');
+    }
     const s = (search ?? '').trim();
     const baseParams: any[] = [tenantId];
     let where = 'WHERE tenant_id = $1';

@@ -69,6 +69,17 @@ export class AuthController {
     return this.authService.setAvailability(req.user.id, tenantId, availability);
   }
 
+  /** Update own profile: name and/or avatar URL */
+  @Patch('me')
+  @UseGuards(JwtAuthGuard)
+  updateMe(
+    @Body() body: { fullName?: string; avatarUrl?: string },
+    @Request() req: any,
+    @TenantId() tenantId: string,
+  ) {
+    return this.authService.updateMe(req.user.id, tenantId, body);
+  }
+
   // ── Agents (for filters/selects) ─────────────────────────────────────────
 
   @Get('agents')

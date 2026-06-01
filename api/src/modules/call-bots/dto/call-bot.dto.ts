@@ -51,6 +51,9 @@ export class CreateCallBotDto {
 
   @IsUUID('4') @IsOptional()
   voiceCatalogId?: string;
+
+  @IsObject() @IsOptional()
+  visualConfig?: Record<string, any>;
 }
 
 export class UpdateCallBotDto {
@@ -107,4 +110,7 @@ export class UpdateCallBotDto {
 
   @IsUUID('4') @IsOptional()
   voiceCatalogId?: string;
+
+  @IsObject() @IsOptional()
+  visualConfig?: Record<string, any>;
 }

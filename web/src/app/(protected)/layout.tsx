@@ -151,6 +151,9 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   const [notifToast,    setNotifToast]    = useState('');
   const [lang,          setLang]          = useState<LangCode>('es');
   const [userMenuOpen,  setUserMenuOpen]  = useState(false);
+  const [profileOpen,   setProfileOpen]   = useState(false);
+  const [profileName,   setProfileName]   = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
   const [langMenuOpen,  setLangMenuOpen]  = useState(false);
   const [sidebarOpen,   setSidebarOpen]   = useState(false);
   const [availability,  setAvailability]  = useState('online');
@@ -630,6 +633,12 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                     </Link>
                   )}
 
+                  <button style={dropItemStyle} onClick={() => { setUserMenuOpen(false); setProfileName(user?.fullName ?? ''); setProfileOpen(true); }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}>
+                    👤 {lang === 'en' ? 'My profile' : lang === 'pt' ? 'Meu perfil' : 'Mi perfil'}
+                  </button>
+
                   <button style={dropItemStyle} onClick={() => { setUserMenuOpen(false); toggleNotif(); }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}>
@@ -662,6 +671,62 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
 
       {/* Global Search modal */}
       <GlobalSearch />
+
+      {/* Profile modal */}
+      {profileOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setProfileOpen(false)}>
+          <div style={{ background: 'var(--surface)', borderRadius: 14, padding: 28, width: 360, maxWidth: 'calc(100vw - 32px)', boxShadow: '0 8px 40px rgba(0,0,0,.25)' }}
+            onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 20px', fontSize: 16, fontWeight: 700 }}>
+              👤 {lang === 'en' ? 'My profile' : lang === 'pt' ? 'Meu perfil' : 'Mi perfil'}
+            </h3>
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+              {lang === 'en' ? 'Full name' : lang === 'pt' ? 'Nome completo' : 'Nombre completo'}
+            </label>
+            <input
+              className="form-input"
+              style={{ width: '100%', marginBottom: 20 }}
+              value={profileName}
+              onChange={(e) => setProfileName(e.target.value)}
+              placeholder={user?.fullName ?? ''}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button className="btn btn-secondary" onClick={() => setProfileOpen(false)}>
+                {lang === 'en' ? 'Cancel' : 'Cancelar'}
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={profileSaving || !profileName.trim()}
+                onClick={async () => {
+                  setProfileSaving(true);
+                  try {
+                    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+                    const token = typeof window !== 'undefined' ? localStorage.getItem('token') ?? '' : '';
+                    const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenantId') ?? '' : '';
+                    const res = await fetch(`${API_URL}/auth/me`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Tenant-ID': tenantId },
+                      body: JSON.stringify({ fullName: profileName.trim() }),
+                    });
+                    if (res.ok) {
+                      const updated = await res.json();
+                      if (typeof window !== 'undefined') {
+                        const stored = JSON.parse(localStorage.getItem('user') ?? '{}');
+                        localStorage.setItem('user', JSON.stringify({ ...stored, fullName: updated.fullName }));
+                      }
+                      setProfileOpen(false);
+                      window.location.reload(); // refresh header to show new name
+                    }
+                  } finally { setProfileSaving(false); }
+                }}
+              >
+                {profileSaving ? '⏳' : (lang === 'en' ? 'Save' : 'Guardar')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Notification toast */}
       {notifToast && (
