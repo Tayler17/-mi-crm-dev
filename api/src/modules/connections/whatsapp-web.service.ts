@@ -27,6 +27,13 @@ export class WhatsappWebService implements OnModuleInit {
    * mark it as read on WhatsApp only when a bot/agent actually replies.
    */
   private readonly pendingReadKeys = new Map<string, Map<string, any>>();
+  /**
+   * Per-identity serialization locks. Keyed by `${connectionId}:${cleanPhone}` so that
+   * two near-simultaneous messages from the SAME person (whether they arrive via the
+   * LID JID or the phone JID) never run their find-or-create logic concurrently — which
+   * is what spawns duplicate contacts/conversations.
+   */
+  private readonly identityLocks = new Map<string, Promise<any>>();
 
   constructor(
     @InjectDataSource() private readonly db: DataSource,
@@ -55,6 +62,102 @@ export class WhatsappWebService implements OnModuleInit {
     } catch (e: any) {
       this.logger.warn(`Failed to load WhatsApp Web sessions on startup: ${e.message}`);
     }
+
+    // Self-heal: merge ghost contacts, dedup open conversations, and install the
+    // unique-index safety net so duplicates can never be created again.
+    this.deduplicateConversations().catch((e: any) =>
+      this.logger.warn(`Conversation self-heal failed: ${e.message}`),
+    );
+  }
+
+  // ── In-process identity lock ─────────────────────────────────────────────────
+  /**
+   * Serializes async work by key. Chains each call after the previous one for the same
+   * key so the critical section (find-or-create contact + conversation) never overlaps
+   * for the same person, eliminating the duplicate-conversation race.
+   */
+  private async withIdentityLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.identityLocks.get(key) ?? Promise.resolve();
+    // Run fn after prev settles (success OR failure — one bad message must not block the next).
+    const result = prev.then(fn, fn);
+    // The map holds a stable, non-rejecting tail marker we can compare against later.
+    const tail = result.then(() => {}, () => {});
+    this.identityLocks.set(key, tail);
+    try {
+      return await result;
+    } finally {
+      // Only delete if no newer call chained on after us (avoids unbounded Map growth).
+      if (this.identityLocks.get(key) === tail) this.identityLocks.delete(key);
+    }
+  }
+
+  // ── LID ↔ phone mapping persistence ──────────────────────────────────────────
+  /** Upsert a LID→phone mapping and backfill any contacts/in-memory map. Safe to call often. */
+  private async persistLidMapping(connectionId: string, tenantId: string, lidDigits: string, phone: string) {
+    if (!lidDigits || !phone) return;
+    const mem = this.lidToPhone.get(connectionId);
+    if (mem) mem.set(lidDigits, phone);
+    await this.db.query(
+      `INSERT INTO wa_lid_map (connection_id, lid_digits, phone, updated_at)
+       VALUES ($1,$2,$3,NOW())
+       ON CONFLICT (connection_id, lid_digits) DO UPDATE SET phone=$3, updated_at=NOW()`,
+      [connectionId, lidDigits, phone],
+    ).catch(() => {});
+    await this.db.query(
+      `UPDATE contacts SET phone=$1, updated_at=NOW()
+       WHERE tenant_id=$2 AND (phone='lid:'||$3 OR phone=$3)`,
+      [phone, tenantId, lidDigits],
+    ).catch(() => {});
+  }
+
+  // ── Self-heal: dedup contacts/conversations + unique index ────────────────────
+  private async deduplicateConversations() {
+    // Step 1: merge ghost 'lid:%' contacts into their real phone contact (via wa_lid_map).
+    await this.db.query(`
+      WITH ghost AS (
+        SELECT c.id AS ghost_id, c.tenant_id, real.id AS real_id
+        FROM contacts c
+        JOIN wa_lid_map m ON c.phone = 'lid:' || m.lid_digits
+        JOIN contacts real ON real.tenant_id = c.tenant_id AND real.phone = m.phone AND real.id <> c.id
+      )
+      UPDATE conversations cv SET contact_id = g.real_id, updated_at = NOW()
+      FROM ghost g
+      WHERE cv.contact_id = g.ghost_id AND cv.tenant_id = g.tenant_id
+    `).catch((e: any) => this.logger.warn(`Self-heal step1 (move convs) failed: ${e.message}`));
+    await this.db.query(`
+      DELETE FROM contacts c
+      USING wa_lid_map m, contacts real
+      WHERE c.phone = 'lid:' || m.lid_digits
+        AND real.tenant_id = c.tenant_id AND real.phone = m.phone AND real.id <> c.id
+    `).catch((e: any) => this.logger.warn(`Self-heal step1 (del ghosts) failed: ${e.message}`));
+
+    // Step 2: for each (tenant, connection, contact) keep only the most recent open conv.
+    // Scoped to whatsapp_web so other channels (email threads, etc.) are never collapsed.
+    await this.db.query(`
+      UPDATE conversations c SET status='resolved', updated_at=NOW()
+      WHERE c.status <> 'resolved'
+        AND c.channel_type = 'whatsapp_web'
+        AND c.contact_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM conversations c2
+          WHERE c2.tenant_id = c.tenant_id
+            AND c2.connection_id IS NOT DISTINCT FROM c.connection_id
+            AND c2.contact_id = c.contact_id
+            AND c2.channel_type = 'whatsapp_web'
+            AND c2.status <> 'resolved'
+            AND (c2.updated_at > c.updated_at OR (c2.updated_at = c.updated_at AND c2.id > c.id))
+        )
+    `).catch((e: any) => this.logger.warn(`Self-heal step2 (dedup convs) failed: ${e.message}`));
+
+    // Step 3: install the unique-index safety net (only succeeds once dupes are gone).
+    // Scoped to whatsapp_web to avoid constraining other channels.
+    await this.db.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_open_conv_per_contact
+      ON conversations (tenant_id, connection_id, contact_id)
+      WHERE status <> 'resolved' AND contact_id IS NOT NULL AND channel_type = 'whatsapp_web'
+    `).catch((e: any) => this.logger.warn(`Self-heal step3 (unique index) failed: ${e.message}`));
+
+    this.logger.log('[wa_web] Conversation self-heal completed');
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -534,19 +637,8 @@ export class WhatsappWebService implements OnModuleInit {
       const saveLidMapping = (lid: string, phone: string) => {
         if (!lid || !phone) return;
         lidMap.set(lid, phone);
-        // Persist to DB so it survives API restarts
-        this.db.query(
-          `INSERT INTO wa_lid_map (connection_id, lid_digits, phone, updated_at)
-           VALUES ($1,$2,$3,NOW())
-           ON CONFLICT (connection_id, lid_digits) DO UPDATE SET phone=$3, updated_at=NOW()`,
-          [connectionId, lid, phone],
-        ).catch(() => {});
-        // Backfill any contacts already stored with this LID
-        this.db.query(
-          `UPDATE contacts SET phone=$1, updated_at=NOW()
-           WHERE tenant_id=$2 AND (phone='lid:'||$3 OR phone=$3)`,
-          [phone, tenantId, lid],
-        ).catch(() => {});
+        // Delegate DB upsert + contact backfill to the shared method
+        this.persistLidMapping(connectionId, tenantId, lid, phone).catch(() => {});
       };
 
       const processContacts = (contacts: any[]) => {
@@ -601,7 +693,10 @@ export class WhatsappWebService implements OnModuleInit {
       });
 
       // ── Incoming messages ─────────────────────────────────────────────────
-
+      // Process the batch sequentially to preserve message order within an event.
+      // The duplicate-conversation race is handled deeper, inside handleIncomingMessage,
+      // via withIdentityLock() keyed by the RESOLVED phone (so LID and phone variants
+      // of the same person serialize even though their raw JIDs differ).
       sock.ev.on('messages.upsert', async ({ messages, type }: any) => {
         if (type !== 'notify') return;
         for (const msg of messages) {
@@ -905,15 +1000,40 @@ export class WhatsappWebService implements OnModuleInit {
     const isLid = normalizedJid.endsWith('@lid');
     const rawDigits = normalizedJid.replace(/@s\.whatsapp\.net$/, '').replace(/@lid$/, '');
 
+    // Resolve the connection's tenant/inbox up front (needed for mapping backfill below)
+    const [conn] = await this.db.query(
+      `SELECT inbox_id, tenant_id FROM channel_connections WHERE id=$1 LIMIT 1`,
+      [connectionId],
+    );
+    if (!conn) return;
+    const inboxId = conn.inbox_id ?? null;
+    const tId     = tenantId || conn.tenant_id;
+
+    // ── Resolve LID ↔ phone directly from the message key ────────────────────
+    // Baileys 6.7.x puts the counterpart identifier on msg.key: when remoteJid is a
+    // LID, key.senderPn carries the real phone; when remoteJid is a phone, key.senderLid
+    // carries the LID. Using these resolves identity on the FIRST message — no need to
+    // wait for contacts.upsert — which is what prevents the LID/phone duplicate split.
+    const keySenderPn  = String(msg.key?.senderPn  ?? '').replace(/@s\.whatsapp\.net$/, '').replace(/\D/g, '');
+    const keySenderLid = String(msg.key?.senderLid ?? '').replace(/@lid$/, '').replace(/\D/g, '');
+    if (msg.key?.senderPn || msg.key?.senderLid) {
+      this.logger.log(`[wa_web] key identity: remoteJid=${normalizedJid} senderPn=${keySenderPn || '-'} senderLid=${keySenderLid || '-'}`);
+    }
+
     let cleanPhone: string;
     let resolvedJid = normalizedJid; // JID used for routing replies
     let realPhone: string | undefined; // set when LID resolves to a real phone number
 
     if (isLid) {
-      // 1st: check in-memory map (populated by contacts.upsert)
-      realPhone = lidMap?.get(rawDigits);
+      // 1st: real phone straight from the message key (most reliable, available on msg #1)
+      if (keySenderPn) {
+        realPhone = keySenderPn;
+        await this.persistLidMapping(connectionId, tId, rawDigits, keySenderPn).catch(() => {});
+      }
+      // 2nd: in-memory map (populated by contacts.upsert)
+      if (!realPhone) realPhone = lidMap?.get(rawDigits);
 
-      // 2nd: if not in memory, check persistent DB map (survives restarts)
+      // 3rd: persistent DB map (survives restarts)
       if (!realPhone) {
         const [dbRow] = await this.db.query(
           `SELECT phone FROM wa_lid_map WHERE connection_id=$1 AND lid_digits=$2 LIMIT 1`,
@@ -934,24 +1054,27 @@ export class WhatsappWebService implements OnModuleInit {
     } else {
       cleanPhone  = rawDigits;
       resolvedJid = normalizedJid;
+      // Message arrived via phone JID but key carries the LID → record the mapping so
+      // future LID-addressed messages from this person resolve immediately.
+      if (keySenderLid) {
+        await this.persistLidMapping(connectionId, tId, keySenderLid, rawDigits).catch(() => {});
+      }
     }
     const pushName = msg.pushName ?? cleanPhone;
 
-    const [conn] = await this.db.query(
-      `SELECT inbox_id, tenant_id FROM channel_connections WHERE id=$1 LIMIT 1`,
-      [connectionId],
-    );
-    if (!conn) return;
-
-    const inboxId = conn.inbox_id ?? null;
-    const tId     = tenantId || conn.tenant_id;
+    // ── Critical section: find-or-create contact + conversation ──────────────
+    // Serialized per resolved identity (connection + cleanPhone) so two
+    // near-simultaneous messages from the same person can't both create records.
+    let contactId!: string;
+    let conversationId!: string;
+    let isNew = false;
+    await this.withIdentityLock(`${connectionId}:${cleanPhone}`, async () => {
 
     // 1. Find or create contact — look up by cleanPhone, normalizedJid, old lid: prefix, or +prefix variant
     const [existingContact] = await this.db.query(
       `SELECT id FROM contacts WHERE tenant_id=$1 AND (phone=$2 OR phone=$3 OR phone=$4 OR phone='+' || $2) LIMIT 1`,
       [tId, cleanPhone, normalizedJid, `lid:${rawDigits}`],
     );
-    let contactId: string;
     if (existingContact) {
       contactId = existingContact.id;
       // Backfill: fix stored phone if it's a raw JID, an old lid:prefix, or bare LID digits
@@ -1060,8 +1183,6 @@ export class WhatsappWebService implements OnModuleInit {
        ORDER BY created_at DESC LIMIT 1`,
       [tId, contactId, connectionId, normalizedJid, resolvedJid],
     );
-    let conversationId: string;
-    let isNew = false;
     if (existingConv) {
       conversationId = existingConv.id;
       // If the conversation was stored with a LID JID but we now know the real phone,
@@ -1078,14 +1199,40 @@ export class WhatsappWebService implements OnModuleInit {
         ? pushName
         : cleanPhone;
 
-      const [newConv] = await this.db.query(
-        `INSERT INTO conversations
-           (tenant_id, contact_id, inbox_id, connection_id, external_id, channel_type, status, subject, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,'whatsapp_web','open',$6,NOW(),NOW()) RETURNING id`,
-        [tId, contactId, inboxId, connectionId, resolvedJid, autoSubject],
-      );
-      conversationId = newConv.id;
-      isNew = true;
+      // The identity-lock above serializes this section per person, so the SELECT/INSERT
+      // is race-free within the process. The unique index uq_open_conv_per_contact is a
+      // hard DB guard: if a duplicate ever slips through, the insert throws 23505 and we
+      // recover by re-selecting the existing open conversation.
+      try {
+        const [newConv] = await this.db.query(
+          `INSERT INTO conversations
+             (tenant_id, contact_id, inbox_id, connection_id, external_id, channel_type, status, subject, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,'whatsapp_web','open',$6,NOW(),NOW()) RETURNING id`,
+          [tId, contactId, inboxId, connectionId, resolvedJid, autoSubject],
+        );
+        conversationId = newConv.id;
+        isNew = true;
+      } catch (e: any) {
+        if (e?.code === '23505') {
+          const [raced] = await this.db.query(
+            `SELECT id FROM conversations
+             WHERE tenant_id=$1 AND connection_id=$2 AND contact_id=$3 AND status <> 'resolved'
+             ORDER BY created_at DESC LIMIT 1`,
+            [tId, connectionId, contactId],
+          );
+          conversationId = raced?.id;
+          this.logger.log(`[wa_web] Duplicate insert blocked by unique index → reused conv ${conversationId}`);
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    }); // end withIdentityLock
+
+    if (!conversationId) {
+      this.logger.warn(`[wa_web] No conversationId resolved for ${cleanPhone} — skipping`);
+      return;
     }
 
     // 3. Dedup
