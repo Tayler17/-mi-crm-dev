@@ -92,7 +92,12 @@ export class WhatsappWebService implements OnModuleInit {
   }
 
   // ── LID ↔ phone mapping persistence ──────────────────────────────────────────
-  /** Upsert a LID→phone mapping and backfill any contacts/in-memory map. Safe to call often. */
+  /**
+   * Upsert a LID→phone mapping, then reconcile contacts: pick a single canonical contact
+   * for this person (real-phone contact, oldest) and merge any LID ghost / duplicate into
+   * it. This avoids the "rename ghost to a phone that already exists" bug that produced
+   * two contact records with the same phone (and thus duplicate conversations).
+   */
   private async persistLidMapping(connectionId: string, tenantId: string, lidDigits: string, phone: string) {
     if (!lidDigits || !phone) return;
     const mem = this.lidToPhone.get(connectionId);
@@ -103,11 +108,26 @@ export class WhatsappWebService implements OnModuleInit {
        ON CONFLICT (connection_id, lid_digits) DO UPDATE SET phone=$3, updated_at=NOW()`,
       [connectionId, lidDigits, phone],
     ).catch(() => {});
-    await this.db.query(
-      `UPDATE contacts SET phone=$1, updated_at=NOW()
-       WHERE tenant_id=$2 AND (phone='lid:'||$3 OR phone=$3)`,
-      [phone, tenantId, lidDigits],
-    ).catch(() => {});
+
+    // All contact rows that belong to this person: the real phone OR the LID variants.
+    const rows: any[] = await this.db.query(
+      `SELECT id, phone FROM contacts
+       WHERE tenant_id=$1 AND (phone=$2 OR phone='lid:'||$3 OR phone=$3)
+       ORDER BY (phone NOT LIKE 'lid:%') DESC, created_at ASC, id ASC`,
+      [tenantId, phone, lidDigits],
+    ).catch(() => []);
+    if (!rows.length) return; // no contact yet — handler will create one with the real phone
+
+    const canonicalId = rows[0].id;
+    // Make sure the canonical row carries the real phone (not a lid: value)
+    if (rows[0].phone !== phone) {
+      await this.db.query(`UPDATE contacts SET phone=$1, updated_at=NOW() WHERE id=$2`, [phone, canonicalId]).catch(() => {});
+    }
+    // Merge every other duplicate into the canonical contact, then remove it.
+    for (const r of rows.slice(1)) {
+      await this.db.query(`UPDATE conversations SET contact_id=$1, updated_at=NOW() WHERE contact_id=$2 AND tenant_id=$3`, [canonicalId, r.id, tenantId]).catch(() => {});
+      await this.db.query(`DELETE FROM contacts WHERE id=$1`, [r.id]).catch(() => {});
+    }
   }
 
   // ── Self-heal: dedup contacts/conversations + unique index ────────────────────
@@ -130,6 +150,21 @@ export class WhatsappWebService implements OnModuleInit {
       WHERE c.phone = 'lid:' || m.lid_digits
         AND real.tenant_id = c.tenant_id AND real.phone = m.phone AND real.id <> c.id
     `).catch((e: any) => this.logger.warn(`Self-heal step1 (del ghosts) failed: ${e.message}`));
+
+    // Step 1c: merge contacts that share the SAME real phone (keep the oldest as canonical,
+    // move every other one's conversations onto it). This collapses the duplicate contact
+    // records (e.g. an ex-LID-ghost renamed to the real phone + an existing phone contact).
+    await this.db.query(`
+      WITH ranked AS (
+        SELECT id, tenant_id, phone,
+               first_value(id) OVER (PARTITION BY tenant_id, phone ORDER BY created_at ASC, id ASC) AS canonical
+        FROM contacts
+        WHERE phone IS NOT NULL AND phone <> '' AND phone NOT LIKE 'lid:%'
+      )
+      UPDATE conversations cv SET contact_id = r.canonical, updated_at = NOW()
+      FROM ranked r
+      WHERE cv.contact_id = r.id AND r.id <> r.canonical
+    `).catch((e: any) => this.logger.warn(`Self-heal step1c (merge dup contacts) failed: ${e.message}`));
 
     // Step 2: for each (tenant, connection, contact) keep only the most recent open conv.
     // Scoped to whatsapp_web so other channels (email threads, etc.) are never collapsed.
@@ -1070,9 +1105,12 @@ export class WhatsappWebService implements OnModuleInit {
     let isNew = false;
     await this.withIdentityLock(`${connectionId}:${cleanPhone}`, async () => {
 
-    // 1. Find or create contact — look up by cleanPhone, normalizedJid, old lid: prefix, or +prefix variant
+    // 1. Find or create contact. Deterministic ordering — prefer a real-phone contact
+    // over a lid: ghost, then oldest — so repeated messages always resolve to the SAME
+    // contact even when duplicate records temporarily coexist.
     const [existingContact] = await this.db.query(
-      `SELECT id FROM contacts WHERE tenant_id=$1 AND (phone=$2 OR phone=$3 OR phone=$4 OR phone='+' || $2) LIMIT 1`,
+      `SELECT id FROM contacts WHERE tenant_id=$1 AND (phone=$2 OR phone=$3 OR phone=$4 OR phone='+' || $2)
+       ORDER BY (phone NOT LIKE 'lid:%') DESC, created_at ASC, id ASC LIMIT 1`,
       [tId, cleanPhone, normalizedJid, `lid:${rawDigits}`],
     );
     if (existingContact) {
@@ -1172,19 +1210,27 @@ export class WhatsappWebService implements OnModuleInit {
       }
     }
 
-    // 2. Find or create open conversation.
-    // Check by contact_id first; also fall back to external_id match so that if the
-    // same sender previously used a different JID type (phone vs LID) the existing
-    // open conversation is reused instead of spawning a duplicate.
+    // 2. Find or reuse the conversation for this contact.
+    // Look up the LATEST conversation for this contact/connection REGARDLESS of status,
+    // preferring a non-resolved one. If the only match is resolved (e.g. the AI bot closed
+    // it), REOPEN that same conversation instead of spawning a new one — so a returning
+    // customer always stays in a single continuous thread.
     const [existingConv] = await this.db.query(
-      `SELECT id FROM conversations
-       WHERE tenant_id=$1 AND connection_id=$3 AND status != 'resolved'
+      `SELECT id, status FROM conversations
+       WHERE tenant_id=$1 AND connection_id=$3
        AND (contact_id=$2 OR external_id=$4 OR external_id=$5)
-       ORDER BY created_at DESC LIMIT 1`,
+       ORDER BY (status <> 'resolved') DESC, updated_at DESC, created_at DESC LIMIT 1`,
       [tId, contactId, connectionId, normalizedJid, resolvedJid],
     );
     if (existingConv) {
       conversationId = existingConv.id;
+      if (existingConv.status === 'resolved') {
+        await this.db.query(
+          `UPDATE conversations SET status='open', updated_at=NOW() WHERE id=$1`,
+          [conversationId],
+        ).catch(() => {});
+        this.logger.log(`[wa_web] Reopened resolved conv ${conversationId} for ${cleanPhone}`);
+      }
       // If the conversation was stored with a LID JID but we now know the real phone,
       // backfill the external_id so future outbound delivery uses the correct JID.
       if (resolvedJid !== remoteJid) {
