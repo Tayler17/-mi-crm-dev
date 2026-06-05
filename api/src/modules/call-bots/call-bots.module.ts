@@ -10,11 +10,13 @@ import { ElevenLabsTtsService } from './elevenlabs-tts.service';
 import { SettingsModule } from '../settings/settings.module';
 import { BotActionsService } from './bot-actions.service';
 import { KnowledgeBaseModule } from '../knowledge-base/knowledge-base.module';
+import { PhoneNumbersService } from './phone-numbers.service';
+import { PhoneNumbersController } from './phone-numbers.controller';
 
 @Module({
   imports: [TypeOrmModule.forFeature([CallBot, CallLog]), SettingsModule, KnowledgeBaseModule],
-  controllers: [CallBotsController, CallBotWebhooksController],
-  providers: [CallBotsService, CallBotTwilioService, BotActionsService, ElevenLabsTtsService],
+  controllers: [CallBotsController, CallBotWebhooksController, PhoneNumbersController],
+  providers: [CallBotsService, CallBotTwilioService, BotActionsService, ElevenLabsTtsService, PhoneNumbersService],
   exports: [CallBotsService],
 })
 export class CallBotsModule {}

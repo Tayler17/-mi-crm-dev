@@ -23,6 +23,10 @@ import {
   updateVoice,
   deleteVoice,
   improveAiChatbotPrompt,
+  searchPhoneNumbers,
+  getMyPhoneNumbers,
+  buyPhoneNumber,
+  releasePhoneNumber,
   API_URL,
   CallBot,
   CallLog,
@@ -31,6 +35,8 @@ import {
   type Inbox,
   type KnowledgeSource,
   type Voice,
+  type AvailableNumber,
+  type OwnedNumber,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
 import { APP } from '@/lib/i18n/app';
@@ -1272,6 +1278,8 @@ export default function CallBotsPage() {
   const i = APP[lang];
 
   const [isOwner, setIsOwner] = useState(false);
+  const [canManage, setCanManage] = useState(false); // admin or owner — can buy numbers
+  const [numModalOpen, setNumModalOpen] = useState(false);
 
   const [bots, setBots] = useState<CallBot[]>([]);
   const [logs, setLogs] = useState<CallLog[]>([]);
@@ -1294,7 +1302,11 @@ export default function CallBotsPage() {
   const [platformPhoneNumbers, setPlatformPhoneNumbers] = useState<string[]>([]);
 
   useEffect(() => {
-    try { setIsOwner(JSON.parse(localStorage.getItem('user') ?? '{}').role === 'owner'); } catch {}
+    try {
+      const role = JSON.parse(localStorage.getItem('user') ?? '{}').role;
+      setIsOwner(role === 'owner');
+      setCanManage(role === 'owner' || role === 'admin');
+    } catch {}
     load();
   }, []);
   useEffect(() => {
@@ -1376,9 +1388,16 @@ export default function CallBotsPage() {
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Call Bots</h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>{i.callBotsSubtitle}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>
-          {i.newCallBot}
-        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {canManage && (
+            <button className="btn btn-secondary" onClick={() => setNumModalOpen(true)}>
+              📞 Comprar número
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true); }}>
+            {i.newCallBot}
+          </button>
+        </div>
       </div>
 
       {/* Twilio setup guide — full instructions only for owner, simple notice for tenants */}
@@ -1393,10 +1412,16 @@ export default function CallBotsPage() {
           </ol>
         </div>
       )}
-      {platformPhoneNumbers.length === 0 && !isOwner && (
+      {platformPhoneNumbers.length === 0 && !isOwner && canManage && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '12px 16px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, marginBottom: 20, fontSize: 13, color: '#1e40af' }}>
+          <span style={{ fontSize: 18 }}>📞</span>
+          <span>Aún no tienes un número de teléfono. Haz clic en <strong>"Comprar número"</strong> arriba para elegir uno y activar tus bots de llamada.</span>
+        </div>
+      )}
+      {platformPhoneNumbers.length === 0 && !canManage && (
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '12px 16px', background: '#fef9c3', border: '1px solid #fde047', borderRadius: 10, marginBottom: 20, fontSize: 13, color: '#92400e' }}>
           <span style={{ fontSize: 18 }}>📞</span>
-          <span>No hay números de teléfono disponibles aún para los bots de llamada. El administrador debe añadir un número en la configuración de la plataforma para activar esta función.</span>
+          <span>No hay números de teléfono disponibles aún. Pide a un administrador que compre uno para activar los bots de llamada.</span>
         </div>
       )}
 
@@ -1615,6 +1640,10 @@ export default function CallBotsPage() {
         <DialModal bot={dialBot} onClose={() => setDialBot(null)} />
       )}
 
+      {numModalOpen && (
+        <PhoneNumberModal onClose={() => setNumModalOpen(false)} onChanged={load} />
+      )}
+
       {voiceModalOpen && isOwner && (
         <div className="modal-overlay" onClick={() => setVoiceModalOpen(false)}>
           <div className="modal" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
@@ -1682,6 +1711,162 @@ export default function CallBotsPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Buy / manage phone numbers ──────────────────────────────────────────────────
+
+const COUNTRY_OPTIONS = [
+  { code: 'US', label: '🇺🇸 Estados Unidos' },
+  { code: 'CA', label: '🇨🇦 Canadá' },
+  { code: 'GB', label: '🇬🇧 Reino Unido' },
+  { code: 'ES', label: '🇪🇸 España' },
+  { code: 'MX', label: '🇲🇽 México' },
+  { code: 'AU', label: '🇦🇺 Australia' },
+];
+
+function PhoneNumberModal({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const [owned, setOwned] = useState<OwnedNumber[]>([]);
+  const [country, setCountry] = useState('US');
+  const [type, setType] = useState('local');
+  const [areaCode, setAreaCode] = useState('');
+  const [results, setResults] = useState<AvailableNumber[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [buying, setBuying] = useState('');
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+
+  const loadOwned = () => { getMyPhoneNumbers().then(setOwned).catch(() => {}); };
+  useEffect(() => { loadOwned(); }, []);
+
+  async function handleSearch() {
+    setSearching(true); setError(''); setResults([]); setInfo('');
+    try {
+      const r = await searchPhoneNumbers({ country, type, areaCode: areaCode.trim() || undefined });
+      setResults(r);
+      if (!r.length) setInfo('No se encontraron números con esos filtros. Prueba otro código de área o país.');
+    } catch (e: any) {
+      setError(e?.message || 'Error al buscar números');
+    } finally { setSearching(false); }
+  }
+
+  async function handleBuy(n: AvailableNumber) {
+    if (!confirm(`¿Comprar ${n.phoneNumber}? Esto genera un cargo mensual en tu cuenta Twilio.`)) return;
+    setBuying(n.phoneNumber); setError('');
+    try {
+      await buyPhoneNumber(n.phoneNumber, country);
+      setResults((prev) => prev.filter((x) => x.phoneNumber !== n.phoneNumber));
+      setInfo(`✅ ${n.phoneNumber} comprado y listo para asignar a un bot.`);
+      loadOwned();
+      onChanged();
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo comprar el número');
+    } finally { setBuying(''); }
+  }
+
+  async function handleRelease(num: OwnedNumber) {
+    if (!confirm(`¿Liberar ${num.phone_number}? Dejará de funcionar y se elimina de Twilio.`)) return;
+    setError('');
+    try {
+      await releasePhoneNumber(num.id);
+      loadOwned();
+      onChanged();
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo liberar el número');
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 style={{ margin: 0, fontSize: 18 }}>📞 Números de teléfono</h2>
+          <button className="btn btn-ghost" onClick={onClose}>✕</button>
+        </div>
+
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {/* Owned numbers */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Tus números</div>
+            {owned.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Aún no tienes números. Busca y compra uno abajo.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {owned.map((n) => (
+                  <div key={n.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 8 }}>
+                    <div>
+                      <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>{n.phone_number}</span>
+                      {n.country && <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>{n.country}</span>}
+                    </div>
+                    <button className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: 11, color: 'var(--danger)' }} onClick={() => handleRelease(n)}>Liberar</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: 0 }} />
+
+          {/* Search */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Comprar un número nuevo</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div className="form-group" style={{ margin: 0, flex: 1, minWidth: 160 }}>
+                <label className="form-label">País</label>
+                <select className="form-input" value={country} onChange={(e) => setCountry(e.target.value)}>
+                  {COUNTRY_OPTIONS.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{ margin: 0, width: 120 }}>
+                <label className="form-label">Tipo</label>
+                <select className="form-input" value={type} onChange={(e) => setType(e.target.value)}>
+                  <option value="local">Local</option>
+                  <option value="mobile">Móvil</option>
+                  <option value="tollFree">Gratuito</option>
+                </select>
+              </div>
+              <div className="form-group" style={{ margin: 0, width: 130 }}>
+                <label className="form-label">Código área</label>
+                <input className="form-input" value={areaCode} onChange={(e) => setAreaCode(e.target.value)} placeholder="ej. 305" />
+              </div>
+              <button className="btn btn-primary" disabled={searching} onClick={handleSearch} style={{ height: 38 }}>
+                {searching ? 'Buscando…' : 'Buscar'}
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+              US/Canadá: compra inmediata. Otros países pueden requerir verificación regulatoria (bundle).
+            </div>
+          </div>
+
+          {error && <div style={{ padding: '8px 12px', background: '#fee2e2', color: '#dc2626', borderRadius: 8, fontSize: 13 }}>❌ {error}</div>}
+          {info && <div style={{ padding: '8px 12px', background: '#dcfce7', color: '#15803d', borderRadius: 8, fontSize: 13 }}>{info}</div>}
+
+          {/* Results */}
+          {results.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
+              {results.map((n) => (
+                <div key={n.phoneNumber} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontFamily: 'monospace' }}>{n.phoneNumber}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      {[n.locality, n.region, n.country].filter(Boolean).join(', ')}
+                      {n.capabilities?.voice ? ' · 📞 Voz' : ''}{n.capabilities?.SMS ? ' · 💬 SMS' : ''}
+                    </div>
+                  </div>
+                  <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: 12 }} disabled={!!buying} onClick={() => handleBuy(n)}>
+                    {buying === n.phoneNumber ? 'Comprando…' : 'Comprar'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cerrar</button>
+        </div>
+      </div>
     </div>
   );
 }

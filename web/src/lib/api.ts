@@ -697,6 +697,36 @@ export const getCallBotStats = () => apiGet<CallBotStats>('/call-bots/stats');
 export const initiateCall = (botId: string, toNumber: string) =>
   apiPost<{ callSid: string; status: string }>(`/call-bots/${botId}/call`, { toNumber });
 
+// ── Phone numbers (on-demand Twilio provisioning) ──────────────────────────────
+
+export interface AvailableNumber {
+  phoneNumber: string;
+  friendlyName: string;
+  locality: string;
+  region: string;
+  country: string;
+  capabilities: { voice?: boolean; SMS?: boolean; MMS?: boolean };
+}
+export interface OwnedNumber {
+  id: string;
+  phone_number: string;
+  phone_sid: string;
+  country: string | null;
+  friendly_name: string | null;
+  status: string;
+  created_at: string;
+}
+export const searchPhoneNumbers = (params: { country?: string; type?: string; areaCode?: string; contains?: string }) => {
+  const qs = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v) as [string, string][],
+  ).toString();
+  return apiGet<AvailableNumber[]>(`/phone-numbers/search?${qs}`);
+};
+export const getMyPhoneNumbers = () => apiGet<OwnedNumber[]>('/phone-numbers');
+export const buyPhoneNumber = (phoneNumber: string, country?: string) =>
+  apiPost<OwnedNumber>('/phone-numbers/buy', { phoneNumber, country });
+export const releasePhoneNumber = (id: string) => apiDelete(`/phone-numbers/${id}`);
+
 // ── Campaigns ─────────────────────────────────────────────────────────────────
 
 export interface Campaign {

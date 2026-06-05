@@ -235,10 +235,19 @@ export class PlatformSettingsService {
       }
     }
 
-    const all = await this.getPhoneNumbers();
-    if (!all.length) return [];
+    // The tenant's own on-demand purchased numbers (Option A) — always available to them.
+    const purchasedRows: Array<{ phone_number: string }> = tenantId
+      ? await db.query(
+          `SELECT phone_number FROM tenant_phone_numbers WHERE tenant_id::text=$1 AND status='active'`,
+          [tenantId],
+        ).catch(() => [])
+      : [];
+    const purchased = purchasedRows.map((r) => r.phone_number);
 
-    // Numbers assigned to OTHER tenants are taken
+    // Shared static pool (owner-provisioned numbers)
+    const all = await this.getPhoneNumbers();
+
+    // Numbers assigned to OTHER tenants are taken (shared pool only)
     const usedByOthers: Array<{ phone_number: string }> = await db.query(
       `SELECT DISTINCT phone_number FROM call_bots
        WHERE phone_number IS NOT NULL AND status != 'deleted'
@@ -246,19 +255,10 @@ export class PlatformSettingsService {
       tenantId ? [tenantId] : [],
     );
     const takenSet = new Set(usedByOthers.map((r) => r.phone_number));
+    const poolAvailable = all.filter((n) => !takenSet.has(n));
 
-    // If this tenant already has a number, only show that one
-    if (tenantId) {
-      const [existing] = await db.query(
-        `SELECT phone_number FROM call_bots
-         WHERE tenant_id::text = $1 AND phone_number IS NOT NULL AND status != 'deleted'
-         LIMIT 1`,
-        [tenantId],
-      );
-      if (existing?.phone_number) return [existing.phone_number];
-    }
-
-    return all.filter((n) => !takenSet.has(n));
+    // Purchased numbers first, then any free shared-pool numbers; de-duplicated.
+    return Array.from(new Set([...purchased, ...poolAvailable]));
   }
 
   /**
