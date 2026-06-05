@@ -19,11 +19,22 @@ export class CallBotsService {
     private readonly platformSettings: PlatformSettingsService,
   ) {}
 
-  findAll(tenantId: string) {
-    return this.db.query(
+  /** Convert a raw snake_case DB row to the camelCase shape the frontend expects. */
+  private toCamel<T = any>(row: any): T {
+    if (!row || typeof row !== 'object') return row;
+    const out: any = {};
+    for (const [k, v] of Object.entries(row)) {
+      out[k.replace(/_([a-z])/g, (_, c) => c.toUpperCase())] = v;
+    }
+    return out;
+  }
+
+  async findAll(tenantId: string) {
+    const rows = await this.db.query(
       `SELECT * FROM call_bots WHERE tenant_id::text = $1 ORDER BY created_at DESC`,
       [tenantId],
     );
+    return rows.map((r: any) => this.toCamel(r));
   }
 
   async findOne(id: string, tenantId: string) {
@@ -32,7 +43,7 @@ export class CallBotsService {
       [id, tenantId],
     );
     if (!bot) throw new NotFoundException('Call bot not found');
-    return bot;
+    return this.toCamel(bot);
   }
 
   async create(dto: CreateCallBotDto, tenantId: string, userId?: string) {
