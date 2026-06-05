@@ -93,8 +93,14 @@ export class PhoneNumbersService implements OnModuleInit {
     const typePath = type === 'tollFree' ? 'TollFree' : type === 'mobile' ? 'Mobile' : 'Local';
 
     const params: Record<string, string> = { PageSize: '20', VoiceEnabled: 'true' };
-    if (opts.areaCode) params.AreaCode = opts.areaCode.replace(/\D/g, '');
-    if (opts.contains) params.Contains = opts.contains;
+    // Twilio's AreaCode filter only works for US/CA. For every other country use the
+    // input as a Contains pattern (matches digits inside the number). Strip any leading
+    // country code the user may have typed (e.g. "+447" → "447" still matches UK mobiles).
+    const filterDigits = (opts.areaCode || opts.contains || '').replace(/\D/g, '');
+    if (filterDigits) {
+      if (country === 'US' || country === 'CA') params.AreaCode = filterDigits;
+      else params.Contains = filterDigits;
+    }
 
     const qs = new URLSearchParams(params).toString();
     const path = `/2010-04-01/Accounts/${sid}/AvailablePhoneNumbers/${country}/${typePath}.json?${qs}`;
