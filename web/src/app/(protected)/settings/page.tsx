@@ -869,6 +869,7 @@ export default function SettingsPage() {
   const [platformForm, setPlatformForm] = useState({
     'ai.provider': 'openai', 'ai.api_key': '', 'ai.model': '',
     'voice.provider': 'twilio', 'voice.account_sid': '', 'voice.auth_token': '', 'voice.phone_numbers': '',
+    'voice.bundle_sid': '', 'voice.address_sid': '',
     'meta.app_id': '', 'meta.app_secret': '', 'meta.verify_token': '',
     'elevenlabs.api_key': '',
     'stripe.secret_key': '', 'stripe.webhook_secret': '', 'stripe.publishable_key': '',
@@ -947,6 +948,8 @@ export default function SettingsPage() {
         'voice.account_sid':    p['voice.account_sid']?.value || '',
         'voice.auth_token':     p['voice.auth_token']?.masked ? '••••••••' : (p['voice.auth_token']?.value || ''),
         'voice.phone_numbers':  p['voice.phone_numbers']?.value || '',
+        'voice.bundle_sid':     p['voice.bundle_sid']?.value || '',
+        'voice.address_sid':    p['voice.address_sid']?.value || '',
         'meta.app_id':          p['meta.app_id']?.value       || '',
         'meta.app_secret':      p['meta.app_secret']?.masked       ? '••••••••' : (p['meta.app_secret']?.value || ''),
         'meta.verify_token':    p['meta.verify_token']?.masked     ? '••••••••' : (p['meta.verify_token']?.value || ''),
@@ -1665,6 +1668,21 @@ export default function SettingsPage() {
                 placeholder="+14155552671, +14155552672" />
               <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
                 Añade aquí cada número que hayas comprado en Twilio en formato E.164 (+1XXXXXXXXXX).
+              </div>
+            </Row>
+            <Row label="Bundle SID (regulatorio)" hint="Para comprar números de países que exigen verificación (UK, EU, LatAm). Lo obtienes en Twilio → Regulatory Compliance → Bundles.">
+              <input className="form-input" style={{ maxWidth: 400 }}
+                value={platformForm['voice.bundle_sid']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'voice.bundle_sid': e.target.value }))}
+                placeholder="BUxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+            </Row>
+            <Row label="Address SID (regulatorio)" hint="Dirección registrada en Twilio asociada al bundle. Twilio → Phone Numbers → Regulatory Compliance → Addresses.">
+              <input className="form-input" style={{ maxWidth: 400 }}
+                value={platformForm['voice.address_sid']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'voice.address_sid': e.target.value }))}
+                placeholder="ADxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                Necesarios solo para comprar números de países regulados (US/Canadá no los requieren).
               </div>
             </Row>
             <Row label="Webhook URLs" hint="Una sola URL global para todos los bots — enrutado automáticamente por número de teléfono">
