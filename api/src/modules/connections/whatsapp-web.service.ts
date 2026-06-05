@@ -132,6 +132,26 @@ export class WhatsappWebService implements OnModuleInit {
 
   // ── Self-heal: dedup contacts/conversations + unique index ────────────────────
   private async deduplicateConversations() {
+    // Step 0a: BEFORE moving ghost convs onto the real contact, resolve any open convs
+    // that would collide (real contact + its LID ghosts → keep only the newest open per
+    // connection). Prevents the unique-index violation during the reassignment below.
+    await this.db.query(`
+      WITH grp AS (
+        SELECT cv.id,
+               row_number() OVER (
+                 PARTITION BY real.id, cv.connection_id
+                 ORDER BY cv.updated_at DESC, cv.id DESC
+               ) AS rn
+        FROM conversations cv
+        JOIN contacts owner ON owner.id = cv.contact_id
+        JOIN wa_lid_map m ON owner.phone = 'lid:' || m.lid_digits OR owner.phone = m.phone
+        JOIN contacts real ON real.tenant_id = owner.tenant_id AND real.phone = m.phone
+        WHERE cv.status <> 'resolved' AND cv.channel_type = 'whatsapp_web'
+      )
+      UPDATE conversations SET status='resolved', updated_at=NOW()
+      FROM grp WHERE conversations.id = grp.id AND grp.rn > 1
+    `).catch((e: any) => this.logger.warn(`Self-heal step0a (pre-resolve lid) failed: ${e.message}`));
+
     // Step 1: merge ghost 'lid:%' contacts into their real phone contact (via wa_lid_map).
     await this.db.query(`
       WITH ghost AS (
@@ -151,6 +171,26 @@ export class WhatsappWebService implements OnModuleInit {
         AND real.tenant_id = c.tenant_id AND real.phone = m.phone AND real.id <> c.id
     `).catch((e: any) => this.logger.warn(`Self-heal step1 (del ghosts) failed: ${e.message}`));
 
+    // Step 1b: BEFORE merging same-phone contacts, resolve open convs that would collide —
+    // group every open whatsapp_web conv by (tenant, real phone, connection) across all the
+    // duplicate contacts and keep only the newest open. After this, reassigning to canonical
+    // can never create two open convs for the same contact.
+    await this.db.query(`
+      WITH grp AS (
+        SELECT cv.id,
+               row_number() OVER (
+                 PARTITION BY c.tenant_id, c.phone, cv.connection_id
+                 ORDER BY cv.updated_at DESC, cv.id DESC
+               ) AS rn
+        FROM conversations cv
+        JOIN contacts c ON c.id = cv.contact_id
+        WHERE cv.status <> 'resolved' AND cv.channel_type = 'whatsapp_web'
+          AND c.phone IS NOT NULL AND c.phone <> '' AND c.phone NOT LIKE 'lid:%'
+      )
+      UPDATE conversations SET status='resolved', updated_at=NOW()
+      FROM grp WHERE conversations.id = grp.id AND grp.rn > 1
+    `).catch((e: any) => this.logger.warn(`Self-heal step1b (pre-resolve phone) failed: ${e.message}`));
+
     // Step 1c: merge contacts that share the SAME real phone (keep the oldest as canonical,
     // move every other one's conversations onto it). This collapses the duplicate contact
     // records (e.g. an ex-LID-ghost renamed to the real phone + an existing phone contact).
@@ -165,6 +205,19 @@ export class WhatsappWebService implements OnModuleInit {
       FROM ranked r
       WHERE cv.contact_id = r.id AND r.id <> r.canonical
     `).catch((e: any) => this.logger.warn(`Self-heal step1c (merge dup contacts) failed: ${e.message}`));
+
+    // Step 1d: delete the now-empty duplicate contacts (conversations already moved to canonical).
+    await this.db.query(`
+      WITH ranked AS (
+        SELECT id, tenant_id, phone,
+               first_value(id) OVER (PARTITION BY tenant_id, phone ORDER BY created_at ASC, id ASC) AS canonical
+        FROM contacts
+        WHERE phone IS NOT NULL AND phone <> '' AND phone NOT LIKE 'lid:%'
+      )
+      DELETE FROM contacts c USING ranked r
+      WHERE c.id = r.id AND r.id <> r.canonical
+        AND NOT EXISTS (SELECT 1 FROM conversations cv WHERE cv.contact_id = c.id)
+    `).catch((e: any) => this.logger.warn(`Self-heal step1d (del dup contacts) failed: ${e.message}`));
 
     // Step 2: for each (tenant, connection, contact) keep only the most recent open conv.
     // Scoped to whatsapp_web so other channels (email threads, etc.) are never collapsed.
