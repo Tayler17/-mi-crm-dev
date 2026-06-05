@@ -135,7 +135,15 @@ export class PhoneNumbersService implements OnModuleInit {
     const [row] = await this.db.query(
       `INSERT INTO tenant_phone_numbers
          (tenant_id, phone_number, phone_sid, country, capabilities, friendly_name, monthly_price, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'active') RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'active')
+       ON CONFLICT (phone_sid) DO UPDATE SET
+         tenant_id    = EXCLUDED.tenant_id,
+         phone_number = EXCLUDED.phone_number,
+         country      = EXCLUDED.country,
+         capabilities = EXCLUDED.capabilities,
+         friendly_name= EXCLUDED.friendly_name,
+         status       = 'active'
+       RETURNING *`,
       [
         tenantId, bought.phone_number, bought.sid, (country || '').toUpperCase() || null,
         JSON.stringify(bought.capabilities ?? {}), bought.friendly_name ?? null, null,
@@ -194,12 +202,19 @@ export class PhoneNumbersService implements OnModuleInit {
       StatusCallback: `${baseUrl}/call-bots/twilio/status`,
     }).catch(() => {});
 
-    // Remove any prior assignment of this number, then assign to the chosen tenant
-    await this.db.query(`UPDATE tenant_phone_numbers SET status='released' WHERE phone_number=$1 AND status='active'`, [phoneNumber]).catch(() => {});
+    // Upsert by phone_sid: re-assigning the same number just reactivates/moves its row
+    // (avoids the UNIQUE(phone_sid) violation that happened on a second assign).
     const [row] = await this.db.query(
       `INSERT INTO tenant_phone_numbers
          (tenant_id, phone_number, phone_sid, country, capabilities, friendly_name, status)
-       VALUES ($1,$2,$3,$4,$5,$6,'active') RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,'active')
+       ON CONFLICT (phone_sid) DO UPDATE SET
+         tenant_id    = EXCLUDED.tenant_id,
+         phone_number = EXCLUDED.phone_number,
+         capabilities = EXCLUDED.capabilities,
+         friendly_name= EXCLUDED.friendly_name,
+         status       = 'active'
+       RETURNING *`,
       [tenantId, tw.phone_number, tw.sid, null, JSON.stringify(tw.capabilities ?? {}), tw.friendly_name ?? null],
     );
     this.logger.log(`[phone-numbers] Owner assigned ${tw.phone_number} → tenant ${tenantId}`);
