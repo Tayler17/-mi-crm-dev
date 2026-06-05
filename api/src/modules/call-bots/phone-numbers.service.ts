@@ -42,6 +42,30 @@ export class PhoneNumbersService implements OnModuleInit {
         UNIQUE (phone_sid)
       )
     `).catch((e: any) => this.logger.warn(`tenant_phone_numbers table init failed: ${e.message}`));
+
+    // Per-tenant regulatory verification (Enfoque A). A tenant operating under the
+    // master Twilio account submits a verification request per country; the owner
+    // creates the bundle in Twilio and approves it with the resulting SIDs. Numbers in
+    // regulated countries can only be bought once the tenant has an 'approved' row.
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS tenant_regulatory_bundles (
+        id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        tenant_id     UUID NOT NULL,
+        country       TEXT NOT NULL,
+        number_type   TEXT NOT NULL DEFAULT 'local',
+        status        TEXT NOT NULL DEFAULT 'submitted',
+        bundle_sid    TEXT,
+        address_sid   TEXT,
+        business_name TEXT,
+        contact_email TEXT,
+        address_text  TEXT,
+        doc_urls      JSONB DEFAULT '[]'::jsonb,
+        notes         TEXT,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (tenant_id, country, number_type)
+      )
+    `).catch((e: any) => this.logger.warn(`tenant_regulatory_bundles table init failed: ${e.message}`));
   }
 
   // ── Twilio REST helpers ─────────────────────────────────────────────────────
@@ -117,7 +141,7 @@ export class PhoneNumbersService implements OnModuleInit {
   }
 
   // ── Purchase a number for a tenant ──────────────────────────────────────────
-  async purchase(tenantId: string, phoneNumber: string, country?: string) {
+  async purchase(tenantId: string, phoneNumber: string, country?: string, numberType = 'local') {
     if (!phoneNumber) throw new BadRequestException('phoneNumber requerido');
     const { sid, token } = await this.creds();
 
@@ -129,11 +153,30 @@ export class PhoneNumbersService implements OnModuleInit {
       StatusCallback: `${baseUrl}/call-bots/twilio/status`,
     };
 
-    // Pass regulatory bundle / address when configured (required for some countries)
-    const [bundleRow] = await this.db.query(`SELECT value FROM platform_settings WHERE key='voice.bundle_sid' LIMIT 1`).catch(() => [null]);
-    const [addrRow]   = await this.db.query(`SELECT value FROM platform_settings WHERE key='voice.address_sid' LIMIT 1`).catch(() => [null]);
-    if (bundleRow?.value) form.BundleSid  = bundleRow.value;
-    if (addrRow?.value)   form.AddressSid = addrRow.value;
+    // Regulatory bundle/address resolution:
+    //  1) the tenant's OWN approved bundle for this country (Enfoque A), else
+    //  2) the platform-level owner bundle (only correct for the owner's own numbers).
+    const cc = (country || '').toUpperCase();
+    let bundleSid = '';
+    let addressSid = '';
+    if (cc) {
+      const [tb] = await this.db.query(
+        `SELECT bundle_sid, address_sid FROM tenant_regulatory_bundles
+         WHERE tenant_id::text=$1 AND country=$2 AND status='approved'
+         ORDER BY (number_type=$3) DESC, updated_at DESC LIMIT 1`,
+        [tenantId, cc, numberType],
+      ).catch(() => [null]);
+      if (tb?.bundle_sid)  bundleSid  = tb.bundle_sid;
+      if (tb?.address_sid) addressSid = tb.address_sid;
+    }
+    if (!bundleSid && !addressSid) {
+      const [bundleRow] = await this.db.query(`SELECT value FROM platform_settings WHERE key='voice.bundle_sid' LIMIT 1`).catch(() => [null]);
+      const [addrRow]   = await this.db.query(`SELECT value FROM platform_settings WHERE key='voice.address_sid' LIMIT 1`).catch(() => [null]);
+      if (bundleRow?.value) bundleSid  = bundleRow.value;
+      if (addrRow?.value)   addressSid = addrRow.value;
+    }
+    if (bundleSid)  form.BundleSid  = bundleSid;
+    if (addressSid) form.AddressSid = addressSid;
 
     const path = `/2010-04-01/Accounts/${sid}/IncomingPhoneNumbers.json`;
     const bought = await this.twilioRequest('POST', path, sid, token, form);
@@ -262,5 +305,74 @@ export class PhoneNumbersService implements OnModuleInit {
       req.on('timeout', () => req.destroy(new Error('Twilio delete timeout')));
       req.end();
     });
+  }
+
+  // ── Regulatory verification per tenant (Enfoque A) ──────────────────────────
+
+  /** Tenant: list their own verification requests. */
+  listRegulatory(tenantId: string) {
+    return this.db.query(
+      `SELECT id, country, number_type, status, bundle_sid, address_sid, business_name,
+              contact_email, address_text, doc_urls, notes, created_at, updated_at
+       FROM tenant_regulatory_bundles WHERE tenant_id::text=$1 ORDER BY created_at DESC`,
+      [tenantId],
+    );
+  }
+
+  /** Tenant: submit (or re-submit) a verification request for a country. */
+  async submitRegulatory(tenantId: string, dto: {
+    country: string; numberType?: string; businessName?: string;
+    contactEmail?: string; addressText?: string; docUrls?: string[];
+  }) {
+    const country = (dto.country || '').toUpperCase();
+    if (!country) throw new BadRequestException('country requerido');
+    const numberType = dto.numberType || 'local';
+    const [row] = await this.db.query(
+      `INSERT INTO tenant_regulatory_bundles
+         (tenant_id, country, number_type, status, business_name, contact_email, address_text, doc_urls)
+       VALUES ($1,$2,$3,'submitted',$4,$5,$6,$7)
+       ON CONFLICT (tenant_id, country, number_type) DO UPDATE SET
+         status='submitted', business_name=EXCLUDED.business_name, contact_email=EXCLUDED.contact_email,
+         address_text=EXCLUDED.address_text, doc_urls=EXCLUDED.doc_urls, notes=NULL, updated_at=NOW()
+       RETURNING *`,
+      [tenantId, country, numberType, dto.businessName ?? null, dto.contactEmail ?? null,
+       dto.addressText ?? null, JSON.stringify(dto.docUrls ?? [])],
+    );
+    this.logger.log(`[regulatory] Tenant ${tenantId} submitted verification for ${country}/${numberType}`);
+    return row;
+  }
+
+  /** Owner: list all verification requests across tenants. */
+  listAllRegulatory() {
+    return this.db.query(
+      `SELECT b.*, t.name AS tenant_name
+       FROM tenant_regulatory_bundles b
+       LEFT JOIN tenants t ON t.id = b.tenant_id
+       ORDER BY CASE b.status WHEN 'submitted' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, b.created_at DESC`,
+    );
+  }
+
+  /** Owner: approve a request by attaching the Twilio Bundle + Address SIDs. */
+  async approveRegulatory(id: string, bundleSid: string, addressSid: string) {
+    if (!bundleSid && !addressSid) throw new BadRequestException('Indica al menos Bundle SID o Address SID');
+    const [row] = await this.db.query(
+      `UPDATE tenant_regulatory_bundles
+       SET status='approved', bundle_sid=$2, address_sid=$3, notes=NULL, updated_at=NOW()
+       WHERE id=$1 RETURNING *`,
+      [id, bundleSid || null, addressSid || null],
+    );
+    if (!row) throw new BadRequestException('Solicitud no encontrada');
+    this.logger.log(`[regulatory] Approved ${id} (${row.country}/${row.number_type})`);
+    return row;
+  }
+
+  /** Owner: reject a request with a reason. */
+  async rejectRegulatory(id: string, notes: string) {
+    const [row] = await this.db.query(
+      `UPDATE tenant_regulatory_bundles SET status='rejected', notes=$2, updated_at=NOW() WHERE id=$1 RETURNING *`,
+      [id, notes ?? null],
+    );
+    if (!row) throw new BadRequestException('Solicitud no encontrada');
+    return row;
   }
 }
