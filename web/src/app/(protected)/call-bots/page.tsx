@@ -30,8 +30,16 @@ import {
   getTwilioInventory,
   assignPhoneNumber,
   getTenantsWithPlans,
+  getMyRegulatory,
+  submitRegulatory,
+  getAllRegulatory,
+  approveRegulatory,
+  rejectRegulatory,
+  uploadRegulatoryDoc,
+  downloadRegulatoryDoc,
   type TwilioInventoryNumber,
   type TenantWithPlan,
+  type RegulatoryBundle,
   API_URL,
   CallBot,
   CallLog,
@@ -1285,6 +1293,7 @@ export default function CallBotsPage() {
   const [isOwner, setIsOwner] = useState(false);
   const [canManage, setCanManage] = useState(false); // admin or owner — can buy numbers
   const [numModalOpen, setNumModalOpen] = useState(false);
+  const [regModalOpen, setRegModalOpen] = useState(false);
 
   const [bots, setBots] = useState<CallBot[]>([]);
   const [logs, setLogs] = useState<CallLog[]>([]);
@@ -1394,6 +1403,11 @@ export default function CallBotsPage() {
           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>{i.callBotsSubtitle}</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
+          {canManage && (
+            <button className="btn btn-secondary" onClick={() => setRegModalOpen(true)}>
+              🛡️ Verificación
+            </button>
+          )}
           {canManage && (
             <button className="btn btn-secondary" onClick={() => setNumModalOpen(true)}>
               📞 Comprar número
@@ -1647,6 +1661,10 @@ export default function CallBotsPage() {
 
       {numModalOpen && (
         <PhoneNumberModal isOwner={isOwner} onClose={() => setNumModalOpen(false)} onChanged={load} />
+      )}
+
+      {regModalOpen && (
+        <RegulatoryModal isOwner={isOwner} onClose={() => setRegModalOpen(false)} />
       )}
 
       {voiceModalOpen && isOwner && (
@@ -1932,6 +1950,225 @@ function PhoneNumberModal({ isOwner, onClose, onChanged }: { isOwner: boolean; o
                 </div>
               ))}
             </div>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Regulatory verification (per-tenant bundles) ────────────────────────────────
+
+const REG_COUNTRIES = [
+  { code: 'GB', label: '🇬🇧 Reino Unido' },
+  { code: 'ES', label: '🇪🇸 España' },
+  { code: 'CO', label: '🇨🇴 Colombia' },
+  { code: 'EC', label: '🇪🇨 Ecuador' },
+  { code: 'PE', label: '🇵🇪 Perú' },
+  { code: 'BR', label: '🇧🇷 Brasil' },
+];
+const REG_STATUS: Record<string, { label: string; bg: string; fg: string }> = {
+  submitted: { label: 'En revisión', bg: '#fef9c3', fg: '#854d0e' },
+  approved:  { label: 'Aprobado',    bg: '#dcfce7', fg: '#15803d' },
+  rejected:  { label: 'Rechazado',   bg: '#fee2e2', fg: '#dc2626' },
+};
+
+function RegulatoryModal({ isOwner, onClose }: { isOwner: boolean; onClose: () => void }) {
+  const [mine, setMine] = useState<RegulatoryBundle[]>([]);
+  const [all, setAll] = useState<RegulatoryBundle[]>([]);
+  const [country, setCountry] = useState('GB');
+  const [numberType, setNumberType] = useState('local');
+  const [businessName, setBusinessName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [addressText, setAddressText] = useState('');
+  const [docs, setDocs] = useState<{ url: string; name: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+  // owner approval inputs keyed by request id
+  const [approve, setApprove] = useState<Record<string, { bundle: string; address: string }>>({});
+
+  const reload = () => {
+    getMyRegulatory().then(setMine).catch(() => {});
+    if (isOwner) getAllRegulatory().then(setAll).catch(() => {});
+  };
+  useEffect(() => { reload(); }, [isOwner]);
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true); setError('');
+    try {
+      const r = await uploadRegulatoryDoc(file);
+      setDocs((p) => [...p, r]);
+    } catch (er: any) { setError(er?.message || 'Error al subir'); }
+    finally { setUploading(false); if (fileRef.current) fileRef.current.value = ''; }
+  }
+
+  async function handleSubmit() {
+    setSubmitting(true); setError(''); setInfo('');
+    try {
+      await submitRegulatory({
+        country, numberType, businessName, contactEmail, addressText,
+        docUrls: docs.map((d) => d.url),
+      });
+      setInfo('✅ Solicitud enviada. El equipo la revisará y aprobará tu verificación.');
+      setBusinessName(''); setContactEmail(''); setAddressText(''); setDocs([]);
+      reload();
+    } catch (er: any) { setError(er?.message || 'Error al enviar'); }
+    finally { setSubmitting(false); }
+  }
+
+  async function handleApprove(id: string) {
+    const v = approve[id] ?? { bundle: '', address: '' };
+    setError('');
+    try { await approveRegulatory(id, v.bundle.trim(), v.address.trim()); reload(); }
+    catch (er: any) { setError(er?.message || 'Error al aprobar'); }
+  }
+  async function handleReject(id: string) {
+    const reason = prompt('Motivo del rechazo (visible para el tenant):') ?? '';
+    setError('');
+    try { await rejectRegulatory(id, reason); reload(); }
+    catch (er: any) { setError(er?.message || 'Error al rechazar'); }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 680, maxHeight: '92vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 style={{ margin: 0, fontSize: 18 }}>🛡️ Verificación regulatoria</h2>
+          <button className="btn btn-ghost" onClick={onClose}>✕</button>
+        </div>
+
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <div style={{ padding: '10px 14px', background: '#eff6ff', borderRadius: 8, fontSize: 12, color: '#1e40af' }}>
+            Para comprar números en países regulados (UK, España, LatAm) Twilio exige verificar tu identidad.
+            Envía tus datos y documentos; cuando el equipo apruebe, podrás comprar números de ese país.
+            US/Canadá no requieren esto.
+          </div>
+
+          {error && <div style={{ padding: '8px 12px', background: '#fee2e2', color: '#dc2626', borderRadius: 8, fontSize: 13 }}>❌ {error}</div>}
+          {info && <div style={{ padding: '8px 12px', background: '#dcfce7', color: '#15803d', borderRadius: 8, fontSize: 13 }}>{info}</div>}
+
+          {/* My requests */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Mis verificaciones</div>
+            {mine.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Aún no has enviado ninguna. Usa el formulario de abajo.</div>
+            ) : mine.map((r) => {
+              const st = REG_STATUS[r.status] ?? REG_STATUS.submitted;
+              return (
+                <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 8, marginBottom: 6 }}>
+                  <div>
+                    <span style={{ fontWeight: 600 }}>{r.country} · {r.number_type}</span>
+                    {r.notes && <div style={{ fontSize: 11, color: '#dc2626' }}>{r.notes}</div>}
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6, background: st.bg, color: st.fg }}>{st.label}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Submit form */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Nueva solicitud</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">País</label>
+                <select className="form-input" value={country} onChange={(e) => setCountry(e.target.value)}>
+                  {REG_COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Tipo de número</label>
+                <select className="form-input" value={numberType} onChange={(e) => setNumberType(e.target.value)}>
+                  <option value="local">Local / Fijo</option>
+                  <option value="mobile">Móvil</option>
+                  <option value="tollFree">Gratuito</option>
+                </select>
+              </div>
+              <div className="form-group" style={{ margin: 0, gridColumn: '1/-1' }}>
+                <label className="form-label">Nombre del negocio / titular</label>
+                <input className="form-input" value={businessName} onChange={(e) => setBusinessName(e.target.value)} />
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Email de contacto</label>
+                <input className="form-input" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} />
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Dirección registrada</label>
+                <input className="form-input" value={addressText} onChange={(e) => setAddressText(e.target.value)} placeholder="Calle, ciudad, código postal, país" />
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style={{ display: 'none' }} onChange={handleUpload} />
+              <button className="btn btn-secondary" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                {uploading ? 'Subiendo…' : '📎 Subir documento'}
+              </button>
+              {docs.map((d, i) => (
+                <span key={i} style={{ fontSize: 12, marginLeft: 8, padding: '2px 8px', background: 'var(--bg-secondary)', borderRadius: 6 }}>{d.name}</span>
+              ))}
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                Sube ID, comprobante de dirección, registro mercantil (según el país). PDF o imagen.
+              </div>
+            </div>
+
+            <button className="btn btn-primary" style={{ marginTop: 12 }} disabled={submitting} onClick={handleSubmit}>
+              {submitting ? 'Enviando…' : 'Enviar solicitud'}
+            </button>
+          </div>
+
+          {/* Owner: review all */}
+          {isOwner && (
+            <>
+              <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: 0 }} />
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
+                  Solicitudes de todos los tenants (owner)
+                </div>
+                {all.length === 0 ? (
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No hay solicitudes.</div>
+                ) : all.map((r) => {
+                  const st = REG_STATUS[r.status] ?? REG_STATUS.submitted;
+                  const v = approve[r.id] ?? { bundle: r.bundle_sid ?? '', address: r.address_sid ?? '' };
+                  return (
+                    <div key={r.id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ fontWeight: 600 }}>{r.tenant_name ?? r.tenant_id} · {r.country}/{r.number_type}</div>
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6, background: st.bg, color: st.fg }}>{st.label}</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0' }}>
+                        {r.business_name} · {r.contact_email}<br />{r.address_text}
+                      </div>
+                      {(r.doc_urls ?? []).length > 0 && (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                          {r.doc_urls.map((u, i) => (
+                            <button key={i} className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => downloadRegulatoryDoc(u).catch(() => {})}>
+                              📄 Documento {i + 1}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                        <input className="form-input" style={{ flex: 1, minWidth: 140, fontSize: 12 }} placeholder="Bundle SID (BU...)"
+                          value={v.bundle} onChange={(e) => setApprove((p) => ({ ...p, [r.id]: { ...v, bundle: e.target.value } }))} />
+                        <input className="form-input" style={{ flex: 1, minWidth: 140, fontSize: 12 }} placeholder="Address SID (AD...)"
+                          value={v.address} onChange={(e) => setApprove((p) => ({ ...p, [r.id]: { ...v, address: e.target.value } }))} />
+                        <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => handleApprove(r.id)}>Aprobar</button>
+                        <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 12, color: 'var(--danger)' }} onClick={() => handleReject(r.id)}>Rechazar</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
         </div>
 

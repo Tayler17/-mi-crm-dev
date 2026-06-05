@@ -737,6 +737,57 @@ export const getTwilioInventory = () => apiGet<TwilioInventoryNumber[]>('/phone-
 export const assignPhoneNumber = (phoneNumber: string, tenantId: string) =>
   apiPost<OwnedNumber>('/phone-numbers/assign', { phoneNumber, tenantId });
 
+// ── Regulatory verification (per-tenant bundles) ───────────────────────────────
+
+export interface RegulatoryBundle {
+  id: string;
+  tenant_id: string;
+  tenant_name?: string;
+  country: string;
+  number_type: string;
+  status: 'submitted' | 'approved' | 'rejected';
+  bundle_sid: string | null;
+  address_sid: string | null;
+  business_name: string | null;
+  contact_email: string | null;
+  address_text: string | null;
+  doc_urls: string[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export const getMyRegulatory = () => apiGet<RegulatoryBundle[]>('/phone-numbers/regulatory');
+export const submitRegulatory = (data: {
+  country: string; numberType?: string; businessName?: string;
+  contactEmail?: string; addressText?: string; docUrls?: string[];
+}) => apiPost<RegulatoryBundle>('/phone-numbers/regulatory', data);
+export const getAllRegulatory = () => apiGet<RegulatoryBundle[]>('/phone-numbers/regulatory/all');
+export const approveRegulatory = (id: string, bundleSid: string, addressSid: string) =>
+  apiPost<RegulatoryBundle>(`/phone-numbers/regulatory/${id}/approve`, { bundleSid, addressSid });
+export const rejectRegulatory = (id: string, notes: string) =>
+  apiPost<RegulatoryBundle>(`/phone-numbers/regulatory/${id}/reject`, { notes });
+export async function uploadRegulatoryDoc(file: File): Promise<{ url: string; name: string }> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(`${API_URL}/phone-numbers/regulatory/upload`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken()}`, 'X-Tenant-ID': getTenantId() },
+    body: fd,
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || 'Error al subir');
+  return res.json();
+}
+export async function downloadRegulatoryDoc(filename: string): Promise<void> {
+  const res = await fetch(`${API_URL}/phone-numbers/regulatory/doc/${encodeURIComponent(filename)}`, {
+    headers: { Authorization: `Bearer ${getToken()}`, 'X-Tenant-ID': getTenantId() },
+  });
+  if (!res.ok) throw new Error(`Error ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
 // ── Campaigns ─────────────────────────────────────────────────────────────────
 
 export interface Campaign {
