@@ -218,19 +218,13 @@ export class PlatformSettingsService {
   }
 
   /**
-   * Returns numbers available for a tenant:
-   * - Numbers not used by any other tenant are available
-   * - If the tenant already has a number assigned, only that number is shown (reuse within tenant)
-   */
-  /**
    * Returns the phone numbers a tenant may use for its call bots.
    * Multi-tenant model: a tenant only ever sees numbers that BELONG to it —
    *   1. its own Twilio numbers (if it brought its own Twilio account), or
    *   2. numbers in tenant_phone_numbers (bought on-demand via the CRM, or assigned
-   *      to it by the owner), plus
-   *   3. numbers already attached to its own call bots (legacy/safety).
-   * The owner's shared static pool is NOT exposed to tenants — the owner assigns
-   * those to a specific tenant instead (see PhoneNumbersService.assignToTenant).
+   *      to it by the owner).
+   * Numbers merely left on an old bot, or the owner's shared static pool, are NOT
+   * exposed — every usable number must be explicitly owned (purchased or assigned).
    */
   async getAvailablePhoneNumbers(db: DataSource, tenantId?: string): Promise<string[]> {
     if (!tenantId) return [];
@@ -255,17 +249,7 @@ export class PlatformSettingsService {
       [tenantId],
     ).catch(() => []);
 
-    // 3. Numbers already attached to this tenant's own bots (legacy/safety).
-    const onBots: Array<{ phone_number: string }> = await db.query(
-      `SELECT DISTINCT phone_number FROM call_bots
-       WHERE tenant_id::text=$1 AND phone_number IS NOT NULL AND status != 'deleted'`,
-      [tenantId],
-    ).catch(() => []);
-
-    return Array.from(new Set([
-      ...ownedRows.map((r) => r.phone_number),
-      ...onBots.map((r) => r.phone_number),
-    ]));
+    return Array.from(new Set(ownedRows.map((r) => r.phone_number)));
   }
 
   /**
