@@ -1767,14 +1767,52 @@ function PhoneNumberModal({ isOwner, onClose, onChanged }: { isOwner: boolean; o
   const [assignTenant, setAssignTenant] = useState('');
   const [assigning, setAssigning] = useState(false);
 
+  // Regulatory status for THIS tenant (to gate regulated-country purchases inline)
+  const [myReg, setMyReg] = useState<RegulatoryBundle[]>([]);
+  const [showRegForm, setShowRegForm] = useState(false);
+  const [regBiz, setRegBiz] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regAddr, setRegAddr] = useState('');
+  const [regDocs, setRegDocs] = useState<{ url: string; name: string }[]>([]);
+  const [regUploading, setRegUploading] = useState(false);
+  const [regSubmitting, setRegSubmitting] = useState(false);
+  const regFileRef = useRef<HTMLInputElement>(null);
+
+  const isRegulated = country !== 'US' && country !== 'CA';
+  const regForCountry = myReg.find((r) => r.country === country && r.number_type === type)
+    ?? myReg.find((r) => r.country === country);
+  const regApproved = regForCountry?.status === 'approved';
+
   const loadOwned = () => { getMyPhoneNumbers().then(setOwned).catch(() => {}); };
+  const loadReg = () => { getMyRegulatory().then(setMyReg).catch(() => {}); };
   useEffect(() => {
     loadOwned();
+    loadReg();
     if (isOwner) {
       getTwilioInventory().then(setInventory).catch(() => {});
       getTenantsWithPlans().then(setTenants).catch(() => {});
     }
   }, [isOwner]);
+
+  async function handleRegUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setRegUploading(true); setError('');
+    try { const r = await uploadRegulatoryDoc(file); setRegDocs((p) => [...p, r]); }
+    catch (er: any) { setError(er?.message || 'Error al subir'); }
+    finally { setRegUploading(false); if (regFileRef.current) regFileRef.current.value = ''; }
+  }
+
+  async function handleRegSubmit() {
+    setRegSubmitting(true); setError(''); setInfo('');
+    try {
+      await submitRegulatory({ country, numberType: type, businessName: regBiz, contactEmail: regEmail, addressText: regAddr, docUrls: regDocs.map((d) => d.url) });
+      setInfo('✅ Solicitud de verificación enviada. Podrás comprar cuando se apruebe.');
+      setShowRegForm(false); setRegBiz(''); setRegEmail(''); setRegAddr(''); setRegDocs([]);
+      loadReg();
+    } catch (er: any) { setError(er?.message || 'Error al enviar'); }
+    finally { setRegSubmitting(false); }
+  }
 
   async function handleAssign() {
     if (!assignNumber || !assignTenant) return;
@@ -1929,6 +1967,46 @@ function PhoneNumberModal({ isOwner, onClose, onChanged }: { isOwner: boolean; o
             </div>
           </div>
 
+          {/* Inline regulatory gate — shows when the selected country needs verification */}
+          {isRegulated && !regApproved && (
+            <div style={{ padding: '12px 14px', background: '#fef9c3', border: '1px solid #fde047', borderRadius: 10, fontSize: 13 }}>
+              {regForCountry?.status === 'submitted' ? (
+                <span style={{ color: '#854d0e' }}>⏳ Tu verificación para <strong>{country}</strong> está <strong>en revisión</strong>. Podrás comprar cuando se apruebe.</span>
+              ) : (
+                <>
+                  <div style={{ color: '#854d0e', fontWeight: 600, marginBottom: 6 }}>
+                    🛡️ {country} requiere verificación regulatoria antes de comprar.
+                    {regForCountry?.status === 'rejected' && regForCountry.notes ? <span style={{ display: 'block', fontWeight: 400, color: '#dc2626' }}>Rechazada: {regForCountry.notes}</span> : null}
+                  </div>
+                  {!showRegForm ? (
+                    <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => setShowRegForm(true)}>
+                      Solicitar verificación para {country}
+                    </button>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+                      <input className="form-input" placeholder="Nombre del negocio / titular" value={regBiz} onChange={(e) => setRegBiz(e.target.value)} />
+                      <input className="form-input" placeholder="Email de contacto" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} />
+                      <input className="form-input" placeholder="Dirección registrada (calle, ciudad, CP, país)" value={regAddr} onChange={(e) => setRegAddr(e.target.value)} />
+                      <div>
+                        <input ref={regFileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style={{ display: 'none' }} onChange={handleRegUpload} />
+                        <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled={regUploading} onClick={() => regFileRef.current?.click()}>
+                          {regUploading ? 'Subiendo…' : '📎 Subir documento'}
+                        </button>
+                        {regDocs.map((d, i) => <span key={i} style={{ fontSize: 11, marginLeft: 8, padding: '2px 8px', background: '#fff', borderRadius: 6 }}>{d.name}</span>)}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="btn btn-primary" style={{ fontSize: 12 }} disabled={regSubmitting} onClick={handleRegSubmit}>
+                          {regSubmitting ? 'Enviando…' : 'Enviar solicitud'}
+                        </button>
+                        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowRegForm(false)}>Cancelar</button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           {error && <div style={{ padding: '8px 12px', background: '#fee2e2', color: '#dc2626', borderRadius: 8, fontSize: 13 }}>❌ {error}</div>}
           {info && <div style={{ padding: '8px 12px', background: '#dcfce7', color: '#15803d', borderRadius: 8, fontSize: 13 }}>{info}</div>}
 
@@ -1944,7 +2022,10 @@ function PhoneNumberModal({ isOwner, onClose, onChanged }: { isOwner: boolean; o
                       {n.capabilities?.voice ? ' · 📞 Voz' : ''}{n.capabilities?.SMS ? ' · 💬 SMS' : ''}
                     </div>
                   </div>
-                  <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: 12 }} disabled={!!buying} onClick={() => handleBuy(n)}>
+                  <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: 12 }}
+                    disabled={!!buying || (isRegulated && !regApproved)}
+                    title={isRegulated && !regApproved ? 'Requiere verificación aprobada para este país' : ''}
+                    onClick={() => handleBuy(n)}>
                     {buying === n.phoneNumber ? 'Comprando…' : 'Comprar'}
                   </button>
                 </div>
