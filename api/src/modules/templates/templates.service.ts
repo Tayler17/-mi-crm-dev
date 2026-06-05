@@ -40,12 +40,31 @@ export class TemplatesService {
   }
 
   private loadTemplates(): Map<string, Template> {
-    const dataDir = path.join(__dirname, 'data');
     const map = new Map<string, Template>();
-    for (const file of fs.readdirSync(dataDir).filter((f) => f.endsWith('.json'))) {
-      const tpl: Template = JSON.parse(fs.readFileSync(path.join(dataDir, file), 'utf-8'));
-      map.set(tpl.slug, tpl);
+    // Look for the JSON data dir in the compiled output first, then fall back to the
+    // source tree (present in dev via the mounted volume). Never throw — a missing
+    // templates dir must not crash the whole API on startup.
+    const candidates = [
+      path.join(__dirname, 'data'),
+      path.join(process.cwd(), 'src', 'modules', 'templates', 'data'),
+      path.join(process.cwd(), 'dist', 'modules', 'templates', 'data'),
+    ];
+    const dataDir = candidates.find((d) => {
+      try { return fs.existsSync(d) && fs.statSync(d).isDirectory(); } catch { return false; }
+    });
+    if (!dataDir) {
+      // eslint-disable-next-line no-console
+      console.warn('[TemplatesService] No templates data dir found — templates disabled');
+      return map;
     }
+    try {
+      for (const file of fs.readdirSync(dataDir).filter((f) => f.endsWith('.json'))) {
+        try {
+          const tpl: Template = JSON.parse(fs.readFileSync(path.join(dataDir, file), 'utf-8'));
+          map.set(tpl.slug, tpl);
+        } catch { /* skip malformed file */ }
+      }
+    } catch { /* unreadable dir — leave map empty */ }
     return map;
   }
 
