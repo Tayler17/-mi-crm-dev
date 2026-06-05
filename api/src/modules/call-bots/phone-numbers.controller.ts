@@ -49,4 +49,18 @@ export class PhoneNumbersController {
     if (req.user?.role === 'agent') throw new ForbiddenException('Solo administradores pueden liberar números.');
     return this.svc.release(tenantId, id);
   }
+
+  /** Owner: list all numbers in the master Twilio account */
+  @Get('twilio-inventory')
+  twilioInventory(@Request() req: any) {
+    if (req.user?.role !== 'owner') throw new ForbiddenException();
+    return this.svc.twilioInventory();
+  }
+
+  /** Owner: assign an existing Twilio number to a specific tenant */
+  @Post('assign')
+  assign(@Body() body: { phoneNumber: string; tenantId: string }, @Request() req: any) {
+    if (req.user?.role !== 'owner') throw new ForbiddenException();
+    return this.svc.assignToTenant(body.tenantId, body.phoneNumber);
+  }
 }

@@ -727,6 +727,16 @@ export const buyPhoneNumber = (phoneNumber: string, country?: string) =>
   apiPost<OwnedNumber>('/phone-numbers/buy', { phoneNumber, country });
 export const releasePhoneNumber = (id: string) => apiDelete(`/phone-numbers/${id}`);
 
+export interface TwilioInventoryNumber {
+  phoneNumber: string;
+  sid: string;
+  friendlyName: string;
+  assignedTenantId: string | null;
+}
+export const getTwilioInventory = () => apiGet<TwilioInventoryNumber[]>('/phone-numbers/twilio-inventory');
+export const assignPhoneNumber = (phoneNumber: string, tenantId: string) =>
+  apiPost<OwnedNumber>('/phone-numbers/assign', { phoneNumber, tenantId });
+
 // ── Campaigns ─────────────────────────────────────────────────────────────────
 
 export interface Campaign {

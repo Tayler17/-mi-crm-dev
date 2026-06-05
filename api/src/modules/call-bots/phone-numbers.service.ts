@@ -154,6 +154,58 @@ export class PhoneNumbersService implements OnModuleInit {
     );
   }
 
+  // ── Owner: list ALL numbers in the master Twilio account ────────────────────
+  /** Numbers owned in the master Twilio account, flagged with which tenant (if any) holds each. */
+  async twilioInventory() {
+    const { sid, token } = await this.creds();
+    const json = await this.twilioRequest('GET', `/2010-04-01/Accounts/${sid}/IncomingPhoneNumbers.json?PageSize=100`, sid, token);
+    const list: any[] = json?.incoming_phone_numbers ?? [];
+    const assigned: Array<{ phone_number: string; tenant_id: string }> = await this.db.query(
+      `SELECT phone_number, tenant_id::text FROM tenant_phone_numbers WHERE status='active'`,
+    ).catch(() => []);
+    const byNumber = new Map(assigned.map((a) => [a.phone_number, a.tenant_id]));
+    return list.map((n) => ({
+      phoneNumber:  n.phone_number,
+      sid:          n.sid,
+      friendlyName: n.friendly_name,
+      assignedTenantId: byNumber.get(n.phone_number) ?? null,
+    }));
+  }
+
+  // ── Owner: assign an existing Twilio number to a tenant ─────────────────────
+  async assignToTenant(tenantId: string, phoneNumber: string) {
+    if (!tenantId || !phoneNumber) throw new BadRequestException('tenantId y phoneNumber requeridos');
+    const { sid, token } = await this.creds();
+
+    // Find the number in the master account to get its SID + capabilities
+    const json = await this.twilioRequest(
+      'GET',
+      `/2010-04-01/Accounts/${sid}/IncomingPhoneNumbers.json?PhoneNumber=${encodeURIComponent(phoneNumber)}`,
+      sid, token,
+    );
+    const tw = (json?.incoming_phone_numbers ?? [])[0];
+    if (!tw) throw new BadRequestException(`El número ${phoneNumber} no existe en tu cuenta Twilio.`);
+
+    // Point its voice webhook at the call-bot router (so calls route correctly)
+    const baseUrl = process.env.API_PUBLIC_URL || 'http://localhost:4000';
+    await this.twilioRequest('POST', `/2010-04-01/Accounts/${sid}/IncomingPhoneNumbers/${tw.sid}.json`, sid, token, {
+      VoiceUrl:       `${baseUrl}/call-bots/twilio/voice`,
+      VoiceMethod:    'POST',
+      StatusCallback: `${baseUrl}/call-bots/twilio/status`,
+    }).catch(() => {});
+
+    // Remove any prior assignment of this number, then assign to the chosen tenant
+    await this.db.query(`UPDATE tenant_phone_numbers SET status='released' WHERE phone_number=$1 AND status='active'`, [phoneNumber]).catch(() => {});
+    const [row] = await this.db.query(
+      `INSERT INTO tenant_phone_numbers
+         (tenant_id, phone_number, phone_sid, country, capabilities, friendly_name, status)
+       VALUES ($1,$2,$3,$4,$5,$6,'active') RETURNING *`,
+      [tenantId, tw.phone_number, tw.sid, null, JSON.stringify(tw.capabilities ?? {}), tw.friendly_name ?? null],
+    );
+    this.logger.log(`[phone-numbers] Owner assigned ${tw.phone_number} → tenant ${tenantId}`);
+    return row;
+  }
+
   // ── Release (delete from Twilio + mark released) ────────────────────────────
   async release(tenantId: string, id: string) {
     const [row] = await this.db.query(

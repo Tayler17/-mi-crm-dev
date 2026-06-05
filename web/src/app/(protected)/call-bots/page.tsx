@@ -27,6 +27,11 @@ import {
   getMyPhoneNumbers,
   buyPhoneNumber,
   releasePhoneNumber,
+  getTwilioInventory,
+  assignPhoneNumber,
+  getTenantsWithPlans,
+  type TwilioInventoryNumber,
+  type TenantWithPlan,
   API_URL,
   CallBot,
   CallLog,
@@ -1641,7 +1646,7 @@ export default function CallBotsPage() {
       )}
 
       {numModalOpen && (
-        <PhoneNumberModal onClose={() => setNumModalOpen(false)} onChanged={load} />
+        <PhoneNumberModal isOwner={isOwner} onClose={() => setNumModalOpen(false)} onChanged={load} />
       )}
 
       {voiceModalOpen && isOwner && (
@@ -1726,7 +1731,7 @@ const COUNTRY_OPTIONS = [
   { code: 'AU', label: '🇦🇺 Australia' },
 ];
 
-function PhoneNumberModal({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+function PhoneNumberModal({ isOwner, onClose, onChanged }: { isOwner: boolean; onClose: () => void; onChanged: () => void }) {
   const [owned, setOwned] = useState<OwnedNumber[]>([]);
   const [country, setCountry] = useState('US');
   const [type, setType] = useState('local');
@@ -1737,8 +1742,37 @@ function PhoneNumberModal({ onClose, onChanged }: { onClose: () => void; onChang
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
+  // Owner-only: assign an existing Twilio number to a tenant
+  const [inventory, setInventory] = useState<TwilioInventoryNumber[]>([]);
+  const [tenants, setTenants] = useState<TenantWithPlan[]>([]);
+  const [assignNumber, setAssignNumber] = useState('');
+  const [assignTenant, setAssignTenant] = useState('');
+  const [assigning, setAssigning] = useState(false);
+
   const loadOwned = () => { getMyPhoneNumbers().then(setOwned).catch(() => {}); };
-  useEffect(() => { loadOwned(); }, []);
+  useEffect(() => {
+    loadOwned();
+    if (isOwner) {
+      getTwilioInventory().then(setInventory).catch(() => {});
+      getTenantsWithPlans().then(setTenants).catch(() => {});
+    }
+  }, [isOwner]);
+
+  async function handleAssign() {
+    if (!assignNumber || !assignTenant) return;
+    setAssigning(true); setError(''); setInfo('');
+    try {
+      await assignPhoneNumber(assignNumber, assignTenant);
+      const tname = tenants.find((t) => t.id === assignTenant)?.name ?? 'tenant';
+      setInfo(`✅ ${assignNumber} asignado a ${tname}.`);
+      setAssignNumber(''); setAssignTenant('');
+      getTwilioInventory().then(setInventory).catch(() => {});
+      loadOwned();
+      onChanged();
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo asignar el número');
+    } finally { setAssigning(false); }
+  }
 
   async function handleSearch() {
     setSearching(true); setError(''); setResults([]); setInfo('');
@@ -1807,6 +1841,44 @@ function PhoneNumberModal({ onClose, onChanged }: { onClose: () => void; onChang
           </div>
 
           <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: 0 }} />
+
+          {/* Owner-only: assign an existing Twilio number to a tenant */}
+          {isOwner && (
+            <>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
+                  Asignar un número existente a un tenant (owner)
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div className="form-group" style={{ margin: 0, flex: 1, minWidth: 180 }}>
+                    <label className="form-label">Número (de tu Twilio)</label>
+                    <select className="form-input" value={assignNumber} onChange={(e) => setAssignNumber(e.target.value)}>
+                      <option value="">— Seleccionar número —</option>
+                      {inventory.map((n) => (
+                        <option key={n.sid} value={n.phoneNumber}>
+                          {n.phoneNumber}{n.assignedTenantId ? ' (ya asignado)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ margin: 0, flex: 1, minWidth: 180 }}>
+                    <label className="form-label">Tenant</label>
+                    <select className="form-input" value={assignTenant} onChange={(e) => setAssignTenant(e.target.value)}>
+                      <option value="">— Seleccionar tenant —</option>
+                      {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                  <button className="btn btn-secondary" style={{ height: 38 }} disabled={assigning || !assignNumber || !assignTenant} onClick={handleAssign}>
+                    {assigning ? 'Asignando…' : 'Asignar'}
+                  </button>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                  Para números que compraste a mano en la consola Twilio. Se le asignan a un tenant y solo ese tenant los verá.
+                </div>
+              </div>
+              <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: 0 }} />
+            </>
+          )}
 
           {/* Search */}
           <div>

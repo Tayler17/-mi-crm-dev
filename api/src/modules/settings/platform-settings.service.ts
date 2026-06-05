@@ -218,47 +218,50 @@ export class PlatformSettingsService {
    * - Numbers not used by any other tenant are available
    * - If the tenant already has a number assigned, only that number is shown (reuse within tenant)
    */
+  /**
+   * Returns the phone numbers a tenant may use for its call bots.
+   * Multi-tenant model: a tenant only ever sees numbers that BELONG to it —
+   *   1. its own Twilio numbers (if it brought its own Twilio account), or
+   *   2. numbers in tenant_phone_numbers (bought on-demand via the CRM, or assigned
+   *      to it by the owner), plus
+   *   3. numbers already attached to its own call bots (legacy/safety).
+   * The owner's shared static pool is NOT exposed to tenants — the owner assigns
+   * those to a specific tenant instead (see PhoneNumbersService.assignToTenant).
+   */
   async getAvailablePhoneNumbers(db: DataSource, tenantId?: string): Promise<string[]> {
-    // Check if tenant has their own Twilio configured
-    if (tenantId) {
-      const [tenantRow] = await db.query(
-        `SELECT t.settings, COALESCE(p.allow_own_twilio, false) AS allow_own_twilio
-         FROM tenants t LEFT JOIN plans p ON p.id = t.plan_id
-         WHERE t.id = $1`,
-        [tenantId],
-      ).catch(() => [null]);
-      if (tenantRow?.allow_own_twilio) {
-        const ownNumbers: string[] = tenantRow.settings?.twilioConfig?.phoneNumbers
-          ? String(tenantRow.settings.twilioConfig.phoneNumbers).split(',').map((n: string) => n.trim()).filter(Boolean)
-          : [];
-        if (ownNumbers.length) return ownNumbers;
-      }
+    if (!tenantId) return [];
+
+    // 1. Tenant brought its own Twilio account → use its configured numbers.
+    const [tenantRow] = await db.query(
+      `SELECT t.settings, COALESCE(p.allow_own_twilio, false) AS allow_own_twilio
+       FROM tenants t LEFT JOIN plans p ON p.id = t.plan_id
+       WHERE t.id = $1`,
+      [tenantId],
+    ).catch(() => [null]);
+    if (tenantRow?.allow_own_twilio) {
+      const ownNumbers: string[] = tenantRow.settings?.twilioConfig?.phoneNumbers
+        ? String(tenantRow.settings.twilioConfig.phoneNumbers).split(',').map((n: string) => n.trim()).filter(Boolean)
+        : [];
+      if (ownNumbers.length) return ownNumbers;
     }
 
-    // The tenant's own on-demand purchased numbers (Option A) — always available to them.
-    const purchasedRows: Array<{ phone_number: string }> = tenantId
-      ? await db.query(
-          `SELECT phone_number FROM tenant_phone_numbers WHERE tenant_id::text=$1 AND status='active'`,
-          [tenantId],
-        ).catch(() => [])
-      : [];
-    const purchased = purchasedRows.map((r) => r.phone_number);
+    // 2. Numbers belonging to this tenant (purchased via CRM or assigned by the owner).
+    const ownedRows: Array<{ phone_number: string }> = await db.query(
+      `SELECT phone_number FROM tenant_phone_numbers WHERE tenant_id::text=$1 AND status='active'`,
+      [tenantId],
+    ).catch(() => []);
 
-    // Shared static pool (owner-provisioned numbers)
-    const all = await this.getPhoneNumbers();
-
-    // Numbers assigned to OTHER tenants are taken (shared pool only)
-    const usedByOthers: Array<{ phone_number: string }> = await db.query(
+    // 3. Numbers already attached to this tenant's own bots (legacy/safety).
+    const onBots: Array<{ phone_number: string }> = await db.query(
       `SELECT DISTINCT phone_number FROM call_bots
-       WHERE phone_number IS NOT NULL AND status != 'deleted'
-       ${tenantId ? `AND tenant_id::text != $1` : ''}`,
-      tenantId ? [tenantId] : [],
-    );
-    const takenSet = new Set(usedByOthers.map((r) => r.phone_number));
-    const poolAvailable = all.filter((n) => !takenSet.has(n));
+       WHERE tenant_id::text=$1 AND phone_number IS NOT NULL AND status != 'deleted'`,
+      [tenantId],
+    ).catch(() => []);
 
-    // Purchased numbers first, then any free shared-pool numbers; de-duplicated.
-    return Array.from(new Set([...purchased, ...poolAvailable]));
+    return Array.from(new Set([
+      ...ownedRows.map((r) => r.phone_number),
+      ...onBots.map((r) => r.phone_number),
+    ]));
   }
 
   /**
