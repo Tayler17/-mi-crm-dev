@@ -29,7 +29,15 @@ async function handleResponse(res: Response) {
   }
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    // Surface only the human-readable message — never the raw {error, statusCode} JSON.
+    let msg = `HTTP ${res.status}`;
+    try {
+      const j = JSON.parse(text);
+      if (j?.message) msg = Array.isArray(j.message) ? j.message.join(', ') : String(j.message);
+    } catch {
+      if (text) msg = text;
+    }
+    throw new Error(msg);
   }
   return res.json();
 }
