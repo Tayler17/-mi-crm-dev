@@ -132,7 +132,11 @@ export default function ChatPage() {
             : c,
         ),
       );
-    } catch {} finally { setSending(false); }
+    } catch (e: any) {
+      // Don't lose what the user typed, and surface the real reason instead of silently dropping it
+      setInput(body);
+      alert(e?.message || 'No se pudo enviar el mensaje');
+    } finally { setSending(false); }
   }
 
   async function startDm(agent: Agent) {
