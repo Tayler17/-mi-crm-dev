@@ -100,11 +100,15 @@ export class InternalChatService {
 
   async getMessages(chatId: string, tenantId: string, userId: string, limit = 50) {
     await this.ensureMember(chatId, userId);
+    // Fetch the MOST RECENT `limit` messages (DESC + take), then restore chronological
+    // order for display. Using ASC+take returned the oldest 50, so any message past the
+    // 50th vanished on the next poll — that's why sent messages "disappeared".
     const msgs = await this.msgRepo.find({
       where: { chatId, tenantId },
-      order: { createdAt: 'ASC' },
+      order: { createdAt: 'DESC' },
       take: limit,
     });
+    msgs.reverse();
 
     // Enrich sender names
     const senderIds = [...new Set(msgs.map((m) => m.senderId))];
