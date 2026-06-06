@@ -1403,7 +1403,7 @@ export default function CallBotsPage() {
           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>{i.callBotsSubtitle}</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          {canManage && (
+          {isOwner && (
             <button className="btn btn-secondary" onClick={() => setRegModalOpen(true)}>
               🛡️ Verificación
             </button>
@@ -1993,6 +1993,9 @@ function PhoneNumberModal({ isOwner, onClose, onChanged }: { isOwner: boolean; o
                           {regUploading ? 'Subiendo…' : '📎 Subir documento'}
                         </button>
                         {regDocs.map((d, i) => <span key={i} style={{ fontSize: 11, marginLeft: 8, padding: '2px 8px', background: '#fff', borderRadius: 6 }}>{d.name}</span>)}
+                        <div style={{ fontSize: 11, color: '#854d0e', marginTop: 4 }}>
+                          Sube ID, comprobante de dirección y registro mercantil (según el país). PDF o imagen.
+                        </div>
                       </div>
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button className="btn btn-primary" style={{ fontSize: 12 }} disabled={regSubmitting} onClick={handleRegSubmit}>
