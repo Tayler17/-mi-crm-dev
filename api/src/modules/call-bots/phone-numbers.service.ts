@@ -113,8 +113,11 @@ export class PhoneNumbersService implements OnModuleInit {
   async search(opts: { country?: string; type?: string; areaCode?: string; contains?: string }) {
     const { sid, token } = await this.creds();
     const country = (opts.country || 'US').toUpperCase();
-    const type = ['local', 'mobile', 'tollFree'].includes(opts.type || '') ? opts.type! : 'local';
-    const typePath = type === 'tollFree' ? 'TollFree' : type === 'mobile' ? 'Mobile' : 'Local';
+    const TYPE_PATHS: Record<string, string> = {
+      local: 'Local', mobile: 'Mobile', tollFree: 'TollFree', national: 'National',
+    };
+    const type = TYPE_PATHS[opts.type || ''] ? opts.type! : 'local';
+    const typePath = TYPE_PATHS[type];
 
     const params: Record<string, string> = { PageSize: '20', VoiceEnabled: 'true' };
     // Twilio's AreaCode filter only works for US/CA. For every other country use the
@@ -128,7 +131,18 @@ export class PhoneNumbersService implements OnModuleInit {
 
     const qs = new URLSearchParams(params).toString();
     const path = `/2010-04-01/Accounts/${sid}/AvailablePhoneNumbers/${country}/${typePath}.json?${qs}`;
-    const json = await this.twilioRequest('GET', path, sid, token);
+    let json: any;
+    try {
+      json = await this.twilioRequest('GET', path, sid, token);
+    } catch (e: any) {
+      // Twilio returns 404 when that number TYPE isn't offered for the country.
+      if (/not found/i.test(e?.message || '')) {
+        throw new BadRequestException(
+          `Twilio no ofrece números de tipo "${type}" en ${country}. Prueba otro tipo (Móvil o Nacional).`,
+        );
+      }
+      throw e;
+    }
     const list: any[] = json?.available_phone_numbers ?? [];
     return list.map((n) => ({
       phoneNumber:  n.phone_number,

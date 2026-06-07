@@ -1849,7 +1849,7 @@ function PhoneNumberModal({ isOwner, onClose, onChanged }: { isOwner: boolean; o
     if (!confirm(`¿Comprar ${n.phoneNumber}? Esto genera un cargo mensual en tu cuenta Twilio.`)) return;
     setBuying(n.phoneNumber); setError('');
     try {
-      await buyPhoneNumber(n.phoneNumber, country);
+      await buyPhoneNumber(n.phoneNumber, country, type);
       setResults((prev) => prev.filter((x) => x.phoneNumber !== n.phoneNumber));
       setInfo(`✅ ${n.phoneNumber} comprado y listo para asignar a un bot.`);
       loadOwned();
@@ -1955,6 +1955,7 @@ function PhoneNumberModal({ isOwner, onClose, onChanged }: { isOwner: boolean; o
                 <select className="form-input" value={type} onChange={(e) => setType(e.target.value)}>
                   <option value="local">Local</option>
                   <option value="mobile">Móvil</option>
+                  <option value="national">Nacional</option>
                   <option value="tollFree">Gratuito</option>
                 </select>
               </div>
@@ -2178,6 +2179,7 @@ function RegulatoryModal({ isOwner, onClose }: { isOwner: boolean; onClose: () =
                 <select className="form-input" value={numberType} onChange={(e) => setNumberType(e.target.value)}>
                   <option value="local">Local / Fijo</option>
                   <option value="mobile">Móvil</option>
+                  <option value="national">Nacional</option>
                   <option value="tollFree">Gratuito</option>
                 </select>
               </div>

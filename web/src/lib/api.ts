@@ -731,8 +731,8 @@ export const searchPhoneNumbers = (params: { country?: string; type?: string; ar
   return apiGet<AvailableNumber[]>(`/phone-numbers/search?${qs}`);
 };
 export const getMyPhoneNumbers = () => apiGet<OwnedNumber[]>('/phone-numbers');
-export const buyPhoneNumber = (phoneNumber: string, country?: string) =>
-  apiPost<OwnedNumber>('/phone-numbers/buy', { phoneNumber, country });
+export const buyPhoneNumber = (phoneNumber: string, country?: string, type?: string) =>
+  apiPost<OwnedNumber>('/phone-numbers/buy', { phoneNumber, country, type });
 export const releasePhoneNumber = (id: string) => apiDelete(`/phone-numbers/${id}`);
 
 export interface TwilioInventoryNumber {
