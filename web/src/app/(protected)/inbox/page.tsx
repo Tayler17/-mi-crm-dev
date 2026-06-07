@@ -634,7 +634,6 @@ export default function InboxPage() {
 
   // ── Aux data ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    getContacts().then((r) => setContacts(r.data)).catch(() => {});
     getInboxes().then(setInboxes).catch(() => {});
     getCannedResponses().then(setCannedResponses).catch(() => {});
     getTags().then(setTags).catch(() => {});
@@ -642,6 +641,16 @@ export default function InboxPage() {
     getTeams().then(setTeams).catch(() => {});
     getQueues().then(setQueues).catch(() => {});
   }, []);
+
+  // ── Contact picker: search the FULL contact list server-side (debounced) ──────
+  // Previously only the first page was loaded, so contacts beyond it never showed
+  // when starting a new conversation.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      getContacts(1, 50, contactSearch.trim()).then((r) => setContacts(r.data)).catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [contactSearch]);
 
   // ── Real-time notifications (SSE) ────────────────────────────────────────────
   useEffect(() => {
@@ -2258,13 +2267,15 @@ export default function InboxPage() {
                       const c = contacts.find((x) => x.id === e.target.value);
                       if (c) setContactSearch(c.fullName ?? '');
                     }}
-                    size={Math.min(6, (contacts.filter((c) => !contactSearch.trim() || c.fullName?.toLowerCase().includes(contactSearch.toLowerCase())).length) + 1)}
+                    size={Math.min(6, contacts.length + 1)}
                     style={{ height: 'auto' }}
                   >
                     <option value="">— {i.noContact} —</option>
-                    {contacts
-                      .filter((c) => !contactSearch.trim() || c.fullName?.toLowerCase().includes(contactSearch.toLowerCase()))
-                      .map((c) => <option key={c.id} value={c.id}>{c.fullName}</option>)}
+                    {contacts.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.fullName}{c.phone ? ` · ${c.phone}` : ''}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="form-group">
