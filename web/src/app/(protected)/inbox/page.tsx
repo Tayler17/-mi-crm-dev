@@ -652,6 +652,21 @@ export default function InboxPage() {
     return () => clearTimeout(t);
   }, [contactSearch]);
 
+  // ── Deep-link from Contacts "💬 Conversar": open the new-conversation modal
+  // pre-filled with the contact passed via ?contactId=...&contactName=...
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const cid = params.get('contactId');
+    if (!cid) return;
+    const cname = params.get('contactName') ?? '';
+    setNewContactId(cid);
+    setContactSearch(cname);
+    setNewChannel('whatsapp_web');
+    setShowNew(true);
+    window.history.replaceState({}, '', '/inbox'); // clean URL so refresh doesn't re-trigger
+  }, []);
+
   // ── Real-time notifications (SSE) ────────────────────────────────────────────
   useEffect(() => {
     const es = openNotificationsStream((data) => {

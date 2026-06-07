@@ -617,6 +617,12 @@ export default function ContactsPage() {
                         <td style={{ color: 'var(--text-muted)' }}>{new Date(c.createdAt).toLocaleDateString(i.locale)}</td>
                         <td>
                           <div style={{ display: 'flex', gap: 8 }}>
+                            <Link
+                              href={`/inbox?contactId=${c.id}&contactName=${encodeURIComponent(c.fullName ?? '')}`}
+                              className="btn btn-secondary"
+                              style={{ fontSize: 12, padding: '4px 10px' }}
+                              title="Iniciar conversación"
+                            >💬</Link>
                             <Link href={`/contacts/${c.id}`} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>{i.viewBtn}</Link>
                             <button className="btn btn-danger" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => handleDelete(c)}>{i.delete}</button>
                           </div>
