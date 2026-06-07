@@ -1746,6 +1746,10 @@ const COUNTRY_OPTIONS = [
   { code: 'GB', label: '🇬🇧 Reino Unido' },
   { code: 'ES', label: '🇪🇸 España' },
   { code: 'MX', label: '🇲🇽 México' },
+  { code: 'CO', label: '🇨🇴 Colombia' },
+  { code: 'EC', label: '🇪🇨 Ecuador' },
+  { code: 'PE', label: '🇵🇪 Perú' },
+  { code: 'BR', label: '🇧🇷 Brasil' },
   { code: 'AU', label: '🇦🇺 Australia' },
 ];
 
