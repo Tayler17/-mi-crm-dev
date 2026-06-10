@@ -77,7 +77,7 @@ export class PhoneNumbersService implements OnModuleInit {
     return { sid: accountSid, token: authToken };
   }
 
-  private twilioRequest(method: 'GET' | 'POST', path: string, sid: string, token: string, form?: Record<string, string>): Promise<any> {
+  private twilioRequest(method: 'GET' | 'POST', path: string, sid: string, token: string, form?: Record<string, string>, host = 'api.twilio.com'): Promise<any> {
     const body = form ? new URLSearchParams(form).toString() : '';
     const auth = Buffer.from(`${sid}:${token}`).toString('base64');
     const headers: Record<string, string> = { Authorization: `Basic ${auth}` };
@@ -87,7 +87,7 @@ export class PhoneNumbersService implements OnModuleInit {
     }
     return new Promise((resolve, reject) => {
       const req = https.request(
-        { hostname: 'api.twilio.com', path, method, headers, timeout: 15_000 },
+        { hostname: host, path, method, headers, timeout: 15_000 },
         (res) => {
           let data = '';
           res.on('data', (c) => (data += c));
@@ -238,7 +238,8 @@ export class PhoneNumbersService implements OnModuleInit {
   // ── Owner: list Twilio Regulatory Bundles (BU...) for the approval dropdown ──
   async listTwilioBundles() {
     const { sid, token } = await this.creds();
-    const json = await this.twilioRequest('GET', `/v2/RegulatoryCompliance/Bundles?PageSize=50`, sid, token);
+    // Regulatory Bundles live on the Numbers v2 API host, not api.twilio.com
+    const json = await this.twilioRequest('GET', `/v2/RegulatoryCompliance/Bundles?PageSize=50`, sid, token, undefined, 'numbers.twilio.com');
     return (json?.results ?? []).map((b: any) => ({
       sid: b.sid,
       status: b.status,
