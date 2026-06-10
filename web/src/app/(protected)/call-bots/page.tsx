@@ -37,9 +37,13 @@ import {
   rejectRegulatory,
   uploadRegulatoryDoc,
   downloadRegulatoryDoc,
+  getTwilioBundles,
+  getTwilioAddresses,
   type TwilioInventoryNumber,
   type TenantWithPlan,
   type RegulatoryBundle,
+  type TwilioBundleOpt,
+  type TwilioAddressOpt,
   API_URL,
   CallBot,
   CallLog,
@@ -2082,10 +2086,17 @@ function RegulatoryModal({ isOwner, onClose }: { isOwner: boolean; onClose: () =
   const fileRef = useRef<HTMLInputElement>(null);
   // owner approval inputs keyed by request id
   const [approve, setApprove] = useState<Record<string, { bundle: string; address: string }>>({});
+  // owner: Twilio bundles/addresses for the approval dropdowns
+  const [twBundles, setTwBundles] = useState<TwilioBundleOpt[]>([]);
+  const [twAddresses, setTwAddresses] = useState<TwilioAddressOpt[]>([]);
 
   const reload = () => {
     getMyRegulatory().then(setMine).catch(() => {});
-    if (isOwner) getAllRegulatory().then(setAll).catch(() => {});
+    if (isOwner) {
+      getAllRegulatory().then(setAll).catch(() => {});
+      getTwilioBundles().then(setTwBundles).catch(() => {});
+      getTwilioAddresses().then(setTwAddresses).catch(() => {});
+    }
   };
   useEffect(() => { reload(); }, [isOwner]);
 
@@ -2247,10 +2258,16 @@ function RegulatoryModal({ isOwner, onClose }: { isOwner: boolean; onClose: () =
                         </div>
                       )}
                       <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                        <input className="form-input" style={{ flex: 1, minWidth: 140, fontSize: 12 }} placeholder="Bundle SID (BU...)"
-                          value={v.bundle} onChange={(e) => setApprove((p) => ({ ...p, [r.id]: { ...v, bundle: e.target.value } }))} />
-                        <input className="form-input" style={{ flex: 1, minWidth: 140, fontSize: 12 }} placeholder="Address SID (AD...)"
-                          value={v.address} onChange={(e) => setApprove((p) => ({ ...p, [r.id]: { ...v, address: e.target.value } }))} />
+                        <select className="form-input" style={{ flex: 1, minWidth: 160, fontSize: 12 }}
+                          value={v.bundle} onChange={(e) => setApprove((p) => ({ ...p, [r.id]: { ...v, bundle: e.target.value } }))}>
+                          <option value="">— Bundle (BU...) —</option>
+                          {twBundles.map((b) => <option key={b.sid} value={b.sid}>{b.label}</option>)}
+                        </select>
+                        <select className="form-input" style={{ flex: 1, minWidth: 160, fontSize: 12 }}
+                          value={v.address} onChange={(e) => setApprove((p) => ({ ...p, [r.id]: { ...v, address: e.target.value } }))}>
+                          <option value="">— Address (AD...) opcional —</option>
+                          {twAddresses.map((a) => <option key={a.sid} value={a.sid}>{a.label}</option>)}
+                        </select>
                         <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => handleApprove(r.id)}>Aprobar</button>
                         <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 12, color: 'var(--danger)' }} onClick={() => handleReject(r.id)}>Rechazar</button>
                       </div>

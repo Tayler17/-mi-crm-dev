@@ -107,6 +107,20 @@ export class PhoneNumbersController {
     return this.svc.listAllRegulatory();
   }
 
+  /** Owner: Twilio Addresses (AD...) for the approval dropdown */
+  @Get('twilio-addresses')
+  twilioAddresses(@Request() req: any) {
+    if (req.user?.role !== 'owner') throw new ForbiddenException();
+    return this.svc.listTwilioAddresses();
+  }
+
+  /** Owner: Twilio Regulatory Bundles (BU...) for the approval dropdown */
+  @Get('twilio-bundles')
+  twilioBundles(@Request() req: any) {
+    if (req.user?.role !== 'owner') throw new ForbiddenException();
+    return this.svc.listTwilioBundles();
+  }
+
   /** Owner: approve a request with the Twilio Bundle + Address SIDs */
   @Post('regulatory/:id/approve')
   approveRegulatory(@Param('id') id: string, @Body() body: { bundleSid?: string; addressSid?: string }, @Request() req: any) {

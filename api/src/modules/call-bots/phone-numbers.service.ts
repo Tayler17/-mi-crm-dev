@@ -225,6 +225,29 @@ export class PhoneNumbersService implements OnModuleInit {
     );
   }
 
+  // ── Owner: list Twilio Addresses (AD...) for the approval dropdown ──────────
+  async listTwilioAddresses() {
+    const { sid, token } = await this.creds();
+    const json = await this.twilioRequest('GET', `/2010-04-01/Accounts/${sid}/Addresses.json?PageSize=50`, sid, token);
+    return (json?.addresses ?? []).map((a: any) => ({
+      sid: a.sid,
+      label: `${a.customer_name || a.friendly_name || 'Dirección'} — ${[a.street, a.city, a.iso_country].filter(Boolean).join(', ')}`,
+    }));
+  }
+
+  // ── Owner: list Twilio Regulatory Bundles (BU...) for the approval dropdown ──
+  async listTwilioBundles() {
+    const { sid, token } = await this.creds();
+    const json = await this.twilioRequest('GET', `/v2/RegulatoryCompliance/Bundles?PageSize=50`, sid, token);
+    return (json?.results ?? []).map((b: any) => ({
+      sid: b.sid,
+      status: b.status,
+      isoCountry: b.iso_country ?? '',
+      numberType: b.number_type ?? '',
+      label: `${b.friendly_name || b.sid} · ${b.iso_country || ''} ${b.number_type || ''} (${b.status})`,
+    }));
+  }
+
   // ── Owner: list ALL numbers in the master Twilio account ────────────────────
   /** Numbers owned in the master Twilio account, flagged with which tenant (if any) holds each. */
   async twilioInventory() {

@@ -772,6 +772,10 @@ export const submitRegulatory = (data: {
   contactEmail?: string; addressText?: string; docUrls?: string[];
 }) => apiPost<RegulatoryBundle>('/phone-numbers/regulatory', data);
 export const getAllRegulatory = () => apiGet<RegulatoryBundle[]>('/phone-numbers/regulatory/all');
+export interface TwilioBundleOpt { sid: string; label: string; status?: string; isoCountry?: string; numberType?: string }
+export interface TwilioAddressOpt { sid: string; label: string }
+export const getTwilioBundles = () => apiGet<TwilioBundleOpt[]>('/phone-numbers/twilio-bundles');
+export const getTwilioAddresses = () => apiGet<TwilioAddressOpt[]>('/phone-numbers/twilio-addresses');
 export const approveRegulatory = (id: string, bundleSid: string, addressSid: string) =>
   apiPost<RegulatoryBundle>(`/phone-numbers/regulatory/${id}/approve`, { bundleSid, addressSid });
 export const rejectRegulatory = (id: string, notes: string) =>
