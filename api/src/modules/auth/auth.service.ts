@@ -40,7 +40,8 @@ export class AuthService {
         ADD COLUMN IF NOT EXISTS reset_token VARCHAR(255),
         ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMPTZ,
         ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(255),
-        ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ
+        ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ
     `).catch(() => {});
     await this.db.query(`
       ALTER TABLE tenants ADD COLUMN IF NOT EXISTS lang VARCHAR(10) DEFAULT 'es'
@@ -201,6 +202,9 @@ export class AuthService {
     const payload = { sub: user.id, email: user.email, tenantId, role: user.role };
     const accessToken = this.jwtService.sign(payload);
 
+    // Record this login as the latest activity
+    this.db.query(`UPDATE users SET last_seen_at=NOW() WHERE id=$1`, [user.id]).catch(() => {});
+
     return {
       accessToken,
       user: {
@@ -211,6 +215,17 @@ export class AuthService {
         tenantId,
       },
     };
+  }
+
+  /** Heartbeat: mark the user as recently active (throttled in-memory to ~1/min). */
+  private readonly lastSeenWrites = new Map<string, number>();
+  async touchLastSeen(userId: string) {
+    const now = Date.now();
+    const prev = this.lastSeenWrites.get(userId) ?? 0;
+    if (now - prev < 60_000) return { ok: true }; // throttle DB writes
+    this.lastSeenWrites.set(userId, now);
+    await this.db.query(`UPDATE users SET last_seen_at=NOW() WHERE id=$1`, [userId]).catch(() => {});
+    return { ok: true };
   }
 
   async demoLogin() {
@@ -264,7 +279,7 @@ export class AuthService {
   getUsers(tenantId: string) {
     return this.userRepo.find({
       where: { tenantId },
-      select: ['id', 'fullName', 'email', 'role', 'isActive', 'createdAt', 'availability'],
+      select: ['id', 'fullName', 'email', 'role', 'isActive', 'createdAt', 'availability', 'lastSeenAt'],
       order: { fullName: 'ASC' },
     });
   }
@@ -272,7 +287,7 @@ export class AuthService {
   async getUser(id: string, tenantId: string) {
     const user = await this.userRepo.findOne({
       where: { id, tenantId },
-      select: ['id', 'fullName', 'email', 'role', 'isActive', 'createdAt', 'availability'],
+      select: ['id', 'fullName', 'email', 'role', 'isActive', 'createdAt', 'availability', 'lastSeenAt'],
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
     return user;

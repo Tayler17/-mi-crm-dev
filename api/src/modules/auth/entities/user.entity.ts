@@ -38,6 +38,9 @@ export class User {
   @Column({ name: 'email_verified_at', nullable: true, type: 'timestamptz' })
   emailVerifiedAt: Date | null;
 
+  @Column({ name: 'last_seen_at', nullable: true, type: 'timestamptz' })
+  lastSeenAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

@@ -8,6 +8,21 @@ import { APP } from '@/lib/i18n/app';
 const ALL_ROLES = ['owner', 'admin', 'agent'] as const;
 type Role = typeof ALL_ROLES[number];
 
+/** Human "hace X" relative time for the last-seen timestamp. */
+function relativeTime(iso?: string | null): string {
+  if (!iso) return 'nunca';
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 0) return 'ahora';
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'ahora';
+  if (m < 60) return `hace ${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `hace ${h} h`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `hace ${d} d`;
+  return new Date(iso).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 const ROLE_RANK: Record<string, number> = { owner: 100, admin: 50, agent: 10 };
 const ROLE_META: Record<string, { label: string; color: string; bg: string; desc: string }> = {
   owner: { label: 'Owner',  color: '#7c3aed', bg: '#ede9fe', desc: 'Superadministrador de la plataforma' },
@@ -225,6 +240,10 @@ export default function UsersPage() {
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{u.email}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
                       Desde {new Date(u.createdAt).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      {' · '}
+                      <span title={u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleString('es-ES') : ''}>
+                        Última conexión: {relativeTime(u.lastSeenAt)}
+                      </span>
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>

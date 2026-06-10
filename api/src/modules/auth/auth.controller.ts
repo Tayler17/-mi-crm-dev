@@ -69,6 +69,14 @@ export class AuthController {
     return this.authService.setAvailability(req.user.id, tenantId, availability);
   }
 
+  /** Heartbeat from the app to record the user's last activity time */
+  @Post('me/seen')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  touchLastSeen(@Request() req: any) {
+    return this.authService.touchLastSeen(req.user.id);
+  }
+
   /** Update own profile: name and/or avatar URL */
   @Patch('me')
   @UseGuards(JwtAuthGuard)

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { logout, getStoredUser, openNotificationsStream, setMyAvailability, getMyChats, getCurrentPlan } from '@/lib/api';
+import { logout, getStoredUser, openNotificationsStream, setMyAvailability, getMyChats, getCurrentPlan, touchLastSeen } from '@/lib/api';
 import { LangContext } from '@/lib/lang-context';
 import { GlobalSearch } from '@/components/GlobalSearch';
 
@@ -172,6 +172,11 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     setUser(getStoredUser());
     setAvailability(localStorage.getItem('availability') ?? 'online');
     setMounted(true);
+
+    // Heartbeat: record last activity now and every 2 minutes while the app is open
+    touchLastSeen().catch(() => {});
+    const seenTimer = setInterval(() => { touchLastSeen().catch(() => {}); }, 120_000);
+    window.addEventListener('beforeunload', () => clearInterval(seenTimer));
 
     // Restore preferences
     const savedDark = localStorage.getItem('theme') === 'dark';

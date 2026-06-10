@@ -326,9 +326,11 @@ export interface User {
   isActive: boolean;
   createdAt: string;
   availability?: string;
+  lastSeenAt?: string | null;
 }
 
 export const getUsers = () => apiGet<User[]>('/auth/users');
+export const touchLastSeen = () => apiPost('/auth/me/seen', {});
 export const createUser = (data: { email: string; fullName: string; password: string; role?: string }) =>
   apiPost<User>('/auth/users', data);
 export const updateUser = (id: string, data: Partial<User> & { password?: string }) =>
