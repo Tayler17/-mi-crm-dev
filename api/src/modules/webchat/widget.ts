@@ -36,7 +36,12 @@ export const WIDGET_JS = `
   function api(method, path, body) {
     var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
     if (body) opts.body = JSON.stringify(body);
-    return fetch(API_BASE + '/webchat/' + path, opts).then(function (r) { return r.json(); });
+    return fetch(API_BASE + '/webchat/' + path, opts).then(function (r) {
+      // fetch does NOT reject on HTTP errors — guard so a 404/500 body never gets
+      // treated as a valid config (which rendered an "undefined" broken widget).
+      if (!r.ok) { return Promise.reject(new Error('HTTP ' + r.status)); }
+      return r.json();
+    });
   }
 
   // ── Render helpers ────────────────────────────────────────────────────────────
@@ -358,7 +363,16 @@ export const WIDGET_JS = `
   function start() {
     api('GET', BOT_ID + '/config')
       .then(function (data) {
+        // Only render when we got a real config (active bot + webchat enabled)
+        if (!data || !data.botId) {
+          console.warn('[Webchat] Config inválida — el bot debe estar activo y el webchat habilitado.');
+          return;
+        }
         cfg = data;
+        cfg.color = cfg.color || '#6366f1';
+        cfg.title = cfg.title || 'Asistente';
+        cfg.subtitle = cfg.subtitle || '';
+        cfg.placeholder = cfg.placeholder || 'Escribe un mensaje...';
         buildUI();
 
         api('POST', BOT_ID + '/session', {
