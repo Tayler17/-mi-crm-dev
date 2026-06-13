@@ -1474,8 +1474,13 @@ export default function AiChatbotsPage() {
   }
 
   async function handleToggle(bot: AiChatbot) {
-    const updated = await toggleAiChatbot(bot.id);
-    setBots((prev) => prev.map((b) => b.id === bot.id ? updated : b));
+    try {
+      const updated = await toggleAiChatbot(bot.id);
+      // Merge only the status so we don't lose the enriched list fields (sessions, etc.)
+      setBots((prev) => prev.map((b) => b.id === bot.id ? { ...b, status: updated.status } : b));
+    } catch (e: any) {
+      alert(e?.message || 'No se pudo cambiar el estado del bot');
+    }
   }
 
   async function handleDuplicate(bot: AiChatbot) {
