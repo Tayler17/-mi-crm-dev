@@ -311,7 +311,7 @@ export const WIDGET_JS = `
         padding: '5px 0 8px',
         background: '#fafafa',
       },
-    }, 'Powered by CRM');
+    }, 'Powered by AutoMarkIQ');
 
     panel.appendChild(header);
     panel.appendChild(msgList);
