@@ -25,6 +25,11 @@ export class AiChatbot {
   @Column({ default: 0 }) handoff_count: number;
   @Column({ nullable: true }) created_by: string;
   @Column({ type: 'jsonb', nullable: true }) visual_config: Record<string, any> | null;
+  @Column({ default: false }) webchat_enabled: boolean;
+  @Column({ nullable: true }) webchat_color: string;
+  @Column({ nullable: true }) webchat_title: string;
+  @Column({ nullable: true }) webchat_subtitle: string;
+  @Column({ nullable: true }) webchat_placeholder: string;
   @CreateDateColumn() created_at: Date;
   @UpdateDateColumn() updated_at: Date;
 }
