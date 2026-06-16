@@ -244,10 +244,10 @@ export class MessagesController {
 
   private async deliverOutbound(conversationId: string, tenantId: string, text: string, contentType = 'text', messageId?: string) {
     if (!text) return;
-    // Defensive: a body shaped like "/uploads/x.ext|name[|caption]" is ALWAYS a
-    // media message — infer the type from the extension regardless of the passed
-    // contentType, so the recipient never receives a raw /uploads path as text.
-    if (/^\/uploads\/\S+\|/.test(text)) {
+    // Defensive: any body that points at an uploaded file ("/uploads/...") is a
+    // media message (with or without the "|name" suffix). Infer the type from the
+    // extension regardless of contentType so the recipient never gets a raw path.
+    if (/^\/uploads\/\S+/.test(text)) {
       const ext = (text.split('|')[0].split('.').pop() ?? '').toLowerCase();
       contentType = /^(jpg|jpeg|png|gif|webp|bmp|heic)$/.test(ext) ? 'image'
         : /^(mp3|ogg|oga|m4a|wav|opus|aac)$/.test(ext) ? 'audio'
@@ -276,8 +276,10 @@ export class MessagesController {
           let waId: string | false = false;
           if (contentType === 'image' || contentType === 'audio' || contentType === 'video' || contentType === 'file') {
             const [fileUrl, , fileCaption] = text.split('|');
+            console.log(`[deliverOutbound] WA file send type=${contentType} url=${fileUrl}`);
             waId = await this.waSvc.sendFile(connectionId, remoteJid, fileUrl, contentType, fileCaption || undefined);
           } else {
+            console.log(`[deliverOutbound] WA text send type=${contentType} body="${text.slice(0, 60)}"`);
             waId = await this.waSvc.sendMessage(connectionId, remoteJid, text);
           }
           if (!waId) {
