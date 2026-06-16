@@ -283,3 +283,11 @@ tr:hover td { background: var(--bg); }
   .page-body   { padding: 16px; }
 
 }
+
+/* Internal chat: per-message edit/delete actions appear on hover (desktop);
+   stay visible on touch devices that have no hover. */
+.chat-msg-actions { opacity: 1; }
+@media (hover: hover) {
+  .chat-msg-actions { opacity: 0; transition: opacity .15s; }
+  .chat-msg-wrap:hover .chat-msg-actions { opacity: 1; }
+}

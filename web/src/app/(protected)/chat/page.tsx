@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   getMyChats, createOrFindDm, getChatMessages, sendChatMessage, markChatRead,
-  getAgents, InternalChat, ChatMessage, Agent,
+  editChatMessage, deleteChatMessage, uploadChatFile,
+  getAgents, InternalChat, ChatMessage, Agent, API_URL,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
 import { APP } from '@/lib/i18n/app';
@@ -67,6 +68,10 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [showNewDm, setShowNewDm] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentSearch, setAgentSearch] = useState('');
@@ -160,6 +165,42 @@ export default function ChatPage() {
       setInput(body);
       alert(e?.message || 'No se pudo enviar el mensaje');
     } finally { setSending(false); }
+  }
+
+  async function handleAttach(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (e.target) e.target.value = ''; // allow re-selecting the same file
+    if (!file || !activeChat) return;
+    setUploading(true);
+    try {
+      const up = await uploadChatFile(file);
+      const caption = input.trim();
+      setInput('');
+      const msg = await sendChatMessage(activeChat.id, {
+        body: caption,
+        attachmentUrl: up.url, attachmentType: up.attachmentType, attachmentName: up.attachmentName,
+      });
+      setMessages((prev) => [...prev, msg]);
+    } catch (err: any) {
+      alert(err?.message || 'No se pudo enviar el archivo');
+    } finally { setUploading(false); }
+  }
+
+  async function handleDelete(id: string) {
+    if (!activeChat || !confirm('¿Eliminar este mensaje?')) return;
+    try { await deleteChatMessage(id); await loadMessages(activeChat.id, true); }
+    catch (e: any) { alert(e?.message || 'No se pudo eliminar'); }
+  }
+
+  function startEdit(m: ChatMessage) { setEditingId(m.id); setEditText(m.body); }
+
+  async function saveEdit() {
+    if (!editingId || !activeChat || !editText.trim()) return;
+    try {
+      await editChatMessage(editingId, editText.trim());
+      setEditingId(null); setEditText('');
+      await loadMessages(activeChat.id, true);
+    } catch (e: any) { alert(e?.message || 'No se pudo editar'); }
   }
 
   async function startDm(agent: Agent) {
@@ -295,22 +336,69 @@ export default function ChatPage() {
                   return (
                     <div key={msg.id} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', gap: 8, alignItems: 'flex-end' }}>
                       {!isMe && <Avatar name={msg.sender?.full_name} email={msg.sender?.email} size={28} />}
-                      <div style={{ maxWidth: '65%' }}>
+                      <div className="chat-msg-wrap" style={{ maxWidth: '65%' }}>
                         {!isMe && (
                           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>
                             {msg.sender?.full_name || msg.sender?.email}
                           </div>
                         )}
-                        <div style={{
-                          background: isMe ? 'var(--primary)' : 'var(--bg-secondary)',
-                          color: isMe ? '#fff' : 'var(--text)',
-                          padding: '8px 12px', borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                          fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word',
-                        }}>
-                          {msg.body}
-                        </div>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, textAlign: isMe ? 'right' : 'left' }}>
-                          {formatTime(msg.createdAt, i.locale)}
+                        {editingId === msg.id ? (
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+                            <textarea
+                              value={editText}
+                              onChange={(e) => setEditText(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); } if (e.key === 'Escape') { setEditingId(null); } }}
+                              rows={1} autoFocus
+                              style={{ resize: 'none', padding: '8px 12px', borderRadius: 12, border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text)', fontSize: 14, minWidth: 180 }}
+                            />
+                            <button className="btn btn-primary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={saveEdit}>✓</button>
+                            <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => { setEditingId(null); setEditText(''); }}>✕</button>
+                          </div>
+                        ) : msg.deletedAt ? (
+                          <div style={{
+                            background: isMe ? 'var(--primary)' : 'var(--bg-secondary)', opacity: 0.6,
+                            color: isMe ? '#fff' : 'var(--text)', padding: '8px 12px',
+                            borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                            fontSize: 13, fontStyle: 'italic',
+                          }}>
+                            🚫 Mensaje eliminado
+                          </div>
+                        ) : (
+                          <div style={{
+                            background: isMe ? 'var(--primary)' : 'var(--bg-secondary)',
+                            color: isMe ? '#fff' : 'var(--text)',
+                            padding: msg.attachmentType === 'image' ? 4 : '8px 12px',
+                            borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                            fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word',
+                          }}>
+                            {msg.attachmentUrl && msg.attachmentType === 'image' && (
+                              <a href={`${API_URL}${msg.attachmentUrl}`} target="_blank" rel="noopener noreferrer">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={`${API_URL}${msg.attachmentUrl}`} alt={msg.attachmentName || ''} style={{ maxWidth: 240, maxHeight: 240, borderRadius: 12, display: 'block' }} />
+                              </a>
+                            )}
+                            {msg.attachmentUrl && msg.attachmentType === 'audio' && (
+                              <audio controls src={`${API_URL}${msg.attachmentUrl}`} style={{ maxWidth: 240 }} />
+                            )}
+                            {msg.attachmentUrl && msg.attachmentType === 'file' && (
+                              <a href={`${API_URL}${msg.attachmentUrl}`} target="_blank" rel="noopener noreferrer"
+                                style={{ color: isMe ? '#fff' : 'var(--primary)', textDecoration: 'underline', wordBreak: 'break-all' }}>
+                                📎 {msg.attachmentName || 'Archivo'}
+                              </a>
+                            )}
+                            {msg.body && <div style={{ marginTop: msg.attachmentUrl ? 6 : 0, padding: msg.attachmentType === 'image' ? '0 8px 4px' : 0 }}>{msg.body}</div>}
+                          </div>
+                        )}
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, textAlign: isMe ? 'right' : 'left', display: 'flex', gap: 8, justifyContent: isMe ? 'flex-end' : 'flex-start', alignItems: 'center' }}>
+                          <span>{formatTime(msg.createdAt, i.locale)}{msg.editedAt && !msg.deletedAt ? ' · editado' : ''}</span>
+                          {isMe && !msg.deletedAt && editingId !== msg.id && (
+                            <span className="chat-msg-actions" style={{ display: 'flex', gap: 6 }}>
+                              {!msg.attachmentUrl && (
+                                <button onClick={() => startEdit(msg)} title="Editar" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}>✎</button>
+                              )}
+                              <button onClick={() => handleDelete(msg.id)} title="Eliminar" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}>🗑</button>
+                            </span>
+                          )}
                         </div>
                       </div>
                       {isMe && <Avatar name={peer!.name} email={peer!.email} size={28} />}
@@ -322,6 +410,22 @@ export default function ChatPage() {
             </div>
 
             <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', background: 'var(--bg)', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,audio/*"
+                style={{ display: 'none' }}
+                onChange={handleAttach}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || sending}
+                title="Adjuntar imagen o audio"
+                style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '50%', width: 40, height: 40, flexShrink: 0, cursor: 'pointer', fontSize: 18, color: 'var(--text-muted)' }}
+              >
+                {uploading ? '…' : '📎'}
+              </button>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}

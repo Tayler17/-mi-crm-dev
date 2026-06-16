@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, OnModuleInit, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { InternalChat } from './entities/internal-chat.entity';
@@ -7,7 +7,7 @@ import { InternalChatMessage } from './entities/internal-chat-message.entity';
 import { CreateChatDto, SendMessageDto } from './dto/internal-chat.dto';
 
 @Injectable()
-export class InternalChatService {
+export class InternalChatService implements OnModuleInit {
   constructor(
     @InjectRepository(InternalChat)
     private readonly chatRepo: Repository<InternalChat>,
@@ -16,6 +16,19 @@ export class InternalChatService {
     @InjectRepository(InternalChatMessage)
     private readonly msgRepo: Repository<InternalChatMessage>,
   ) {}
+
+  // Add the attachment / edit / delete columns to the existing table (no migrations in this project).
+  async onModuleInit() {
+    await this.msgRepo.query(`
+      ALTER TABLE internal_chat_messages
+        ADD COLUMN IF NOT EXISTS attachment_url  TEXT,
+        ADD COLUMN IF NOT EXISTS attachment_type TEXT,
+        ADD COLUMN IF NOT EXISTS attachment_name TEXT,
+        ADD COLUMN IF NOT EXISTS edited_at  TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ
+    `).catch(() => {});
+    await this.msgRepo.query(`ALTER TABLE internal_chat_messages ALTER COLUMN body SET DEFAULT ''`).catch(() => {});
+  }
 
   // List all chats where the current user is a member
   async findMyChats(tenantId: string, userId: string) {
@@ -59,9 +72,17 @@ export class InternalChatService {
           [chat.members.map((m) => m.userId)],
         );
 
+        const previewBody = !lastMsg ? null
+          : lastMsg.deletedAt ? '🚫 Mensaje eliminado'
+          : lastMsg.body ? lastMsg.body
+          : lastMsg.attachmentType === 'image' ? '📷 Imagen'
+          : lastMsg.attachmentType === 'audio' ? '🎤 Nota de voz'
+          : lastMsg.attachmentUrl ? '📎 Archivo'
+          : '';
+
         return {
           ...chat,
-          lastMessage: lastMsg ? { body: lastMsg.body, senderId: lastMsg.senderId, createdAt: lastMsg.createdAt } : null,
+          lastMessage: lastMsg ? { body: previewBody ?? '', senderId: lastMsg.senderId, createdAt: lastMsg.createdAt } : null,
           unreadCount: unread,
           memberDetails: memberInfos,
         };
@@ -122,18 +143,50 @@ export class InternalChatService {
 
     return msgs.map((m) => ({
       ...m,
+      // Deleted messages: keep the row but hide the content.
+      body: m.deletedAt ? '' : m.body,
+      attachmentUrl: m.deletedAt ? null : m.attachmentUrl,
       sender: senderMap[m.senderId] ?? { id: m.senderId },
     }));
   }
 
   async sendMessage(chatId: string, tenantId: string, userId: string, dto: SendMessageDto) {
     await this.ensureMember(chatId, userId);
+    const body = (dto.body ?? '').trim();
+    if (!body && !dto.attachmentUrl) throw new ForbiddenException('Mensaje vacío');
     const msg = await this.msgRepo.save(
-      this.msgRepo.create({ chatId, tenantId, senderId: userId, body: dto.body }),
+      this.msgRepo.create({
+        chatId, tenantId, senderId: userId, body,
+        attachmentUrl: dto.attachmentUrl ?? null,
+        attachmentType: dto.attachmentType ?? null,
+        attachmentName: dto.attachmentName ?? null,
+      }),
     );
     // touch updated_at on the chat
     await this.chatRepo.update(chatId, { updatedAt: new Date() });
     return msg;
+  }
+
+  async editMessage(messageId: string, tenantId: string, userId: string, body: string) {
+    const msg = await this.msgRepo.findOne({ where: { id: messageId, tenantId } });
+    if (!msg) throw new NotFoundException('Mensaje no encontrado');
+    if (msg.senderId !== userId) throw new ForbiddenException('Solo puedes editar tus propios mensajes');
+    if (msg.deletedAt) throw new ForbiddenException('No se puede editar un mensaje eliminado');
+    const clean = (body ?? '').trim();
+    if (!clean) throw new ForbiddenException('El mensaje no puede quedar vacío');
+    msg.body = clean;
+    msg.editedAt = new Date();
+    await this.msgRepo.save(msg);
+    return { ok: true };
+  }
+
+  async deleteMessage(messageId: string, tenantId: string, userId: string) {
+    const msg = await this.msgRepo.findOne({ where: { id: messageId, tenantId } });
+    if (!msg) throw new NotFoundException('Mensaje no encontrado');
+    if (msg.senderId !== userId) throw new ForbiddenException('Solo puedes eliminar tus propios mensajes');
+    msg.deletedAt = new Date();
+    await this.msgRepo.save(msg);
+    return { ok: true };
   }
 
   async markRead(chatId: string, userId: string) {

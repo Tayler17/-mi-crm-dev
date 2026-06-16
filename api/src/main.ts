@@ -42,7 +42,7 @@ async function bootstrap() {
   // Serve public upload directories (conversation media, content images)
   // kb-pdfs are NOT served publicly — accessed only via protected API
   const uploadsDir = join(process.cwd(), 'uploads');
-  const subDirs = ['content', 'messages'];
+  const subDirs = ['content', 'messages', 'chat'];
   for (const sub of subDirs) {
     const dir = join(uploadsDir, sub);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });

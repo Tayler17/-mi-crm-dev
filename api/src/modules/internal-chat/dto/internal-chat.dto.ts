@@ -19,5 +19,23 @@ export class CreateChatDto {
 
 export class SendMessageDto {
   @IsString()
+  @IsOptional()
+  body?: string;
+
+  @IsString()
+  @IsOptional()
+  attachmentUrl?: string;
+
+  @IsString()
+  @IsOptional()
+  attachmentType?: string; // image | audio | file
+
+  @IsString()
+  @IsOptional()
+  attachmentName?: string;
+}
+
+export class EditMessageDto {
+  @IsString()
   body: string;
 }

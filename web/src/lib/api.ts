@@ -962,8 +962,20 @@ export interface ChatMessage {
   chatId: string;
   senderId: string;
   body: string;
+  attachmentUrl?: string | null;
+  attachmentType?: string | null; // image | audio | file
+  attachmentName?: string | null;
+  editedAt?: string | null;
+  deletedAt?: string | null;
   createdAt: string;
   sender: { id: string; full_name?: string; email?: string };
+}
+
+export interface ChatSendPayload {
+  body?: string;
+  attachmentUrl?: string;
+  attachmentType?: string;
+  attachmentName?: string;
 }
 
 export const getMyChats = () => apiGet<InternalChat[]>('/internal-chat');
@@ -971,10 +983,25 @@ export const createOrFindDm = (targetUserId: string) =>
   apiPost<InternalChat>('/internal-chat', { targetUserId });
 export const getChatMessages = (chatId: string) =>
   apiGet<ChatMessage[]>(`/internal-chat/${chatId}/messages`);
-export const sendChatMessage = (chatId: string, body: string) =>
-  apiPost<ChatMessage>(`/internal-chat/${chatId}/messages`, { body });
+export const sendChatMessage = (chatId: string, payload: string | ChatSendPayload) =>
+  apiPost<ChatMessage>(`/internal-chat/${chatId}/messages`, typeof payload === 'string' ? { body: payload } : payload);
+export const editChatMessage = (messageId: string, body: string) =>
+  apiPatch(`/internal-chat/messages/${messageId}`, { body });
+export const deleteChatMessage = (messageId: string) =>
+  apiDelete(`/internal-chat/messages/${messageId}`);
 export const markChatRead = (chatId: string) =>
   apiPost(`/internal-chat/${chatId}/read`, {});
+export async function uploadChatFile(file: File): Promise<{ url: string; attachmentType: string; attachmentName: string }> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(`${API_URL}/internal-chat/upload`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken()}`, 'X-Tenant-ID': getTenantId() },
+    body: fd,
+  });
+  if (!res.ok) throw new Error('No se pudo subir el archivo');
+  return res.json();
+}
 
 // ── Schedules ─────────────────────────────────────────────────────────────────
 
