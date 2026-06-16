@@ -242,6 +242,16 @@ export class MessagesController {
 
   private async deliverOutbound(conversationId: string, tenantId: string, text: string, contentType = 'text', messageId?: string) {
     if (!text) return;
+    // Defensive: a body shaped like "/uploads/x.ext|name[|caption]" is a media
+    // message even if contentType arrived as text — infer the type from the
+    // extension so the recipient never receives a raw /uploads path as text.
+    if ((contentType === 'text' || !contentType) && /^\/uploads\/\S+\|/.test(text)) {
+      const ext = (text.split('|')[0].split('.').pop() ?? '').toLowerCase();
+      contentType = /^(jpg|jpeg|png|gif|webp|bmp|heic)$/.test(ext) ? 'image'
+        : /^(mp3|ogg|oga|m4a|wav|opus|aac)$/.test(ext) ? 'audio'
+        : /^(mp4|mov|avi|webm|3gp)$/.test(ext) ? 'video'
+        : 'file';
+    }
     try {
       const [conv] = await this.db.query(
         `SELECT c.channel_type, c.connection_id, c.external_id,

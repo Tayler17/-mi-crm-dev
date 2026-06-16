@@ -1581,7 +1581,16 @@ export default function InboxPage() {
                       </div>
                     );
                   }
-                  const isFile = m.contentType === 'image' || m.contentType === 'audio' || m.contentType === 'file';
+                  // Effective type: infer from a "/uploads/x.ext|..." body if the
+                  // stored contentType is missing/text (e.g. optimistic snake_case render).
+                  let ctype = m.contentType;
+                  if ((!ctype || ctype === 'text') && /^\/uploads\/\S+\|/.test(m.body ?? '')) {
+                    const ext = (m.body.split('|')[0].split('.').pop() ?? '').toLowerCase();
+                    ctype = /^(jpe?g|png|gif|webp|bmp|heic)$/.test(ext) ? 'image'
+                      : /^(mp3|ogg|oga|m4a|wav|opus|aac)$/.test(ext) ? 'audio'
+                      : /^(mp4|mov|avi|webm|3gp)$/.test(ext) ? 'video' : 'file';
+                  }
+                  const isFile = ctype === 'image' || ctype === 'audio' || ctype === 'video' || ctype === 'file';
                   let fileUrl = ''; let fileName = '';
                   if (isFile && m.body?.includes('|')) { [fileUrl, fileName] = m.body.split('|'); }
                   else if (isFile) { fileUrl = m.body; fileName = m.body.split('/').pop() ?? 'archivo'; }
@@ -1589,11 +1598,11 @@ export default function InboxPage() {
                   return (
                     <div key={m.id} className={`msg ${m.isPrivate ? 'msg-note' : m.direction === 'outbound' ? 'msg-out' : 'msg-in'}`} style={isTranscript ? { maxWidth: '95%', alignSelf: 'stretch' } : undefined}>
                       <div className="msg-bubble" style={isTranscript ? { background: 'transparent', border: '1px solid var(--border)', padding: '12px 14px' } : undefined}>
-                        {m.contentType === 'image' && fileUrl ? (
+                        {ctype === 'image' && fileUrl ? (
                           <a href={`${API_URL}${fileUrl}`} target="_blank" rel="noopener">
                             <img src={`${API_URL}${fileUrl}`} alt={fileName} style={{ maxWidth: 220, maxHeight: 200, borderRadius: 6, display: 'block' }} />
                           </a>
-                        ) : m.contentType === 'audio' && fileUrl ? (
+                        ) : ctype === 'audio' && fileUrl ? (
                           <audio
                             key={`audio-${m.id}`}
                             controls
@@ -1611,13 +1620,13 @@ export default function InboxPage() {
                               }
                             }}
                           />
-                        ) : m.contentType === 'video' && fileUrl ? (
+                        ) : ctype === 'video' && fileUrl ? (
                           <video controls src={`${API_URL}${fileUrl}`} style={{ maxWidth: 220, borderRadius: 6 }} />
-                        ) : m.contentType === 'file' && fileUrl && /\.(jpe?g|png|gif|webp|bmp|heic)$/i.test(fileName) ? (
+                        ) : ctype === 'file' && fileUrl && /\.(jpe?g|png|gif|webp|bmp|heic)$/i.test(fileName) ? (
                           <a href={`${API_URL}${fileUrl}`} target="_blank" rel="noopener">
                             <img src={`${API_URL}${fileUrl}`} alt={fileName} style={{ maxWidth: 220, maxHeight: 200, borderRadius: 6, display: 'block' }} />
                           </a>
-                        ) : m.contentType === 'file' && fileUrl ? (
+                        ) : ctype === 'file' && fileUrl ? (
                           <a href={`${API_URL}${fileUrl}`} target="_blank" rel="noopener" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'inherit', textDecoration: 'none' }}>
                             📎 <span style={{ textDecoration: 'underline', wordBreak: 'break-all' }}>{fileName}</span>
                           </a>
