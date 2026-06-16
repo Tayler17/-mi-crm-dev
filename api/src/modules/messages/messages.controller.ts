@@ -158,7 +158,9 @@ export class MessagesController {
   @UseInterceptors(FileInterceptor('file', {
     storage: diskStorage({
       destination: (_req, _file, cb) => {
-        const dir = join(process.cwd(), 'uploads');
+        // Save under /uploads/messages, which IS served statically (the root
+        // /uploads is not) — otherwise sent media 404s and won't play in the CRM.
+        const dir = join(process.cwd(), 'uploads', 'messages');
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
         cb(null, dir);
       },
@@ -195,13 +197,13 @@ export class MessagesController {
     // Audio → mp3 for universal playback (Safari can't play webm/ogg). Falls back to original on failure.
     if (isAudio && !/\.mp3$/i.test(filename)) {
       try {
-        const inputPath = join(process.cwd(), 'uploads', file.filename);
+        const inputPath = join(process.cwd(), 'uploads', 'messages', file.filename);
         const outPath = await transcodeToMp3(inputPath);
         filename = outPath.split(/[\\/]/).pop()!;
         await unlink(inputPath).catch(() => {});
       } catch { /* keep original */ }
     }
-    const fileUrl = `/uploads/${filename}`;
+    const fileUrl = `/uploads/messages/${filename}`;
     // caption comes via multipart field
     const caption: string = (req.body?.caption ?? '').trim();
     const body = caption
@@ -242,10 +244,10 @@ export class MessagesController {
 
   private async deliverOutbound(conversationId: string, tenantId: string, text: string, contentType = 'text', messageId?: string) {
     if (!text) return;
-    // Defensive: a body shaped like "/uploads/x.ext|name[|caption]" is a media
-    // message even if contentType arrived as text — infer the type from the
-    // extension so the recipient never receives a raw /uploads path as text.
-    if ((contentType === 'text' || !contentType) && /^\/uploads\/\S+\|/.test(text)) {
+    // Defensive: a body shaped like "/uploads/x.ext|name[|caption]" is ALWAYS a
+    // media message — infer the type from the extension regardless of the passed
+    // contentType, so the recipient never receives a raw /uploads path as text.
+    if (/^\/uploads\/\S+\|/.test(text)) {
       const ext = (text.split('|')[0].split('.').pop() ?? '').toLowerCase();
       contentType = /^(jpg|jpeg|png|gif|webp|bmp|heic)$/.test(ext) ? 'image'
         : /^(mp3|ogg|oga|m4a|wav|opus|aac)$/.test(ext) ? 'audio'
