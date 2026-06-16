@@ -409,6 +409,7 @@ export class FlowRunnerService {
         if (conv) {
           const channelType = conv.conn_channel_type ?? conv.channel_type;
           if (channelType === 'whatsapp_web' && conv.external_id && conv.connection_id) {
+            console.log(`[flow deliver] WA send body="${(body ?? '').slice(0, 60)}"`);
             const waId = await this.waSvc.sendMessage(conv.connection_id, conv.external_id, body);
             if (waId && msg?.id) {
               await this.db.query(`UPDATE messages SET external_id=$1 WHERE id=$2`, [waId, msg.id]).catch(() => {});

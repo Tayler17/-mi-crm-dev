@@ -1094,6 +1094,20 @@ export class AiChatbotEngineService {
     switch (channelType) {
       case 'whatsapp_web': {
         if (!conv.external_id || !conv.connection_id) return;
+        console.log(`[bot deliverOutbound] WA send body="${(text ?? '').slice(0, 60)}"`);
+        // Safety: never send an uploaded-file path as text (deliver as media instead).
+        if (/^\/uploads\/\S+/.test(text)) {
+          const [fileUrl, , cap] = text.split('|');
+          const ext = (fileUrl.split('.').pop() ?? '').toLowerCase();
+          const ct = /^(jpe?g|png|gif|webp|bmp|heic)$/.test(ext) ? 'image'
+            : /^(mp3|ogg|oga|m4a|wav|opus|aac)$/.test(ext) ? 'audio'
+            : /^(mp4|mov|avi|webm|3gp)$/.test(ext) ? 'video' : 'file';
+          const fid = await this.waSvc.sendFile(conv.connection_id, conv.external_id, fileUrl, ct, cap || undefined);
+          if (fid && messageId && typeof fid === 'string') {
+            await this.db.query(`UPDATE messages SET external_id=$1 WHERE id=$2`, [fid, messageId]).catch(() => {});
+          }
+          break;
+        }
         const waId = await this.waSvc.sendMessage(conv.connection_id, conv.external_id, text);
         if (!waId) this.logger.warn(`[bot] WA session not connected for ${conversationId}`);
         else if (messageId && typeof waId === 'string') {
