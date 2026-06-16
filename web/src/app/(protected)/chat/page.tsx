@@ -71,7 +71,13 @@ export default function ChatPage() {
   const [uploading, setUploading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const [recording, setRecording] = useState(false);
+  const [recordSecs, setRecordSecs] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cancelRecordRef = useRef(false);
   const [showNewDm, setShowNewDm] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentSearch, setAgentSearch] = useState('');
@@ -79,6 +85,7 @@ export default function ChatPage() {
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<'list' | 'chat'>('list');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const justOpenedRef = useRef(false);
   const lastMsgIdRef = useRef<string | null>(null);
@@ -117,14 +124,21 @@ export default function ChatPage() {
   // Jump to the bottom instantly when opening a chat; smooth-scroll only when a
   // genuinely new message arrives. Idle polls (same last message) don't scroll,
   // so reading older messages isn't interrupted.
+  const scrollToBottom = (smooth: boolean) => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  };
   useEffect(() => {
     const lastId = messages.length ? messages[messages.length - 1].id : null;
     if (justOpenedRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      // Scroll after layout settles (and once more shortly after, in case images grow the height).
+      requestAnimationFrame(() => scrollToBottom(false));
+      setTimeout(() => scrollToBottom(false), 120);
       justOpenedRef.current = false;
       lastMsgIdRef.current = lastId;
     } else if (lastId && lastId !== lastMsgIdRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      requestAnimationFrame(() => scrollToBottom(true));
       lastMsgIdRef.current = lastId;
     }
   }, [messages]);
@@ -184,6 +198,46 @@ export default function ChatPage() {
     } catch (err: any) {
       alert(err?.message || 'No se pudo enviar el archivo');
     } finally { setUploading(false); }
+  }
+
+  async function startRecording() {
+    if (!activeChat || recording) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      cancelRecordRef.current = false;
+      mr.ondataavailable = (e) => { if (e.data.size) audioChunksRef.current.push(e.data); };
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+        setRecording(false);
+        setRecordSecs(0);
+        if (cancelRecordRef.current) return;
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        if (blob.size < 800) return; // too short / empty
+        const file = new File([blob], `voz-${Date.now()}.webm`, { type: 'audio/webm' });
+        setUploading(true);
+        try {
+          const up = await uploadChatFile(file);
+          const msg = await sendChatMessage(activeChat.id, { attachmentUrl: up.url, attachmentType: 'audio', attachmentName: up.attachmentName });
+          setMessages((prev) => [...prev, msg]);
+        } catch (e: any) { alert(e?.message || 'No se pudo enviar la nota de voz'); }
+        finally { setUploading(false); }
+      };
+      mediaRecorderRef.current = mr;
+      mr.start();
+      setRecording(true);
+      setRecordSecs(0);
+      recordTimerRef.current = setInterval(() => setRecordSecs((s) => s + 1), 1000);
+    } catch {
+      alert('No se pudo acceder al micrófono. Revisa los permisos del navegador.');
+    }
+  }
+
+  function stopRecording(cancel = false) {
+    cancelRecordRef.current = cancel;
+    mediaRecorderRef.current?.stop();
   }
 
   async function handleDelete(id: string) {
@@ -325,7 +379,7 @@ export default function ChatPage() {
               </div>
             </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div ref={messagesContainerRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
               {loadingMsgs ? (
                 <div style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: 40 }}>{i.loadingMessages}</div>
               ) : messages.length === 0 ? (
@@ -417,37 +471,63 @@ export default function ChatPage() {
                 style={{ display: 'none' }}
                 onChange={handleAttach}
               />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading || sending}
-                title="Adjuntar imagen o audio"
-                style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '50%', width: 40, height: 40, flexShrink: 0, cursor: 'pointer', fontSize: 18, color: 'var(--text-muted)' }}
-              >
-                {uploading ? '…' : '📎'}
-              </button>
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                placeholder={i.chatInputPlaceholder}
-                rows={1}
-                style={{
-                  flex: 1, resize: 'none', padding: '10px 14px',
-                  borderRadius: 20, border: '1px solid var(--border)',
-                  background: 'var(--input-bg)', color: 'var(--text)',
-                  fontSize: 14, outline: 'none', lineHeight: 1.5,
-                  maxHeight: 120, overflowY: 'auto',
-                }}
-              />
-              <button
-                className="btn btn-primary"
-                style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}
-                onClick={handleSend}
-                disabled={!input.trim() || sending}
-              >
-                ➤
-              </button>
+              {recording ? (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 14px', borderRadius: 20, border: '1px solid var(--danger, #ef4444)', background: 'var(--input-bg)' }}>
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ef4444', animation: 'pulse 1s infinite' }} />
+                  <span style={{ fontSize: 14, color: 'var(--text)' }}>
+                    Grabando… {Math.floor(recordSecs / 60)}:{String(recordSecs % 60).padStart(2, '0')}
+                  </span>
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                    <button type="button" onClick={() => stopRecording(true)} title="Cancelar"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--text-muted)' }}>✕</button>
+                    <button type="button" onClick={() => stopRecording(false)} title="Enviar nota de voz"
+                      style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '50%', width: 32, height: 32, cursor: 'pointer', fontSize: 14 }}>➤</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading || sending}
+                    title="Adjuntar imagen o audio"
+                    style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '50%', width: 40, height: 40, flexShrink: 0, cursor: 'pointer', fontSize: 18, color: 'var(--text-muted)' }}
+                  >
+                    {uploading ? '…' : '📎'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={startRecording}
+                    disabled={uploading || sending}
+                    title="Grabar nota de voz"
+                    style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '50%', width: 40, height: 40, flexShrink: 0, cursor: 'pointer', fontSize: 18, color: 'var(--text-muted)' }}
+                  >
+                    🎤
+                  </button>
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                    placeholder={i.chatInputPlaceholder}
+                    rows={1}
+                    style={{
+                      flex: 1, resize: 'none', padding: '10px 14px',
+                      borderRadius: 20, border: '1px solid var(--border)',
+                      background: 'var(--input-bg)', color: 'var(--text)',
+                      fontSize: 14, outline: 'none', lineHeight: 1.5,
+                      maxHeight: 120, overflowY: 'auto',
+                    }}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    style={{ borderRadius: '50%', width: 40, height: 40, padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}
+                    onClick={handleSend}
+                    disabled={!input.trim() || sending}
+                  >
+                    ➤
+                  </button>
+                </>
+              )}
             </div>
           </>
         )}

@@ -284,6 +284,9 @@ tr:hover td { background: var(--bg); }
 
 }
 
+/* Recording indicator pulse */
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
 /* Internal chat: per-message edit/delete actions appear on hover (desktop);
    stay visible on touch devices that have no hover. */
 .chat-msg-actions { opacity: 1; }
