@@ -25,6 +25,14 @@ export interface BookAppointmentInput {
 /** Result of a successful booking (Phase 3). */
 export interface BookedAppointment { id: string; start: string; finish?: string; }
 
+/** A normalized inbound webhook event (Phase 4). */
+export interface WebhookEvent {
+  /** 'contact' upserts a CRM contact; other types are logged for now. */
+  type: 'contact' | 'appointment' | 'other';
+  contact?: ExternalContact;
+  raw?: any;
+}
+
 /**
  * A pluggable connector to an external practice-management / scheduling system
  * (Dentally first; Cliniko, Acuity, etc. later). Each tenant connects its own
@@ -51,4 +59,7 @@ export interface IntegrationConnector {
   ): Promise<AvailabilitySlot[]>;
   /** Phase 3: create an appointment in the external system. */
   createAppointment?(config: Record<string, any>, appt: BookAppointmentInput): Promise<BookedAppointment>;
+
+  /** Phase 4: normalize an inbound webhook payload to a common event (null = ignore). */
+  normalizeWebhook?(payload: any): WebhookEvent | null;
 }

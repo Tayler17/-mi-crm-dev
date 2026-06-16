@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   getIntegrationCatalog, getIntegrations, connectIntegration, testIntegration, disconnectIntegration, syncIntegration,
-  getPractitioners, getAvailability, bookAppointment, getContacts,
+  getPractitioners, getAvailability, bookAppointment, getContacts, getWebhookInfo, enableWebhook,
   type IntegrationCatalogItem, type TenantIntegration, type Practitioner, type AvailabilitySlot, type Contact,
 } from '@/lib/api';
 
@@ -32,6 +32,7 @@ export default function IntegrationsPage() {
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [bookingProvider, setBookingProvider] = useState<string | null>(null);
+  const [webhookProvider, setWebhookProvider] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
@@ -137,6 +138,9 @@ export default function IntegrationsPage() {
                           <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => setBookingProvider(bookingProvider === item.provider ? null : item.provider)}>
                             {bookingProvider === item.provider ? 'Cerrar agenda' : '📅 Agendar cita'}
                           </button>
+                          <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => setWebhookProvider(webhookProvider === item.provider ? null : item.provider)}>
+                            {webhookProvider === item.provider ? 'Cerrar webhook' : '🔔 Webhook'}
+                          </button>
                           <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => handleTest(item.provider)}>Probar</button>
                           <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px', color: 'var(--danger)' }} onClick={() => handleDisconnect(item.provider)}>Desconectar</button>
                         </>
@@ -172,6 +176,10 @@ export default function IntegrationsPage() {
 
                 {conn && canManage && bookingProvider === item.provider && (
                   <BookingPanel provider={item.provider} />
+                )}
+
+                {conn && canManage && webhookProvider === item.provider && (
+                  <WebhookPanel provider={item.provider} label={item.label} />
                 )}
               </div>
             );
@@ -313,6 +321,57 @@ function BookingPanel({ provider }: { provider: string }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Webhook panel: generate a per-tenant URL to paste into the provider for real-time sync. */
+function WebhookPanel({ provider, label }: { provider: string; label: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    getWebhookInfo(provider).then((r) => { setEnabled(r.enabled); setUrl(r.url); }).catch(() => {});
+  }, [provider]);
+
+  async function generate() {
+    setBusy(true);
+    try { const r = await enableWebhook(provider); setUrl(r.url); setEnabled(true); }
+    catch { /* ignore */ }
+    finally { setBusy(false); }
+  }
+
+  function copy() {
+    if (!url) return;
+    navigator.clipboard?.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
+  }
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ fontWeight: 600, fontSize: 14 }}>🔔 Webhook (sincronización en tiempo real)</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        Genera una URL única y pégala en {label} (Settings → Webhooks). Cuando se cree o actualice un paciente,
+        se reflejará solo en tus contactos.
+      </div>
+      {!enabled || !url ? (
+        <div>
+          <button className="btn btn-primary" disabled={busy} onClick={generate}>
+            {busy ? 'Generando…' : 'Generar URL de webhook'}
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input className="form-input" readOnly value={url} style={{ flex: 1, fontSize: 12, fontFamily: 'monospace' }} onFocus={(e) => e.target.select()} />
+          <button className="btn btn-secondary" style={{ fontSize: 12, padding: '6px 12px', whiteSpace: 'nowrap' }} onClick={copy}>
+            {copied ? '✓ Copiado' : 'Copiar'}
+          </button>
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+        Mantén esta URL en secreto: contiene una clave que identifica tu cuenta.
+      </div>
     </div>
   );
 }

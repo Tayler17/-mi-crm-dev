@@ -70,6 +70,19 @@ export class IntegrationsController {
     return this.svc.bookAppointment(tenantId, provider, body ?? {});
   }
 
+  /** Phase 4: webhook URL + status for this tenant */
+  @Get(':provider/webhook')
+  webhookInfo(@Param('provider') provider: string, @TenantId() tenantId: string) {
+    return this.svc.webhookInfo(tenantId, provider);
+  }
+
+  /** Phase 4: enable webhooks — returns the URL to paste into the provider */
+  @Post(':provider/webhook')
+  enableWebhook(@Param('provider') provider: string, @TenantId() tenantId: string, @Request() req: any) {
+    if (req.user?.role === 'agent') throw new ForbiddenException();
+    return this.svc.enableWebhook(tenantId, provider);
+  }
+
   /** Disconnect a provider */
   @Delete(':provider')
   disconnect(@Param('provider') provider: string, @TenantId() tenantId: string, @Request() req: any) {

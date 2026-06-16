@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import * as https from 'https';
-import { IntegrationConnector, ExternalContact, Practitioner, AvailabilitySlot, BookAppointmentInput, BookedAppointment } from './connector.interface';
+import { IntegrationConnector, ExternalContact, Practitioner, AvailabilitySlot, BookAppointmentInput, BookedAppointment, WebhookEvent } from './connector.interface';
 
 /** Region → API host. Default is the global/UK cluster. */
 const HOSTS: Record<string, string> = {
@@ -60,6 +60,31 @@ export class DentallyConnector implements IntegrationConnector {
       if (pag && pag.current_page && pag.total_pages && pag.current_page >= pag.total_pages) break;
     }
     return out;
+  }
+
+  /**
+   * Phase 4: normalize a Dentally webhook payload to a common event.
+   * Best-effort — Dentally sends events like { event: 'patient_insertion',
+   * patient: {...} } or { event: 'appointment_insertion', appointment: {...} }.
+   * Confirm exact names/shape against real deliveries and adjust here.
+   */
+  normalizeWebhook(payload: any): WebhookEvent | null {
+    if (!payload) return null;
+    const event = String(payload.event || payload.type || '').toLowerCase();
+
+    // Patient created/updated → upsert a CRM contact.
+    const patient = payload.patient || (event.includes('patient') ? payload.data : undefined);
+    if (patient && (event.includes('patient') || event === '')) {
+      const c = this.mapPatient(patient);
+      if (c) return { type: 'contact', contact: c, raw: payload };
+    }
+
+    // Appointment events → logged for now (see service).
+    if (event.includes('appointment') || payload.appointment) {
+      return { type: 'appointment', raw: payload };
+    }
+
+    return { type: 'other', raw: payload };
   }
 
   /** Authenticated request against the Dentally API. Always sends a User-Agent (required → 403 without it). */

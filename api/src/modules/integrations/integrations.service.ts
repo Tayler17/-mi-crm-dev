@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { randomBytes } from 'crypto';
 import { IntegrationConnector } from './connectors/connector.interface';
 import { DentallyConnector } from './connectors/dentally.connector';
 
@@ -140,59 +141,11 @@ export class IntegrationsService implements OnModuleInit {
     const note = `Importado de ${connector.label}`;
 
     for (const ext of externals) {
-      if (!ext.externalId || !ext.fullName) { skipped++; continue; }
       try {
-        // 1) Already mapped? update that contact.
-        const [mapped] = await this.db.query(
-          `SELECT contact_id FROM integration_contact_map
-           WHERE tenant_id::text=$1 AND provider=$2 AND external_id=$3`,
-          [tenantId, provider, ext.externalId],
-        );
-
-        let contactId: string | undefined = mapped?.contact_id;
-
-        // 2) Not mapped — match an existing contact by email or phone.
-        if (!contactId && (ext.email || ext.phone)) {
-          const [match] = await this.db.query(
-            `SELECT id FROM contacts
-             WHERE tenant_id::text=$1
-               AND ( ($2 <> '' AND lower(email)=lower($2)) OR ($3 <> '' AND phone=$3) )
-             LIMIT 1`,
-            [tenantId, ext.email ?? '', ext.phone ?? ''],
-          );
-          contactId = match?.id;
-        }
-
-        if (contactId) {
-          await this.db.query(
-            `UPDATE contacts SET
-               full_name = COALESCE(NULLIF($2,''), full_name),
-               email     = COALESCE(NULLIF($3,''), email),
-               phone     = COALESCE(NULLIF($4,''), phone),
-               location  = COALESCE(NULLIF($5,''), location),
-               updated_at = NOW()
-             WHERE id=$1 AND tenant_id::text=$6`,
-            [contactId, ext.fullName, ext.email ?? '', ext.phone ?? '', ext.location ?? '', tenantId],
-          );
-          updated++;
-        } else {
-          const [row] = await this.db.query(
-            `INSERT INTO contacts (tenant_id, full_name, email, phone, location, notes)
-             VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),$6)
-             RETURNING id`,
-            [tenantId, ext.fullName, ext.email ?? '', ext.phone ?? '', ext.location ?? '', note],
-          );
-          contactId = row.id;
-          created++;
-        }
-
-        // Record/refresh the mapping.
-        await this.db.query(
-          `INSERT INTO integration_contact_map (tenant_id, provider, external_id, contact_id)
-           VALUES ($1,$2,$3,$4)
-           ON CONFLICT (tenant_id, provider, external_id) DO UPDATE SET contact_id=$4`,
-          [tenantId, provider, ext.externalId, contactId],
-        );
+        const r = await this.upsertExternalContact(tenantId, provider, ext, note);
+        if (r === 'created') created++;
+        else if (r === 'updated') updated++;
+        else skipped++;
       } catch (e: any) {
         this.logger.warn(`[integrations] sync skip ${provider}:${ext.externalId} — ${e.message}`);
         skipped++;
@@ -260,6 +213,147 @@ export class IntegrationsService implements OnModuleInit {
     });
     this.logger.log(`[integrations] ${provider} booked appt ${booked.id} for contact ${input.contactId} (tenant ${tenantId})`);
     return { ok: true, appointment: booked };
+  }
+
+  /**
+   * Upsert one external contact into CRM contacts + record the mapping.
+   * Shared by the bulk sync (Phase 2) and inbound webhooks (Phase 4).
+   * Returns 'created' | 'updated' | 'skipped'.
+   */
+  private async upsertExternalContact(
+    tenantId: string, provider: string,
+    ext: { externalId: string; fullName: string; email?: string; phone?: string; location?: string },
+    note: string,
+  ): Promise<'created' | 'updated' | 'skipped'> {
+    if (!ext.externalId || !ext.fullName) return 'skipped';
+
+    // 1) Already mapped? update that contact.
+    const [mapped] = await this.db.query(
+      `SELECT contact_id FROM integration_contact_map
+       WHERE tenant_id::text=$1 AND provider=$2 AND external_id=$3`,
+      [tenantId, provider, ext.externalId],
+    );
+    let contactId: string | undefined = mapped?.contact_id;
+
+    // 2) Not mapped — match an existing contact by email or phone.
+    if (!contactId && (ext.email || ext.phone)) {
+      const [match] = await this.db.query(
+        `SELECT id FROM contacts
+         WHERE tenant_id::text=$1
+           AND ( ($2 <> '' AND lower(email)=lower($2)) OR ($3 <> '' AND phone=$3) )
+         LIMIT 1`,
+        [tenantId, ext.email ?? '', ext.phone ?? ''],
+      );
+      contactId = match?.id;
+    }
+
+    let result: 'created' | 'updated';
+    if (contactId) {
+      await this.db.query(
+        `UPDATE contacts SET
+           full_name = COALESCE(NULLIF($2,''), full_name),
+           email     = COALESCE(NULLIF($3,''), email),
+           phone     = COALESCE(NULLIF($4,''), phone),
+           location  = COALESCE(NULLIF($5,''), location),
+           updated_at = NOW()
+         WHERE id=$1 AND tenant_id::text=$6`,
+        [contactId, ext.fullName, ext.email ?? '', ext.phone ?? '', ext.location ?? '', tenantId],
+      );
+      result = 'updated';
+    } else {
+      const [row] = await this.db.query(
+        `INSERT INTO contacts (tenant_id, full_name, email, phone, location, notes)
+         VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),$6)
+         RETURNING id`,
+        [tenantId, ext.fullName, ext.email ?? '', ext.phone ?? '', ext.location ?? '', note],
+      );
+      contactId = row.id;
+      result = 'created';
+    }
+
+    await this.db.query(
+      `INSERT INTO integration_contact_map (tenant_id, provider, external_id, contact_id)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (tenant_id, provider, external_id) DO UPDATE SET contact_id=$4`,
+      [tenantId, provider, ext.externalId, contactId],
+    );
+    return result;
+  }
+
+  // ── Phase 4: webhooks (real-time inbound sync) ──────────────────────────────
+
+  private webhookBaseUrl() {
+    return process.env.API_PUBLIC_URL || 'https://api.automarkiq.com';
+  }
+
+  /** Enable webhooks for a tenant: generate a per-tenant secret + return the URL to paste in the provider. */
+  async enableWebhook(tenantId: string, provider: string) {
+    const { config } = await this.getConnected(tenantId, provider);
+    let secret = config.webhookSecret;
+    if (!secret) {
+      secret = randomBytes(24).toString('hex');
+      const next = { ...config, webhookSecret: secret };
+      await this.db.query(
+        `UPDATE tenant_integrations SET config=$3, updated_at=NOW()
+         WHERE tenant_id::text=$1 AND provider=$2`,
+        [tenantId, provider, JSON.stringify(next)],
+      );
+    }
+    return { url: `${this.webhookBaseUrl()}/integrations/${provider}/webhook/${secret}` };
+  }
+
+  /** Webhook status/URL for the UI (only reveals the URL, derived from the stored secret). */
+  async webhookInfo(tenantId: string, provider: string) {
+    const [row] = await this.db.query(
+      `SELECT config FROM tenant_integrations WHERE tenant_id::text=$1 AND provider=$2`,
+      [tenantId, provider],
+    );
+    const secret = row?.config?.webhookSecret;
+    return {
+      enabled: !!secret,
+      url: secret ? `${this.webhookBaseUrl()}/integrations/${provider}/webhook/${secret}` : null,
+    };
+  }
+
+  /**
+   * Handle an inbound webhook. The secret in the URL identifies the tenant.
+   * Best-effort event parsing — confirm event names/payload shape against real
+   * provider deliveries and adjust the connector's normalizeWebhook if needed.
+   */
+  async handleInboundWebhook(provider: string, secret: string, payload: any) {
+    if (!secret) return { ok: false };
+    const [row] = await this.db.query(
+      `SELECT tenant_id, config FROM tenant_integrations
+       WHERE provider=$1 AND config->>'webhookSecret'=$2`,
+      [provider, secret],
+    );
+    if (!row) {
+      this.logger.warn(`[integrations] webhook with unknown secret for ${provider}`);
+      return { ok: false };
+    }
+    const tenantId = row.tenant_id;
+    const connector = this.connectors.get(provider);
+
+    // Provider normalizes its payload to a common event; default: ignore.
+    const event = connector?.normalizeWebhook ? connector.normalizeWebhook(payload) : null;
+    if (!event) {
+      this.logger.log(`[integrations] webhook ${provider} (tenant ${tenantId}) — unhandled event`);
+      return { ok: true };
+    }
+
+    if (event.type === 'contact' && event.contact) {
+      try {
+        const r = await this.upsertExternalContact(tenantId, provider, event.contact, `Sincronizado de ${connector!.label}`);
+        this.logger.log(`[integrations] webhook ${provider} contact ${event.contact.externalId} → ${r} (tenant ${tenantId})`);
+      } catch (e: any) {
+        this.logger.warn(`[integrations] webhook contact upsert failed: ${e.message}`);
+      }
+    } else {
+      // Appointment / other events: logged for now. (Mirroring clinical
+      // appointments into the CRM reminders table would mis-fire reminders.)
+      this.logger.log(`[integrations] webhook ${provider} event '${event.type}' (tenant ${tenantId})`);
+    }
+    return { ok: true };
   }
 
   /** Internal helper for future phases: get a connector + a tenant's stored config. */
