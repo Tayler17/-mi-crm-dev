@@ -242,10 +242,14 @@ tr:hover td { background: var(--bg); }
   .mobile-detail-btn { display: inline-flex !important; }
   .mobile-detail-back { display: flex !important; }
 
-  /* ── Chat Interno mobile panel switching ── */
-  .chat-layout[data-panel="chat"]  .chat-list-panel { display: none; }
-  .chat-layout[data-panel="list"]  .chat-chat-panel { display: none; }
-  .chat-layout[data-panel="chat"]  .chat-chat-panel { flex: 1; display: flex; flex-direction: column; }
+  /* ── Chat Interno mobile panel switching ──
+     !important is required: the panels carry inline display:flex, which would
+     otherwise beat these class rules and leave both panels (the user list +
+     the conversation) on screen at once. */
+  .chat-layout[data-panel="chat"]  .chat-list-panel { display: none !important; }
+  .chat-layout[data-panel="list"]  .chat-chat-panel { display: none !important; }
+  .chat-layout[data-panel="list"]  .chat-list-panel { display: flex !important; width: 100% !important; }
+  .chat-layout[data-panel="chat"]  .chat-chat-panel { display: flex !important; flex: 1; flex-direction: column; }
 
   /* Show back button in chat headers */
   .mobile-back-btn { display: flex !important; }

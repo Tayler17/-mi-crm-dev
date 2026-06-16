@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
-# pg_dump for automatic backups
-RUN apk add --no-cache postgresql-client
+# pg_dump for automatic backups; ffmpeg to transcode voice notes to mp3 (cross-device playback)
+RUN apk add --no-cache postgresql-client ffmpeg
 
 WORKDIR /app
 

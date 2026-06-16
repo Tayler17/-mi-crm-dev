@@ -3,12 +3,26 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
+import { spawn } from 'child_process';
+import { unlink } from 'fs/promises';
 import { InternalChatService } from './internal-chat.service';
 import { CreateChatDto, SendMessageDto, EditMessageDto } from './dto/internal-chat.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantId } from '../../common/decorators/tenant.decorator';
 
 const CHAT_UPLOAD_DIR = join(process.cwd(), 'uploads', 'chat');
+
+/** Transcode an audio file to mp3 so it plays on every device (iOS can't play webm/opus). */
+function transcodeToMp3(inputPath: string): Promise<string> {
+  const outPath = inputPath.replace(/\.[^.]+$/, '') + '.mp3';
+  return new Promise((resolve, reject) => {
+    const ff = spawn('ffmpeg', ['-y', '-i', inputPath, '-vn', '-acodec', 'libmp3lame', '-q:a', '4', outPath]);
+    let err = '';
+    ff.stderr?.on('data', (d) => (err += d.toString()));
+    ff.on('error', reject);
+    ff.on('close', (code) => (code === 0 ? resolve(outPath) : reject(new Error('ffmpeg ' + err.slice(-160)))));
+  });
+}
 
 @Controller('internal-chat')
 @UseGuards(JwtAuthGuard)
@@ -64,13 +78,26 @@ export class InternalChatController {
     }),
     limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB
   }))
-  upload(@UploadedFile() file: Express.Multer.File) {
+  async upload(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException('No se recibió ningún archivo');
     const name = file.originalname.toLowerCase();
     const type = /\.(jpg|jpeg|png|gif|webp|bmp|heic)$/i.test(name) ? 'image'
-      : /\.(mp3|ogg|oga|wav|m4a|webm|aac)$/i.test(name) ? 'audio'
+      : /\.(mp3|ogg|oga|wav|m4a|webm|aac)$/i.test(name) || file.mimetype?.startsWith('audio/') ? 'audio'
       : 'file';
-    return { url: `/uploads/chat/${file.filename}`, attachmentType: type, attachmentName: file.originalname };
+
+    let filename = file.filename;
+    // Audio → mp3 for universal playback. If ffmpeg isn't available, keep the original.
+    if (type === 'audio' && !/\.mp3$/i.test(filename)) {
+      try {
+        const inputPath = join(CHAT_UPLOAD_DIR, file.filename);
+        const outPath = await transcodeToMp3(inputPath);
+        filename = outPath.split(/[\\/]/).pop()!;
+        await unlink(inputPath).catch(() => {});
+      } catch {
+        // ffmpeg missing/failed → fall back to the original file.
+      }
+    }
+    return { url: `/uploads/chat/${filename}`, attachmentType: type, attachmentName: file.originalname };
   }
 
   @Patch('messages/:messageId')
