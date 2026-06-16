@@ -1676,9 +1676,10 @@ export const sendMessage = (conversationId: string, body: string) =>
 
 export async function uploadMessageFile(conversationId: string, file: File, caption?: string, kind?: string): Promise<Message> {
   const formData = new FormData();
-  formData.append('file', file);
+  // Text fields MUST be appended before the file so multer reliably exposes them in req.body.
   if (caption) formData.append('caption', caption);
   if (kind) formData.append('kind', kind);
+  formData.append('file', file);
   const res = await fetch(`${API_URL}/conversations/${conversationId}/messages/upload`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getToken()}`, 'X-Tenant-ID': getTenantId() },

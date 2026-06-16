@@ -858,9 +858,10 @@ export default function InboxPage() {
         setRecording(false);
         setRecordSecs(0);
         if (cancelRecordRef.current) return;
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/ogg' });
         if (blob.size < 800) return;
-        const file = new File([blob], `voz-${Date.now()}.webm`, { type: 'audio/webm' });
+        // .ogg name → server detects audio by extension regardless of mimetype; ffmpeg transcodes to mp3.
+        const file = new File([blob], `voz-${Date.now()}.ogg`, { type: 'audio/ogg' });
         setSending(true);
         try {
           await uploadMessageFile(activeId, file, undefined, 'audio');
