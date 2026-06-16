@@ -1730,6 +1730,26 @@ export const updateHelpArticle = (id: string, data: Partial<HelpArticle>) =>
   apiPatch<HelpArticle>(`/help/articles/${id}`, data);
 export const deleteHelpArticle = (id: string) => apiDelete(`/help/articles/${id}`);
 
+// ── Integrations (external systems: Dentally, etc.) ────────────────────────────
+
+export interface IntegrationCatalogItem { provider: string; label: string }
+export interface TenantIntegration {
+  provider: string;
+  status: 'connected' | 'error';
+  lastError?: string | null;
+  region: string;
+  hasToken: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+export const getIntegrationCatalog = () => apiGet<IntegrationCatalogItem[]>('/integrations/catalog');
+export const getIntegrations = () => apiGet<TenantIntegration[]>('/integrations');
+export const connectIntegration = (provider: string, config: Record<string, any>) =>
+  apiPost<{ ok: boolean; info?: string }>(`/integrations/${provider}`, config);
+export const testIntegration = (provider: string) =>
+  apiPost<{ ok: boolean; info?: string; error?: string }>(`/integrations/${provider}/test`, {});
+export const disconnectIntegration = (provider: string) => apiDelete(`/integrations/${provider}`);
+
 // ── Admin: Tenant Management ──────────────────────────────────────────────────
 
 export interface TenantAdmin {

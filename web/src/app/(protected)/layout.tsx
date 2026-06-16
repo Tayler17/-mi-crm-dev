@@ -115,6 +115,7 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   { group: '📢 MARKETING',     href: '/contact-lists',    label: 'Listas de Contactos',  icon: '📋', minRole: 'admin' },
   // ── Configuración ──
   { group: '⚙️ CONFIGURACIÓN', href: '/connections',      label: 'Conexiones',           icon: '🔌', minRole: 'admin' },
+  { group: '⚙️ CONFIGURACIÓN', href: '/integrations',     label: 'Integraciones',        icon: '🧩', minRole: 'admin' },
   { group: '⚙️ CONFIGURACIÓN', href: '/custom-fields',    label: 'Campos Custom',        icon: '🗃', minRole: 'admin' },
   { group: '⚙️ CONFIGURACIÓN', href: '/outbound-webhooks',label: 'Webhooks',             icon: '🔗', minRole: 'admin' },
   { group: '⚙️ CONFIGURACIÓN', href: '/templates',        label: 'Plantillas',           icon: '🗂', minRole: 'admin' },

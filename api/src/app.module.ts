@@ -42,6 +42,7 @@ import { BillingModule } from './modules/billing/billing.module';
 import { BackupsModule } from './modules/backups/backups.module';
 import { WebchatModule } from './modules/webchat/webchat.module';
 import { HelpModule } from './modules/help/help.module';
+import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { TemplatesModule } from './modules/templates/templates.module';
 import { SearchModule } from './modules/search/search.module';
 import { CsatModule } from './modules/csat/csat.module';
@@ -128,6 +129,7 @@ import { TenantMiddleware } from './common/middleware/tenant.middleware';
     KnowledgeBaseModule,
     NotificationsModule,
     WebhooksModule,
+    IntegrationsModule,
     PlansModule,
     BillingModule,
     BackupsModule,
