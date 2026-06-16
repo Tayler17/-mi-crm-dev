@@ -1739,6 +1739,8 @@ export interface TenantIntegration {
   lastError?: string | null;
   region: string;
   hasToken: boolean;
+  autoSync: boolean;
+  lastSyncAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1764,6 +1766,8 @@ export const getAvailability = (provider: string, practitionerId: string, startD
 export const bookAppointment = (provider: string, body: { contactId: string; practitionerId: string; start: string; finish?: string; reason?: string }) =>
   apiPost<{ ok: boolean; appointment: { id: string; start: string; finish?: string } }>(`/integrations/${provider}/appointments`, body);
 
+export const setAutoSync = (provider: string, enabled: boolean) =>
+  apiPost<{ ok: boolean; autoSync: boolean }>(`/integrations/${provider}/auto-sync`, { enabled });
 export const getWebhookInfo = (provider: string) =>
   apiGet<{ enabled: boolean; url: string | null }>(`/integrations/${provider}/webhook`);
 export const enableWebhook = (provider: string) =>

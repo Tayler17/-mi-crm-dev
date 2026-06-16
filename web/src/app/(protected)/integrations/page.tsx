@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   getIntegrationCatalog, getIntegrations, connectIntegration, testIntegration, disconnectIntegration, syncIntegration,
-  getPractitioners, getAvailability, bookAppointment, getContacts, getWebhookInfo, enableWebhook,
+  getPractitioners, getAvailability, bookAppointment, getContacts, getWebhookInfo, enableWebhook, setAutoSync,
   type IntegrationCatalogItem, type TenantIntegration, type Practitioner, type AvailabilitySlot, type Contact,
 } from '@/lib/api';
 
@@ -72,6 +72,12 @@ export default function IntegrationsPage() {
     } catch (e: any) { setError(e?.message || 'Error al probar'); }
   }
 
+  async function handleAutoSync(provider: string, enabled: boolean) {
+    setError(''); setInfo('');
+    try { await setAutoSync(provider, enabled); load(); }
+    catch (e: any) { setError(e?.message || 'Error'); }
+  }
+
   async function handleSync(provider: string) {
     setSyncing(provider); setError(''); setInfo('');
     try {
@@ -126,6 +132,13 @@ export default function IntegrationsPage() {
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{meta.desc}</div>
                     {conn?.status === 'error' && conn.lastError && (
                       <div style={{ fontSize: 11, color: '#dc2626', marginTop: 4 }}>{conn.lastError}</div>
+                    )}
+                    {conn && canManage && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginTop: 8, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={conn.autoSync} onChange={(e) => handleAutoSync(item.provider, e.target.checked)} />
+                        Sincronización automática (cada 15 min)
+                        {conn.lastSyncAt && <span style={{ marginLeft: 4 }}>· última: {new Date(conn.lastSyncAt).toLocaleString()}</span>}
+                      </label>
                     )}
                   </div>
                   {canManage && (
@@ -350,10 +363,10 @@ function WebhookPanel({ provider, label }: { provider: string; label: string }) 
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ fontWeight: 600, fontSize: 14 }}>🔔 Webhook (sincronización en tiempo real)</div>
+      <div style={{ fontWeight: 600, fontSize: 14 }}>🔔 Webhook (opcional · tiempo real)</div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-        Genera una URL única y pégala en {label} (Settings → Webhooks). Cuando se cree o actualice un paciente,
-        se reflejará solo en tus contactos.
+        <b>Opcional.</b> Con la sincronización automática ya basta el token. El webhook solo añade actualización
+        instantánea: genera una URL única y pégala en {label} (Settings → Webhooks).
       </div>
       {!enabled || !url ? (
         <div>

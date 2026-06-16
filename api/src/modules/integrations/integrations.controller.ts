@@ -70,6 +70,13 @@ export class IntegrationsController {
     return this.svc.bookAppointment(tenantId, provider, body ?? {});
   }
 
+  /** Toggle the automatic background sync (token-only model) */
+  @Post(':provider/auto-sync')
+  autoSync(@Param('provider') provider: string, @Body() body: any, @TenantId() tenantId: string, @Request() req: any) {
+    if (req.user?.role === 'agent') throw new ForbiddenException();
+    return this.svc.setAutoSync(tenantId, provider, !!body?.enabled);
+  }
+
   /** Phase 4: webhook URL + status for this tenant */
   @Get(':provider/webhook')
   webhookInfo(@Param('provider') provider: string, @TenantId() tenantId: string) {

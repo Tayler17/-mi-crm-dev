@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import { Cron } from '@nestjs/schedule';
 import { DataSource } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { IntegrationConnector } from './connectors/connector.interface';
@@ -66,6 +67,8 @@ export class IntegrationsService implements OnModuleInit {
       lastError: r.last_error,
       region:    r.config?.region ?? 'global',
       hasToken:  !!r.config?.token,
+      autoSync:  !!r.config?.autoSync,
+      lastSyncAt: r.config?.lastSyncAt ?? null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     }));
@@ -153,12 +156,55 @@ export class IntegrationsService implements OnModuleInit {
     }
 
     await this.db.query(
-      `UPDATE tenant_integrations SET status='connected', last_error=NULL, updated_at=NOW()
+      `UPDATE tenant_integrations SET
+         status='connected', last_error=NULL, updated_at=NOW(),
+         config = jsonb_set(config, '{lastSyncAt}', to_jsonb(NOW()::text), true)
        WHERE tenant_id::text=$1 AND provider=$2`,
       [tenantId, provider],
     );
     this.logger.log(`[integrations] ${provider} sync tenant ${tenantId}: +${created} ~${updated} skip ${skipped} / ${externals.length}`);
     return { ok: true, total: externals.length, created, updated, skipped };
+  }
+
+  /** Turn the automatic background sync on/off for a tenant's integration. */
+  async setAutoSync(tenantId: string, provider: string, enabled: boolean) {
+    const { config } = await this.getConnected(tenantId, provider);
+    const next = { ...config, autoSync: enabled };
+    await this.db.query(
+      `UPDATE tenant_integrations SET config=$3, updated_at=NOW()
+       WHERE tenant_id::text=$1 AND provider=$2`,
+      [tenantId, provider, JSON.stringify(next)],
+    );
+    return { ok: true, autoSync: enabled };
+  }
+
+  /**
+   * Background auto-sync: every 15 min, re-pull contacts for every connected
+   * integration that has autoSync enabled. This is the "token-only" model —
+   * the client just provides a token; no webhook URL to paste anywhere.
+   */
+  @Cron('*/15 * * * *')
+  async autoSyncTick() {
+    let rows: any[] = [];
+    try {
+      rows = await this.db.query(
+        `SELECT tenant_id, provider FROM tenant_integrations
+         WHERE status <> 'disabled' AND config->>'autoSync' = 'true'`,
+      );
+    } catch (e: any) {
+      this.logger.warn(`[integrations] autoSync query failed: ${e.message}`);
+      return;
+    }
+    if (!rows.length) return;
+    this.logger.log(`[integrations] autoSync tick — ${rows.length} integration(s)`);
+    for (const r of rows) {
+      try {
+        await this.syncContacts(r.tenant_id, r.provider);
+      } catch (e: any) {
+        // syncContacts already records the error on the integration row.
+        this.logger.warn(`[integrations] autoSync ${r.provider} tenant ${r.tenant_id} failed: ${e.message}`);
+      }
+    }
   }
 
   /** Phase 3: bookable professionals from the external system. */
