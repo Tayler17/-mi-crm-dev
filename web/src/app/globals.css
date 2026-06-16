@@ -223,8 +223,11 @@ tr:hover td { background: var(--bg); }
   .inbox-layout { left: 0; }
   .top-header { padding: 0 12px; }
 
-  /* Fix chat page fixed positioning (it uses var(--sidebar-w) inline) */
-  .chat-layout { left: 0 !important; top: var(--header-h) !important; }
+  /* Fix chat page fixed positioning (it uses var(--sidebar-w) inline).
+     Drop the inline 100vh height so top+bottom pin it to the visible viewport —
+     otherwise the offset by --header-h pushed the message input below the fold
+     (only visible in landscape). */
+  .chat-layout { left: 0 !important; top: var(--header-h) !important; bottom: 0 !important; height: auto !important; }
 
   /* ── Inbox mobile panel switching via data-panel attribute ── */
   .inbox-layout[data-panel="chat"]   .inbox-sidebar { display: none; }

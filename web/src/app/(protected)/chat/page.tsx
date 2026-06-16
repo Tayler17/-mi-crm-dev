@@ -75,6 +75,8 @@ export default function ChatPage() {
   const [mobilePanel, setMobilePanel] = useState<'list' | 'chat'>('list');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const justOpenedRef = useRef(false);
+  const lastMsgIdRef = useRef<string | null>(null);
 
   const loadChats = useCallback(async () => {
     try { const data = await getMyChats(); setChats(data); } catch {}
@@ -107,13 +109,34 @@ export default function ChatPage() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [activeChat, loadMessages, loadChats]);
 
+  // Jump to the bottom instantly when opening a chat; smooth-scroll only when a
+  // genuinely new message arrives. Idle polls (same last message) don't scroll,
+  // so reading older messages isn't interrupted.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const lastId = messages.length ? messages[messages.length - 1].id : null;
+    if (justOpenedRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      justOpenedRef.current = false;
+      lastMsgIdRef.current = lastId;
+    } else if (lastId && lastId !== lastMsgIdRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      lastMsgIdRef.current = lastId;
+    }
   }, [messages]);
+
+  // Persist the draft per chat so it survives navigating away / coming back.
+  useEffect(() => {
+    if (!activeChat) return;
+    const key = `chat_draft_${activeChat.id}`;
+    if (input) localStorage.setItem(key, input);
+    else localStorage.removeItem(key);
+  }, [input, activeChat]);
 
   async function openChat(chat: InternalChat) {
     setActiveChat(chat);
     setMobilePanel('chat');
+    setInput(localStorage.getItem(`chat_draft_${chat.id}`) ?? '');
+    justOpenedRef.current = true;
     await loadMessages(chat.id);
   }
 

@@ -37,6 +37,13 @@ const AVAIL_COLOR: Record<string, string> = {
   offline:'#9ca3af',
 };
 
+// Real presence derived from activity (heartbeat every 2 min) rather than the
+// manually-chosen status — "online" = active within the last 3 minutes.
+function isOnline(lastSeenAt?: string | null) {
+  if (!lastSeenAt) return false;
+  return Date.now() - new Date(lastSeenAt).getTime() < 3 * 60_000;
+}
+
 function Avatar({ name, size = 36, availability }: { name: string; size?: number; availability?: string }) {
   const initials = name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
   const colors = ['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f97316', '#22c55e', '#06b6d4', '#3b82f6'];
@@ -224,7 +231,7 @@ export default function UsersPage() {
                   borderBottom: idx < filtered.length - 1 ? '1px solid var(--border)' : 'none',
                   opacity: u.isActive ? 1 : 0.55,
                 }}>
-                  <Avatar name={u.fullName || u.email} availability={u.availability} />
+                  <Avatar name={u.fullName || u.email} availability={isOnline(u.lastSeenAt) ? 'online' : 'offline'} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 600, fontSize: 14 }}>{u.fullName}</span>
@@ -241,9 +248,13 @@ export default function UsersPage() {
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
                       Desde {new Date(u.createdAt).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}
                       {' · '}
-                      <span title={u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleString('es-ES') : ''}>
-                        Última conexión: {relativeTime(u.lastSeenAt)}
-                      </span>
+                      {isOnline(u.lastSeenAt) ? (
+                        <span style={{ color: '#22c55e', fontWeight: 600 }}>● En línea</span>
+                      ) : (
+                        <span title={u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleString('es-ES') : ''}>
+                          Última conexión: {relativeTime(u.lastSeenAt)}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
