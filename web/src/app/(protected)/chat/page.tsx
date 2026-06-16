@@ -507,7 +507,7 @@ export default function ChatPage() {
                   <textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !(typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window))) { e.preventDefault(); handleSend(); } }}
                     placeholder={i.chatInputPlaceholder}
                     rows={1}
                     style={{

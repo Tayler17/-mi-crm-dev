@@ -23,6 +23,13 @@ import {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// Touch/phone devices have no easy Shift+Enter, so there Enter inserts a newline
+// and the send button sends (like WhatsApp). Desktop keeps Enter=send.
+function isTouchDevice(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window;
+}
+
 function exportConversationPdf(conv: Conversation, contact: { fullName?: string; email?: string } | null, msgs: Message[], i: typeof APP['es']) {
   const contactName = contact?.fullName || contact?.email || i.noContact;
   const fmtTime = (dt: string) => new Date(dt).toLocaleString(i.locale, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -528,6 +535,14 @@ export default function InboxPage() {
   // File attachment staged (caption uses the main body textarea)
   const [pendingFile, setPendingFile] = useState<File | null>(null);
 
+  // Voice note recording
+  const [recording, setRecording] = useState(false);
+  const [recordSecs, setRecordSecs] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cancelRecordRef = useRef(false);
+
   // Conversation tags
   const [convTags, setConvTags] = useState<Tag[]>([]);
 
@@ -827,6 +842,47 @@ export default function InboxPage() {
       loadList(true);
     } catch (err: unknown) { alert(err instanceof Error ? err.message : i.inbxErrUpload); }
     finally { setSending(false); setPendingFile(null); }
+  }
+
+  async function startRecording() {
+    if (!activeId || recording) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      cancelRecordRef.current = false;
+      mr.ondataavailable = (ev) => { if (ev.data.size) audioChunksRef.current.push(ev.data); };
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+        setRecording(false);
+        setRecordSecs(0);
+        if (cancelRecordRef.current) return;
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        if (blob.size < 800) return;
+        const file = new File([blob], `voz-${Date.now()}.webm`, { type: 'audio/webm' });
+        setSending(true);
+        try {
+          await uploadMessageFile(activeId, file);
+          const [m, n] = await Promise.all([getMessages(activeId), getNotes(activeId)]);
+          setMessages(m); setNotes(n);
+          loadList(true);
+        } catch (err: unknown) { alert(err instanceof Error ? err.message : i.inbxErrUpload); }
+        finally { setSending(false); }
+      };
+      mediaRecorderRef.current = mr;
+      mr.start();
+      setRecording(true);
+      setRecordSecs(0);
+      recordTimerRef.current = setInterval(() => setRecordSecs((s) => s + 1), 1000);
+    } catch {
+      alert('No se pudo acceder al micrófono. Revisa los permisos del navegador.');
+    }
+  }
+
+  function stopRecording(cancel = false) {
+    cancelRecordRef.current = cancel;
+    mediaRecorderRef.current?.stop();
   }
 
   async function handleCancelScheduled(schedId: string) {
@@ -1717,6 +1773,21 @@ export default function InboxPage() {
                   <button type="button" onClick={() => setPendingFile(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, padding: '2px 4px' }}>✕</button>
                 </div>
               )}
+              {/* Voice recording bar */}
+              {recording && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6, padding: '8px 12px', borderRadius: 8, border: '1px solid #ef4444', background: 'var(--bg-hover, #fef2f2)' }}>
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ef4444', animation: 'pulse 1s infinite' }} />
+                  <span style={{ fontSize: 13, color: 'var(--text)' }}>
+                    Grabando nota de voz… {Math.floor(recordSecs / 60)}:{String(recordSecs % 60).padStart(2, '0')}
+                  </span>
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                    <button type="button" onClick={() => stopRecording(true)} title="Cancelar"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--text-muted)' }}>✕</button>
+                    <button type="button" onClick={() => stopRecording(false)} title="Enviar nota de voz"
+                      style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '50%', width: 32, height: 32, cursor: 'pointer', fontSize: 14 }}>➤</button>
+                  </div>
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                 {/* Hidden file input */}
                 <input ref={fileInputRef} type="file" accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt" style={{ display: 'none' }} onChange={handleFileUpload} />
@@ -1725,13 +1796,26 @@ export default function InboxPage() {
                     type="button"
                     title={i.inbxAttach}
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={sending}
+                    disabled={sending || recording}
                     style={{
                       padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)',
                       background: 'none', color: 'var(--text-muted)',
                       cursor: 'pointer', fontSize: 14, flexShrink: 0, alignSelf: 'flex-end',
                     }}
                   >📎</button>
+                )}
+                {composerTab === 'message' && (
+                  <button
+                    type="button"
+                    title="Grabar nota de voz"
+                    onClick={startRecording}
+                    disabled={sending || recording}
+                    style={{
+                      padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)',
+                      background: recording ? '#fee2e2' : 'none', color: recording ? '#ef4444' : 'var(--text-muted)',
+                      cursor: 'pointer', fontSize: 14, flexShrink: 0, alignSelf: 'flex-end',
+                    }}
+                  >🎤</button>
                 )}
                 <button
                   type="button"
@@ -1781,7 +1865,7 @@ export default function InboxPage() {
                       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertMention(mentionSuggestions[mentionCursor]); return; }
                       if (e.key === 'Escape') { setMentionQuery(null); return; }
                     }
-                    if (e.key === 'Enter' && !e.shiftKey && !scheduleMode) { e.preventDefault(); if (pendingFile) handleFileSend(); else handleSend(e as any); }
+                    if (e.key === 'Enter' && !e.shiftKey && !scheduleMode && !isTouchDevice()) { e.preventDefault(); if (pendingFile) handleFileSend(); else handleSend(e as any); }
                     if (e.key === 'Escape') setShowCanned(false);
                   }}
                 />

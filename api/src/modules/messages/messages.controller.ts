@@ -3,6 +3,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
+import { spawn } from 'child_process';
+import { unlink } from 'fs/promises';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { MessagesService } from './messages.service';
@@ -12,6 +14,18 @@ import { TenantId } from '../../common/decorators/tenant.decorator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WhatsappWebService } from '../connections/whatsapp-web.service';
+
+/** Transcode a recorded audio file to ogg/opus so WhatsApp sends it as a real voice note (ptt). */
+function transcodeToOggOpus(inputPath: string): Promise<string> {
+  const outPath = inputPath.replace(/\.[^.]+$/, '') + '.ogg';
+  return new Promise((resolve, reject) => {
+    const ff = spawn('ffmpeg', ['-y', '-i', inputPath, '-vn', '-c:a', 'libopus', '-b:a', '32k', outPath]);
+    let err = '';
+    ff.stderr?.on('data', (d) => (err += d.toString()));
+    ff.on('error', reject);
+    ff.on('close', (code) => (code === 0 ? resolve(outPath) : reject(new Error('ffmpeg ' + err.slice(-160)))));
+  });
+}
 
 @Controller('conversations/:conversationId')
 @UseGuards(JwtAuthGuard)
@@ -168,11 +182,23 @@ export class MessagesController {
     @Request() req: any,
   ) {
     if (!file) throw new Error('No file received');
-    const fileUrl = `/uploads/${file.filename}`;
     const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.originalname);
-    const isAudio = /\.(mp3|ogg|wav|m4a|opus)$/i.test(file.originalname);
-    const isVideo = /\.(mp4|mov|avi|webm)$/i.test(file.originalname);
+    // Recorded voice notes arrive as audio/webm — detect audio by extension OR mimetype.
+    const isAudio = /\.(mp3|ogg|wav|m4a|opus)$/i.test(file.originalname) || (file.mimetype?.startsWith('audio/') ?? false);
+    const isVideo = !isAudio && /\.(mp4|mov|avi|webm)$/i.test(file.originalname);
     const contentType = isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : 'file';
+
+    let filename = file.filename;
+    // Audio → ogg/opus so WhatsApp delivers a proper voice note (ptt). Falls back to original on failure.
+    if (isAudio && !/\.ogg$/i.test(filename)) {
+      try {
+        const inputPath = join(process.cwd(), 'uploads', file.filename);
+        const outPath = await transcodeToOggOpus(inputPath);
+        filename = outPath.split(/[\\/]/).pop()!;
+        await unlink(inputPath).catch(() => {});
+      } catch { /* keep original */ }
+    }
+    const fileUrl = `/uploads/${filename}`;
     // caption comes via multipart field
     const caption: string = (req.body?.caption ?? '').trim();
     const body = caption
