@@ -184,8 +184,10 @@ export class MessagesController {
   ) {
     if (!file) throw new Error('No file received');
     const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.originalname);
-    // Recorded voice notes arrive as audio/webm — detect audio by extension OR mimetype.
-    const isAudio = /\.(mp3|ogg|wav|m4a|opus)$/i.test(file.originalname) || (file.mimetype?.startsWith('audio/') ?? false);
+    // Recorded voice notes are flagged explicitly (kind=audio) because a .webm
+    // recording can be reported as video/webm; also accept audio ext/mimetype.
+    const forcedAudio = req.body?.kind === 'audio';
+    const isAudio = forcedAudio || /\.(mp3|ogg|wav|m4a|opus)$/i.test(file.originalname) || (file.mimetype?.startsWith('audio/') ?? false);
     const isVideo = !isAudio && /\.(mp4|mov|avi|webm)$/i.test(file.originalname);
     const contentType = isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : 'file';
 

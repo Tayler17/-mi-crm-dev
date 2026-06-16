@@ -863,7 +863,7 @@ export default function InboxPage() {
         const file = new File([blob], `voz-${Date.now()}.webm`, { type: 'audio/webm' });
         setSending(true);
         try {
-          await uploadMessageFile(activeId, file);
+          await uploadMessageFile(activeId, file, undefined, 'audio');
           const [m, n] = await Promise.all([getMessages(activeId), getNotes(activeId)]);
           setMessages(m); setNotes(n);
           loadList(true);

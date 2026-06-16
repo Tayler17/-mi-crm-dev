@@ -3,8 +3,9 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationsService } from '../notifications/notifications.service';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import { join, extname } from 'path';
+import { spawn } from 'child_process';
 
 @Injectable()
 export class WhatsappWebService implements OnModuleInit {
@@ -358,6 +359,18 @@ export class WhatsappWebService implements OnModuleInit {
       this.logger.error(`sendFile failed for ${connectionId}: ${e.message}`);
       return false;
     }
+  }
+
+  /** Transcode an audio file to mp3 (universal playback). Returns the new filename, or null on failure. */
+  private transcodeToMp3(inputPath: string): Promise<string | null> {
+    const outPath = inputPath.replace(/\.[^.]+$/, '') + '.mp3';
+    return new Promise((resolve) => {
+      try {
+        const ff = spawn('ffmpeg', ['-y', '-i', inputPath, '-vn', '-acodec', 'libmp3lame', '-q:a', '4', outPath]);
+        ff.on('error', () => resolve(null));
+        ff.on('close', (code) => resolve(code === 0 ? outPath.split(/[\\/]/).pop()! : null));
+      } catch { resolve(null); }
+    });
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
@@ -1036,8 +1049,17 @@ export class WhatsappWebService implements OnModuleInit {
           const ext = extMap[mime] || (mime.split('/')[1] ? `.${mime.split('/')[1].split(';')[0]}` : '.bin');
           const uploadsDir = join(process.cwd(), 'uploads', 'messages');
           if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
-          const filename = `wa-${Date.now()}${ext}`;
+          let filename = `wa-${Date.now()}${ext}`;
           writeFileSync(join(uploadsDir, filename), buffer);
+          // Incoming voice notes are ogg/opus → transcode to mp3 so they play on
+          // mobile/Safari in the CRM (ogg only plays on desktop Chrome).
+          if (contentType === 'audioMessage' && !/\.mp3$/i.test(filename)) {
+            const mp3 = await this.transcodeToMp3(join(uploadsDir, filename));
+            if (mp3) {
+              try { unlinkSync(join(uploadsDir, filename)); } catch {}
+              filename = mp3;
+            }
+          }
           const fileUrl  = `/uploads/messages/${filename}`;
           const origName = msgContent.documentMessage?.fileName ?? msgContent.audioMessage?.fileName ?? filename;
           body = `${fileUrl}|${origName}`;

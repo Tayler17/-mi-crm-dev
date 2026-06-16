@@ -1674,10 +1674,11 @@ export const getMessages = (conversationId: string) =>
 export const sendMessage = (conversationId: string, body: string) =>
   apiPost<Message>(`/conversations/${conversationId}/messages`, { body, contentType: 'text', direction: 'outbound' });
 
-export async function uploadMessageFile(conversationId: string, file: File, caption?: string): Promise<Message> {
+export async function uploadMessageFile(conversationId: string, file: File, caption?: string, kind?: string): Promise<Message> {
   const formData = new FormData();
   formData.append('file', file);
   if (caption) formData.append('caption', caption);
+  if (kind) formData.append('kind', kind);
   const res = await fetch(`${API_URL}/conversations/${conversationId}/messages/upload`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getToken()}`, 'X-Tenant-ID': getTenantId() },
