@@ -1,3 +1,12 @@
+/** Provider-agnostic contact shape returned by listPatients (Phase 2). */
+export interface ExternalContact {
+  externalId: string;
+  fullName: string;
+  email?: string;
+  phone?: string;
+  location?: string;
+}
+
 /**
  * A pluggable connector to an external practice-management / scheduling system
  * (Dentally first; Cliniko, Acuity, etc. later). Each tenant connects its own
@@ -14,7 +23,7 @@ export interface IntegrationConnector {
 
   // ── Later phases (optional until implemented) ──────────────────────────────
   /** Phase 2: pull patients/customers to sync as CRM contacts. */
-  listPatients?(config: Record<string, any>, opts?: { page?: number; perPage?: number }): Promise<any[]>;
+  listPatients?(config: Record<string, any>, opts?: { perPage?: number; maxPages?: number }): Promise<ExternalContact[]>;
   /** Phase 3: open slots for a date range / practitioner. */
   listAvailability?(config: Record<string, any>, opts: any): Promise<any[]>;
   /** Phase 3: create an appointment in the external system. */

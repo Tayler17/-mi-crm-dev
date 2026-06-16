@@ -31,6 +31,20 @@ export class IntegrationsService implements OnModuleInit {
         UNIQUE (tenant_id, provider)
       )
     `).catch((e: any) => this.logger.warn(`tenant_integrations table init failed: ${e.message}`));
+
+    // Maps an external record (e.g. a Dentally patient) to a CRM contact so
+    // re-syncs update the same contact instead of creating duplicates.
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS integration_contact_map (
+        id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        tenant_id    UUID NOT NULL,
+        provider     TEXT NOT NULL,
+        external_id  TEXT NOT NULL,
+        contact_id   UUID NOT NULL,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (tenant_id, provider, external_id)
+      )
+    `).catch((e: any) => this.logger.warn(`integration_contact_map table init failed: ${e.message}`));
   }
 
   /** Catalog of connectors available to connect (for the UI). */
@@ -99,6 +113,99 @@ export class IntegrationsService implements OnModuleInit {
       [tenantId, provider],
     );
     return { ok: true };
+  }
+
+  /**
+   * Phase 2: pull contacts/patients from the external system into CRM contacts.
+   * Dedupe order: (1) prior mapping → update same contact; (2) existing contact
+   * by email/phone in this tenant → link + update; (3) otherwise create new.
+   */
+  async syncContacts(tenantId: string, provider: string) {
+    const { connector, config } = await this.getConnected(tenantId, provider);
+    if (!connector.listPatients) throw new BadRequestException(`${provider} no soporta importar contactos.`);
+
+    let externals;
+    try {
+      externals = await connector.listPatients(config);
+    } catch (e: any) {
+      await this.db.query(
+        `UPDATE tenant_integrations SET status='error', last_error=$3, updated_at=NOW()
+         WHERE tenant_id::text=$1 AND provider=$2`,
+        [tenantId, provider, e.message?.slice(0, 500) ?? 'Error al importar'],
+      );
+      throw new BadRequestException(e.message || 'No se pudieron leer los contactos.');
+    }
+
+    let created = 0, updated = 0, skipped = 0;
+    const note = `Importado de ${connector.label}`;
+
+    for (const ext of externals) {
+      if (!ext.externalId || !ext.fullName) { skipped++; continue; }
+      try {
+        // 1) Already mapped? update that contact.
+        const [mapped] = await this.db.query(
+          `SELECT contact_id FROM integration_contact_map
+           WHERE tenant_id::text=$1 AND provider=$2 AND external_id=$3`,
+          [tenantId, provider, ext.externalId],
+        );
+
+        let contactId: string | undefined = mapped?.contact_id;
+
+        // 2) Not mapped — match an existing contact by email or phone.
+        if (!contactId && (ext.email || ext.phone)) {
+          const [match] = await this.db.query(
+            `SELECT id FROM contacts
+             WHERE tenant_id::text=$1
+               AND ( ($2 <> '' AND lower(email)=lower($2)) OR ($3 <> '' AND phone=$3) )
+             LIMIT 1`,
+            [tenantId, ext.email ?? '', ext.phone ?? ''],
+          );
+          contactId = match?.id;
+        }
+
+        if (contactId) {
+          await this.db.query(
+            `UPDATE contacts SET
+               full_name = COALESCE(NULLIF($2,''), full_name),
+               email     = COALESCE(NULLIF($3,''), email),
+               phone     = COALESCE(NULLIF($4,''), phone),
+               location  = COALESCE(NULLIF($5,''), location),
+               updated_at = NOW()
+             WHERE id=$1 AND tenant_id::text=$6`,
+            [contactId, ext.fullName, ext.email ?? '', ext.phone ?? '', ext.location ?? '', tenantId],
+          );
+          updated++;
+        } else {
+          const [row] = await this.db.query(
+            `INSERT INTO contacts (tenant_id, full_name, email, phone, location, notes)
+             VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),$6)
+             RETURNING id`,
+            [tenantId, ext.fullName, ext.email ?? '', ext.phone ?? '', ext.location ?? '', note],
+          );
+          contactId = row.id;
+          created++;
+        }
+
+        // Record/refresh the mapping.
+        await this.db.query(
+          `INSERT INTO integration_contact_map (tenant_id, provider, external_id, contact_id)
+           VALUES ($1,$2,$3,$4)
+           ON CONFLICT (tenant_id, provider, external_id) DO UPDATE SET contact_id=$4`,
+          [tenantId, provider, ext.externalId, contactId],
+        );
+      } catch (e: any) {
+        this.logger.warn(`[integrations] sync skip ${provider}:${ext.externalId} — ${e.message}`);
+        skipped++;
+      }
+    }
+
+    await this.db.query(
+      `UPDATE tenant_integrations SET status='connected', last_error=NULL, updated_at=NOW()
+       WHERE tenant_id::text=$1 AND provider=$2`,
+      [tenantId, provider],
+    );
+    this.logger.log(`[integrations] ${provider} sync tenant ${tenantId}: +${created} ~${updated} skip ${skipped} / ${externals.length}`);
+    return { ok: true, total: externals.length, created, updated, skipped };
   }
 
   /** Internal helper for future phases: get a connector + a tenant's stored config. */

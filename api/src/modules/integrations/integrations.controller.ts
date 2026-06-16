@@ -34,6 +34,13 @@ export class IntegrationsController {
     return this.svc.test(tenantId, provider);
   }
 
+  /** Import contacts/patients from the external system into CRM contacts */
+  @Post(':provider/sync')
+  sync(@Param('provider') provider: string, @TenantId() tenantId: string, @Request() req: any) {
+    if (req.user?.role === 'agent') throw new ForbiddenException('Solo administradores pueden importar contactos.');
+    return this.svc.syncContacts(tenantId, provider);
+  }
+
   /** Disconnect a provider */
   @Delete(':provider')
   disconnect(@Param('provider') provider: string, @TenantId() tenantId: string, @Request() req: any) {

@@ -1749,6 +1749,8 @@ export const connectIntegration = (provider: string, config: Record<string, any>
 export const testIntegration = (provider: string) =>
   apiPost<{ ok: boolean; info?: string; error?: string }>(`/integrations/${provider}/test`, {});
 export const disconnectIntegration = (provider: string) => apiDelete(`/integrations/${provider}`);
+export const syncIntegration = (provider: string) =>
+  apiPost<{ ok: boolean; total: number; created: number; updated: number; skipped: number }>(`/integrations/${provider}/sync`, {});
 
 // ── Admin: Tenant Management ──────────────────────────────────────────────────
 

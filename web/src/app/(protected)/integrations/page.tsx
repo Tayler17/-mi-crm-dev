@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import {
-  getIntegrationCatalog, getIntegrations, connectIntegration, testIntegration, disconnectIntegration,
+  getIntegrationCatalog, getIntegrations, connectIntegration, testIntegration, disconnectIntegration, syncIntegration,
   type IntegrationCatalogItem, type TenantIntegration,
 } from '@/lib/api';
 
@@ -29,6 +29,7 @@ export default function IntegrationsPage() {
   const [token, setToken] = useState('');
   const [region, setRegion] = useState('global');
   const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
@@ -66,6 +67,16 @@ export default function IntegrationsPage() {
       else setError(r.error || 'La conexión falló.');
       load();
     } catch (e: any) { setError(e?.message || 'Error al probar'); }
+  }
+
+  async function handleSync(provider: string) {
+    setSyncing(provider); setError(''); setInfo('');
+    try {
+      const r = await syncIntegration(provider);
+      setInfo(`✅ Sincronización completa: ${r.created} nuevos, ${r.updated} actualizados${r.skipped ? `, ${r.skipped} omitidos` : ''} (de ${r.total}).`);
+      load();
+    } catch (e: any) { setError(e?.message || 'Error al sincronizar'); }
+    finally { setSyncing(null); }
   }
 
   async function handleDisconnect(provider: string) {
@@ -118,6 +129,9 @@ export default function IntegrationsPage() {
                     <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                       {conn ? (
                         <>
+                          <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 10px' }} disabled={syncing === item.provider} onClick={() => handleSync(item.provider)}>
+                            {syncing === item.provider ? 'Sincronizando…' : '↻ Sincronizar pacientes'}
+                          </button>
                           <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => handleTest(item.provider)}>Probar</button>
                           <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px', color: 'var(--danger)' }} onClick={() => handleDisconnect(item.provider)}>Desconectar</button>
                         </>
