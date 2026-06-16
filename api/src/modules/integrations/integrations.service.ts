@@ -208,6 +208,60 @@ export class IntegrationsService implements OnModuleInit {
     return { ok: true, total: externals.length, created, updated, skipped };
   }
 
+  /** Phase 3: bookable professionals from the external system. */
+  async listPractitioners(tenantId: string, provider: string) {
+    const { connector, config } = await this.getConnected(tenantId, provider);
+    if (!connector.listPractitioners) throw new BadRequestException(`${provider} no soporta agendar citas.`);
+    return connector.listPractitioners(config);
+  }
+
+  /** Phase 3: open appointment slots for a practitioner over a date range. */
+  async listAvailability(
+    tenantId: string, provider: string,
+    opts: { practitionerId: string; startDate: string; finishDate: string; durationMinutes?: number },
+  ) {
+    const { connector, config } = await this.getConnected(tenantId, provider);
+    if (!connector.listAvailability) throw new BadRequestException(`${provider} no soporta agendar citas.`);
+    if (!opts.practitionerId || !opts.startDate || !opts.finishDate) {
+      throw new BadRequestException('Faltan datos: profesional y rango de fechas.');
+    }
+    return connector.listAvailability(config, opts);
+  }
+
+  /**
+   * Phase 3: book an appointment for a CRM contact. The contact must be linked
+   * to an external patient (created/linked by the Phase 2 sync).
+   */
+  async bookAppointment(
+    tenantId: string, provider: string,
+    input: { contactId: string; practitionerId: string; start: string; finish?: string; reason?: string },
+  ) {
+    const { connector, config } = await this.getConnected(tenantId, provider);
+    if (!connector.createAppointment) throw new BadRequestException(`${provider} no soporta agendar citas.`);
+    if (!input.contactId || !input.practitionerId || !input.start) {
+      throw new BadRequestException('Faltan datos: contacto, profesional y horario.');
+    }
+
+    const [map] = await this.db.query(
+      `SELECT external_id FROM integration_contact_map
+       WHERE tenant_id::text=$1 AND provider=$2 AND contact_id::text=$3`,
+      [tenantId, provider, input.contactId],
+    );
+    if (!map?.external_id) {
+      throw new BadRequestException('Este contacto no está vinculado a un paciente de Dentally. Sincroniza primero los pacientes.');
+    }
+
+    const booked = await connector.createAppointment(config, {
+      patientExternalId: map.external_id,
+      practitionerId: input.practitionerId,
+      start: input.start,
+      finish: input.finish,
+      reason: input.reason,
+    });
+    this.logger.log(`[integrations] ${provider} booked appt ${booked.id} for contact ${input.contactId} (tenant ${tenantId})`);
+    return { ok: true, appointment: booked };
+  }
+
   /** Internal helper for future phases: get a connector + a tenant's stored config. */
   async getConnected(tenantId: string, provider: string): Promise<{ connector: IntegrationConnector; config: Record<string, any> }> {
     const connector = this.connectors.get(provider);

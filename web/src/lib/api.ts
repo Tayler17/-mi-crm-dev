@@ -1752,6 +1752,18 @@ export const disconnectIntegration = (provider: string) => apiDelete(`/integrati
 export const syncIntegration = (provider: string) =>
   apiPost<{ ok: boolean; total: number; created: number; updated: number; skipped: number }>(`/integrations/${provider}/sync`, {});
 
+export interface Practitioner { id: string; name: string; }
+export interface AvailabilitySlot { start: string; finish?: string; practitionerId?: string; }
+export const getPractitioners = (provider: string) =>
+  apiGet<Practitioner[]>(`/integrations/${provider}/practitioners`);
+export const getAvailability = (provider: string, practitionerId: string, startDate: string, finishDate: string, duration?: number) => {
+  const p = new URLSearchParams({ practitionerId, startDate, finishDate });
+  if (duration) p.set('duration', String(duration));
+  return apiGet<AvailabilitySlot[]>(`/integrations/${provider}/availability?${p.toString()}`);
+};
+export const bookAppointment = (provider: string, body: { contactId: string; practitionerId: string; start: string; finish?: string; reason?: string }) =>
+  apiPost<{ ok: boolean; appointment: { id: string; start: string; finish?: string } }>(`/integrations/${provider}/appointments`, body);
+
 // ── Admin: Tenant Management ──────────────────────────────────────────────────
 
 export interface TenantAdmin {

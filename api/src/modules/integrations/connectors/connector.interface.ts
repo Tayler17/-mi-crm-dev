@@ -7,6 +7,24 @@ export interface ExternalContact {
   location?: string;
 }
 
+/** A bookable professional in the external system (Phase 3). */
+export interface Practitioner { id: string; name: string; }
+
+/** An open appointment slot (Phase 3). ISO 8601 times. */
+export interface AvailabilitySlot { start: string; finish?: string; practitionerId?: string; }
+
+/** Input to create an appointment (Phase 3). */
+export interface BookAppointmentInput {
+  patientExternalId: string;
+  practitionerId: string;
+  start: string;
+  finish?: string;
+  reason?: string;
+}
+
+/** Result of a successful booking (Phase 3). */
+export interface BookedAppointment { id: string; start: string; finish?: string; }
+
 /**
  * A pluggable connector to an external practice-management / scheduling system
  * (Dentally first; Cliniko, Acuity, etc. later). Each tenant connects its own
@@ -24,8 +42,13 @@ export interface IntegrationConnector {
   // ── Later phases (optional until implemented) ──────────────────────────────
   /** Phase 2: pull patients/customers to sync as CRM contacts. */
   listPatients?(config: Record<string, any>, opts?: { perPage?: number; maxPages?: number }): Promise<ExternalContact[]>;
+  /** Phase 3: bookable professionals. */
+  listPractitioners?(config: Record<string, any>): Promise<Practitioner[]>;
   /** Phase 3: open slots for a date range / practitioner. */
-  listAvailability?(config: Record<string, any>, opts: any): Promise<any[]>;
+  listAvailability?(
+    config: Record<string, any>,
+    opts: { practitionerId: string; startDate: string; finishDate: string; durationMinutes?: number },
+  ): Promise<AvailabilitySlot[]>;
   /** Phase 3: create an appointment in the external system. */
-  createAppointment?(config: Record<string, any>, appt: any): Promise<any>;
+  createAppointment?(config: Record<string, any>, appt: BookAppointmentInput): Promise<BookedAppointment>;
 }

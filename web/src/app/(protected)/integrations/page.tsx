@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   getIntegrationCatalog, getIntegrations, connectIntegration, testIntegration, disconnectIntegration, syncIntegration,
-  type IntegrationCatalogItem, type TenantIntegration,
+  getPractitioners, getAvailability, bookAppointment, getContacts,
+  type IntegrationCatalogItem, type TenantIntegration, type Practitioner, type AvailabilitySlot, type Contact,
 } from '@/lib/api';
 
 const PROVIDER_META: Record<string, { emoji: string; desc: string; help: string }> = {
@@ -30,6 +31,7 @@ export default function IntegrationsPage() {
   const [region, setRegion] = useState('global');
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
+  const [bookingProvider, setBookingProvider] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
@@ -132,6 +134,9 @@ export default function IntegrationsPage() {
                           <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 10px' }} disabled={syncing === item.provider} onClick={() => handleSync(item.provider)}>
                             {syncing === item.provider ? 'Sincronizando…' : '↻ Sincronizar pacientes'}
                           </button>
+                          <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => setBookingProvider(bookingProvider === item.provider ? null : item.provider)}>
+                            {bookingProvider === item.provider ? 'Cerrar agenda' : '📅 Agendar cita'}
+                          </button>
                           <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => handleTest(item.provider)}>Probar</button>
                           <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px', color: 'var(--danger)' }} onClick={() => handleDisconnect(item.provider)}>Desconectar</button>
                         </>
@@ -164,10 +169,148 @@ export default function IntegrationsPage() {
                     </div>
                   </div>
                 )}
+
+                {conn && canManage && bookingProvider === item.provider && (
+                  <BookingPanel provider={item.provider} />
+                )}
               </div>
             );
           })}
           {catalog.length === 0 && <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No hay integraciones disponibles.</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Booking panel: pick a professional + date → see open slots → book one for a CRM contact. */
+function BookingPanel({ provider }: { provider: string }) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
+  const [practitionerId, setPractitionerId] = useState('');
+  const [date, setDate] = useState(todayStr);
+  const [duration, setDuration] = useState(30);
+  const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
+  const [selectedSlot, setSelectedSlot] = useState<AvailabilitySlot | null>(null);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [contactSearch, setContactSearch] = useState('');
+  const [contactId, setContactId] = useState('');
+  const [reason, setReason] = useState('');
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [booking, setBooking] = useState(false);
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+
+  useEffect(() => {
+    getPractitioners(provider)
+      .then((p) => { setPractitioners(p); if (p[0]) setPractitionerId(p[0].id); })
+      .catch((e: any) => setErr(e?.message || 'No se pudieron cargar los profesionales'));
+  }, [provider]);
+
+  // Debounced contact search
+  useEffect(() => {
+    const t = setTimeout(() => {
+      getContacts(1, 30, contactSearch).then((r) => setContacts(r.data)).catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [contactSearch]);
+
+  async function loadSlots() {
+    setErr(''); setOk(''); setSelectedSlot(null); setLoadingSlots(true);
+    try {
+      const s = await getAvailability(provider, practitionerId, `${date}T00:00:00Z`, `${date}T23:59:59Z`, duration);
+      setSlots(s);
+      if (s.length === 0) setErr('No hay horarios disponibles para ese día.');
+    } catch (e: any) { setErr(e?.message || 'Error al consultar disponibilidad'); }
+    finally { setLoadingSlots(false); }
+  }
+
+  async function confirm() {
+    if (!selectedSlot || !contactId) return;
+    setBooking(true); setErr(''); setOk('');
+    try {
+      const r = await bookAppointment(provider, {
+        contactId, practitionerId,
+        start: selectedSlot.start, finish: selectedSlot.finish,
+        reason: reason.trim() || undefined,
+      });
+      const when = new Date(r.appointment.start).toLocaleString();
+      setOk(`✅ Cita agendada para el ${when}.`);
+      setSelectedSlot(null); setSlots([]); setReason('');
+    } catch (e: any) { setErr(e?.message || 'No se pudo agendar la cita'); }
+    finally { setBooking(false); }
+  }
+
+  const fmtTime = (iso: string) => { try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return iso; } };
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ fontWeight: 600, fontSize: 14 }}>📅 Agendar cita</div>
+      {err && <div style={{ padding: '6px 10px', background: '#fee2e2', color: '#dc2626', borderRadius: 6, fontSize: 12 }}>❌ {err}</div>}
+      {ok && <div style={{ padding: '6px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, fontSize: 12 }}>{ok}</div>}
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div className="form-group" style={{ margin: 0, flex: '1 1 200px' }}>
+          <label className="form-label">Profesional</label>
+          <select className="form-input" value={practitionerId} onChange={(e) => setPractitionerId(e.target.value)}>
+            {practitioners.length === 0 && <option value="">—</option>}
+            {practitioners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div className="form-group" style={{ margin: 0, width: 150 }}>
+          <label className="form-label">Fecha</label>
+          <input className="form-input" type="date" value={date} min={todayStr} onChange={(e) => setDate(e.target.value)} />
+        </div>
+        <div className="form-group" style={{ margin: 0, width: 110 }}>
+          <label className="form-label">Duración</label>
+          <select className="form-input" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
+            {[15, 30, 45, 60, 90].map((d) => <option key={d} value={d}>{d} min</option>)}
+          </select>
+        </div>
+        <button className="btn btn-primary" disabled={!practitionerId || loadingSlots} onClick={loadSlots}>
+          {loadingSlots ? 'Buscando…' : 'Ver horarios'}
+        </button>
+      </div>
+
+      {slots.length > 0 && (
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Selecciona un horario:</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {slots.map((s, i) => (
+              <button key={i} className="btn"
+                style={{ fontSize: 12, padding: '4px 10px', border: '1px solid var(--border)',
+                  background: selectedSlot?.start === s.start ? 'var(--primary)' : 'transparent',
+                  color: selectedSlot?.start === s.start ? '#fff' : 'inherit' }}
+                onClick={() => setSelectedSlot(s)}>
+                {fmtTime(s.start)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {selectedSlot && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 4 }}>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Paciente (contacto del CRM)</label>
+            <input className="form-input" placeholder="Buscar contacto por nombre…" value={contactSearch} onChange={(e) => setContactSearch(e.target.value)} />
+            <select className="form-input" style={{ marginTop: 6 }} value={contactId} onChange={(e) => setContactId(e.target.value)} size={Math.min(contacts.length || 1, 5)}>
+              {contacts.length === 0 && <option value="">No hay contactos</option>}
+              {contacts.map((c) => <option key={c.id} value={c.id}>{c.fullName}{c.email ? ` · ${c.email}` : ''}</option>)}
+            </select>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+              El contacto debe estar vinculado a un paciente de Dentally (sincroniza primero).
+            </div>
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Motivo (opcional)</label>
+            <input className="form-input" placeholder="Ej. Revisión, limpieza…" value={reason} onChange={(e) => setReason(e.target.value)} />
+          </div>
+          <div>
+            <button className="btn btn-primary" disabled={booking || !contactId} onClick={confirm}>
+              {booking ? 'Agendando…' : `Confirmar cita (${fmtTime(selectedSlot.start)})`}
+            </button>
+          </div>
         </div>
       )}
     </div>

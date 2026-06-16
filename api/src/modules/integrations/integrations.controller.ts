@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Param, Body, UseGuards, Request, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Query, Body, UseGuards, Request, ForbiddenException } from '@nestjs/common';
 import { IntegrationsService } from './integrations.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantId } from '../../common/decorators/tenant.decorator';
@@ -39,6 +39,35 @@ export class IntegrationsController {
   sync(@Param('provider') provider: string, @TenantId() tenantId: string, @Request() req: any) {
     if (req.user?.role === 'agent') throw new ForbiddenException('Solo administradores pueden importar contactos.');
     return this.svc.syncContacts(tenantId, provider);
+  }
+
+  /** Phase 3: bookable professionals */
+  @Get(':provider/practitioners')
+  practitioners(@Param('provider') provider: string, @TenantId() tenantId: string) {
+    return this.svc.listPractitioners(tenantId, provider);
+  }
+
+  /** Phase 3: open slots for a practitioner over a date range */
+  @Get(':provider/availability')
+  availability(
+    @Param('provider') provider: string,
+    @TenantId() tenantId: string,
+    @Query('practitionerId') practitionerId: string,
+    @Query('startDate') startDate: string,
+    @Query('finishDate') finishDate: string,
+    @Query('duration') duration?: string,
+  ) {
+    return this.svc.listAvailability(tenantId, provider, {
+      practitionerId, startDate, finishDate,
+      durationMinutes: duration ? Number(duration) : undefined,
+    });
+  }
+
+  /** Phase 3: book an appointment for a CRM contact */
+  @Post(':provider/appointments')
+  book(@Param('provider') provider: string, @Body() body: any, @TenantId() tenantId: string, @Request() req: any) {
+    if (req.user?.role === 'agent') throw new ForbiddenException('Solo administradores pueden agendar citas.');
+    return this.svc.bookAppointment(tenantId, provider, body ?? {});
   }
 
   /** Disconnect a provider */
