@@ -15,11 +15,12 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WhatsappWebService } from '../connections/whatsapp-web.service';
 
-/** Transcode a recorded audio file to ogg/opus so WhatsApp sends it as a real voice note (ptt). */
-function transcodeToOggOpus(inputPath: string): Promise<string> {
-  const outPath = inputPath.replace(/\.[^.]+$/, '') + '.ogg';
+/** Transcode a recorded audio file to mp3 so it plays on every device/browser
+ * (ogg/opus fails on Safari). WhatsApp still delivers it as a playable audio. */
+function transcodeToMp3(inputPath: string): Promise<string> {
+  const outPath = inputPath.replace(/\.[^.]+$/, '') + '.mp3';
   return new Promise((resolve, reject) => {
-    const ff = spawn('ffmpeg', ['-y', '-i', inputPath, '-vn', '-c:a', 'libopus', '-b:a', '32k', outPath]);
+    const ff = spawn('ffmpeg', ['-y', '-i', inputPath, '-vn', '-acodec', 'libmp3lame', '-q:a', '4', outPath]);
     let err = '';
     ff.stderr?.on('data', (d) => (err += d.toString()));
     ff.on('error', reject);
@@ -189,11 +190,11 @@ export class MessagesController {
     const contentType = isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : 'file';
 
     let filename = file.filename;
-    // Audio → ogg/opus so WhatsApp delivers a proper voice note (ptt). Falls back to original on failure.
-    if (isAudio && !/\.ogg$/i.test(filename)) {
+    // Audio → mp3 for universal playback (Safari can't play webm/ogg). Falls back to original on failure.
+    if (isAudio && !/\.mp3$/i.test(filename)) {
       try {
         const inputPath = join(process.cwd(), 'uploads', file.filename);
-        const outPath = await transcodeToOggOpus(inputPath);
+        const outPath = await transcodeToMp3(inputPath);
         filename = outPath.split(/[\\/]/).pop()!;
         await unlink(inputPath).catch(() => {});
       } catch { /* keep original */ }
