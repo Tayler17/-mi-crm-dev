@@ -156,9 +156,13 @@ export class CallBotMediaStreamService {
         // fired on any noise (keyboard, objects) and cut the bot off. We only
         // interrupt when Deepgram actually recognizes WORDS (below).
         if (msg.type === 'Results') {
-          const transcript: string = msg.channel?.alternatives?.[0]?.transcript ?? '';
-          // Barge-in: real words while the bot is talking → stop and listen.
-          if (speaking && /[a-zA-Záéíóúñ]{2,}/i.test(transcript)) stopSpeaking();
+          const alt = msg.channel?.alternatives?.[0];
+          const transcript: string = alt?.transcript ?? '';
+          const confidence: number = alt?.confidence ?? 1;
+          // Barge-in: only on confident, real words. Background voices are usually
+          // lower-confidence (farther from the phone mic), so this avoids the bot
+          // stopping for people talking nearby, while you (close to the mic) cut in.
+          if (speaking && confidence >= 0.6 && /[a-zA-Záéíóúñ]{2,}/i.test(transcript)) stopSpeaking();
           if (msg.is_final && transcript) finalsBuffer.push(transcript);
           // speech_final = Deepgram is confident speech ended → respond now.
           if (msg.speech_final) flushUtterance();
