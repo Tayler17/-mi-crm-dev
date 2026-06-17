@@ -699,8 +699,17 @@ export class AiChatbotEngineService {
 
   /** Transcribe audio file using OpenAI Whisper */
   private async transcribeAudio(apiKey: string, filePath: string): Promise<string> {
+    // Use the REAL file extension/mimetype — Whisper detects format by filename,
+    // so a hardcoded .ogg breaks now that incoming audio is transcoded to mp3.
+    const ext = (filePath.split('.').pop() ?? 'ogg').toLowerCase();
+    const mimeMap: Record<string, string> = {
+      ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg',
+      mp3: 'audio/mpeg', m4a: 'audio/mp4', mp4: 'audio/mp4',
+      wav: 'audio/wav', webm: 'audio/webm', aac: 'audio/aac',
+    };
+    const mime = mimeMap[ext] ?? 'audio/mpeg';
     const form = new FormData();
-    form.append('file', readFileSync(filePath), { filename: 'audio.ogg', contentType: 'audio/ogg' });
+    form.append('file', readFileSync(filePath), { filename: `audio.${ext}`, contentType: mime });
     form.append('model', 'whisper-1');
     const res = await axios.post(
       'https://api.openai.com/v1/audio/transcriptions',
