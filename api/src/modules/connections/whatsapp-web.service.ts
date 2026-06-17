@@ -300,7 +300,6 @@ export class WhatsappWebService implements OnModuleInit {
     // Choke-point safety: a "/uploads/..." body is an uploaded file, never text.
     // Redirect to a media send so no caller can leak the raw path to the recipient.
     if (/^\/uploads\/\S+/.test(text ?? '')) {
-      console.log(`[waSvc.sendMessage] redirecting /uploads body to file send. caller:\n${new Error().stack?.split('\n').slice(2, 7).join('\n')}`);
       const [fileUrl, , cap] = text.split('|');
       const ext = (fileUrl.split('.').pop() ?? '').toLowerCase();
       const ct = /^(jpe?g|png|gif|webp|bmp|heic)$/.test(ext) ? 'image'
@@ -337,12 +336,10 @@ export class WhatsappWebService implements OnModuleInit {
       return false;
     }
     try {
-      const { readFileSync, existsSync } = await import('fs');
+      const { readFileSync } = await import('fs');
       const { join } = await import('path');
       const filePath = join(process.cwd(), fileUrl); // fileUrl is like /uploads/xxx.jpg
-      console.log(`[sendFile] type=${contentType} path=${filePath} exists=${existsSync(filePath)}`);
       const buffer = readFileSync(filePath);
-      console.log(`[sendFile] read ${buffer.length} bytes`);
       const filename = fileUrl.split('/').pop() ?? 'file';
       const ext = filename.split('.').pop()?.toLowerCase() ?? '';
 
@@ -370,17 +367,14 @@ export class WhatsappWebService implements OnModuleInit {
           if (oggBuf) audioBuf = oggBuf;
           else audioMime = mimetype; // transcode failed → send original as-is
         }
-        console.log(`[sendFile] audio send ptt mime=${audioMime} bytes=${audioBuf.length}`);
         result = await session.sock.sendMessage(remoteJid, { audio: audioBuf, mimetype: audioMime, ptt: true });
       } else if (contentType === 'video') {
         result = await session.sock.sendMessage(remoteJid, { video: buffer, mimetype, caption: caption ?? '' });
       } else {
         result = await session.sock.sendMessage(remoteJid, { document: buffer, mimetype, fileName: filename, caption: caption ?? '' });
       }
-      console.log(`[sendFile] sent ok, key=${result?.key?.id}`);
       return result?.key?.id ?? true as any;
     } catch (e: any) {
-      console.log(`[sendFile] ERROR: ${e.message}`);
       this.logger.error(`sendFile failed for ${connectionId}: ${e.message}`);
       return false;
     }

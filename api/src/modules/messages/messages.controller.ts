@@ -276,10 +276,8 @@ export class MessagesController {
           let waId: string | false = false;
           if (contentType === 'image' || contentType === 'audio' || contentType === 'video' || contentType === 'file') {
             const [fileUrl, , fileCaption] = text.split('|');
-            console.log(`[deliverOutbound] WA file send type=${contentType} url=${fileUrl}`);
             waId = await this.waSvc.sendFile(connectionId, remoteJid, fileUrl, contentType, fileCaption || undefined);
           } else {
-            console.log(`[deliverOutbound] WA text send type=${contentType} body="${text.slice(0, 60)}"`);
             waId = await this.waSvc.sendMessage(connectionId, remoteJid, text);
           }
           if (!waId) {

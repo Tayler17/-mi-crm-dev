@@ -1094,7 +1094,6 @@ export class AiChatbotEngineService {
     switch (channelType) {
       case 'whatsapp_web': {
         if (!conv.external_id || !conv.connection_id) return;
-        console.log(`[bot deliverOutbound] WA send body="${(text ?? '').slice(0, 60)}"`);
         // Safety: never send an uploaded-file path as text (deliver as media instead).
         if (/^\/uploads\/\S+/.test(text)) {
           const [fileUrl, , cap] = text.split('|');
