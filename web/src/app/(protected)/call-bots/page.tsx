@@ -399,6 +399,7 @@ type BotForm = {
   voiceCatalogId: string;
   visualConfig: VisualConfig;
   promptMode: 'visual' | 'advanced';
+  streamingMode: boolean;
 };
 
 function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
@@ -503,6 +504,7 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
     voiceCatalogId: (bot as any)?.voiceCatalogId ?? '',
     visualConfig: initVC,
     promptMode: initPromptMode,
+    streamingMode: (bot as any)?.streamingMode ?? false,
   });
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1074,6 +1076,18 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
                     </div>
                   )}
                 </>
+              )}
+
+              {isOwner && (
+                <div style={{ marginTop: 4, padding: '14px 16px', background: 'var(--bg-secondary)', borderRadius: 8 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={form.streamingMode} onChange={(e) => upd('streamingMode', e.target.checked)} />
+                    <span style={{ fontWeight: 600, fontSize: 14 }}>⚡ Modo tiempo real (streaming)</span>
+                  </label>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
+                    Conversación fluida sin silencios, filtra ruido y permite interrumpir al bot. Requiere la <strong>API Key de Deepgram</strong> (Configuración → Plataforma) y voz <strong>ElevenLabs</strong>. La voz de Twilio no funciona en este modo.
+                  </div>
+                </div>
               )}
 
               {voices.filter((v) => v.isActive).length === 0 && !isOwner && (
