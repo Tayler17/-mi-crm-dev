@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   getContactProfile, updateContact, deleteContact, getTags,
-  addContactTag, removeContactTag, getCompanies,
+  addContactTag, removeContactTag, getCompanies, formatMessagePreview,
   type ContactProfile, type Tag,
 } from '@/lib/api';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
@@ -393,7 +393,7 @@ export default function ContactProfilePage() {
                     <span style={{ fontSize: 13 }}>{CHANNEL_ICON[conv.inbox?.channelType] ?? '💬'} {conv.inbox?.name ?? 'Inbox'}</span>
                     <span style={{ fontSize: 11, fontWeight: 600, color: sc.color }}>{label}</span>
                   </div>
-                  {conv.last_message && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.last_message}</div>}
+                  {conv.last_message && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{formatMessagePreview(conv.last_message)}</div>}
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{fmtTime(conv.updated_at, i.locale)}</div>
                 </div>
               );
@@ -464,7 +464,7 @@ export default function ContactProfilePage() {
                   <span style={{ fontSize: 12, fontWeight: 600, color: sc.color, padding: '2px 10px', borderRadius: 10, background: sc.color + '20' }}>{label}</span>
                 </div>
                 {conv.last_message && (
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 8, padding: '6px 10px', background: 'var(--bg-secondary)', borderRadius: 6 }}>{conv.last_message}</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 8, padding: '6px 10px', background: 'var(--bg-secondary)', borderRadius: 6 }}>{formatMessagePreview(conv.last_message)}</div>
                 )}
               </div>
             );

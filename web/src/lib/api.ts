@@ -1,5 +1,18 @@
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
+/** Friendly preview for a message body — media bodies ("/uploads/x.ext|...") become a label. */
+export function formatMessagePreview(body?: string | null): string {
+  if (!body) return '';
+  if (/^\/uploads\/\S+/.test(body)) {
+    const ext = (body.split('|')[0].split('.').pop() ?? '').toLowerCase();
+    if (/^(jpe?g|png|gif|webp|bmp|heic)$/.test(ext)) return '📷 Imagen';
+    if (/^(mp3|ogg|oga|m4a|wav|opus|aac)$/.test(ext)) return '🎤 Nota de voz';
+    if (/^(mp4|mov|avi|webm|3gp)$/.test(ext)) return '🎬 Video';
+    return '📎 Archivo';
+  }
+  return body;
+}
+
 function getToken(): string {
   if (typeof window === 'undefined') return '';
   return localStorage.getItem('token') || '';

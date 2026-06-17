@@ -361,7 +361,17 @@ export class WhatsappWebService implements OnModuleInit {
       if (contentType === 'image') {
         result = await session.sock.sendMessage(remoteJid, { image: buffer, mimetype, caption: caption ?? '' });
       } else if (contentType === 'audio') {
-        result = await session.sock.sendMessage(remoteJid, { audio: buffer, mimetype, ptt: ext === 'ogg' });
+        // WhatsApp voice notes must be ogg/opus + ptt. If the file isn't ogg,
+        // transcode on the fly so it delivers as a real, playable voice note.
+        let audioBuf: Buffer = buffer;
+        let audioMime = 'audio/ogg; codecs=opus';
+        if (ext !== 'ogg') {
+          const oggBuf = await this.toOggOpusBuffer(filePath);
+          if (oggBuf) audioBuf = oggBuf;
+          else audioMime = mimetype; // transcode failed → send original as-is
+        }
+        console.log(`[sendFile] audio send ptt mime=${audioMime} bytes=${audioBuf.length}`);
+        result = await session.sock.sendMessage(remoteJid, { audio: audioBuf, mimetype: audioMime, ptt: true });
       } else if (contentType === 'video') {
         result = await session.sock.sendMessage(remoteJid, { video: buffer, mimetype, caption: caption ?? '' });
       } else {
@@ -374,6 +384,25 @@ export class WhatsappWebService implements OnModuleInit {
       this.logger.error(`sendFile failed for ${connectionId}: ${e.message}`);
       return false;
     }
+  }
+
+  /** Transcode an audio file to an ogg/opus buffer (WhatsApp voice-note format). Null on failure. */
+  private async toOggOpusBuffer(inputPath: string): Promise<Buffer | null> {
+    const outPath = inputPath.replace(/\.[^.]+$/, '') + `.ptt-${Date.now()}.ogg`;
+    const ok = await new Promise<boolean>((resolve) => {
+      try {
+        const ff = spawn('ffmpeg', ['-y', '-i', inputPath, '-vn', '-c:a', 'libopus', '-b:a', '32k', '-ac', '1', outPath]);
+        ff.on('error', () => resolve(false));
+        ff.on('close', (code) => resolve(code === 0));
+      } catch { resolve(false); }
+    });
+    if (!ok) return null;
+    try {
+      const { readFileSync, unlinkSync } = await import('fs');
+      const buf = readFileSync(outPath);
+      try { unlinkSync(outPath); } catch {}
+      return buf;
+    } catch { return null; }
   }
 
   /** Transcode an audio file to mp3 (universal playback). Returns the new filename, or null on failure. */
