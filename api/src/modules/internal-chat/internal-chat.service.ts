@@ -119,6 +119,48 @@ export class InternalChatService implements OnModuleInit {
     return this.chatRepo.findOne({ where: { id: chat.id }, relations: ['members'] });
   }
 
+  // Create a group chat with the creator + selected members.
+  async createGroup(tenantId: string, userId: string, name: string, memberIds: string[]) {
+    const clean = (name ?? '').trim() || 'Grupo';
+    const ids = [...new Set([userId, ...(memberIds ?? [])])].filter(Boolean);
+    const chat = await this.chatRepo.save(
+      this.chatRepo.create({ tenantId, isGroup: true, name: clean }),
+    );
+    await this.memberRepo.save(ids.map((uid) => this.memberRepo.create({ chatId: chat.id, userId: uid })));
+    return this.chatRepo.findOne({ where: { id: chat.id }, relations: ['members'] });
+  }
+
+  // Add members to a group (requester must be a member).
+  async addMembers(chatId: string, tenantId: string, userId: string, memberIds: string[]) {
+    await this.ensureMember(chatId, userId);
+    const chat = await this.chatRepo.findOne({ where: { id: chatId, tenantId, isGroup: true }, relations: ['members'] });
+    if (!chat) throw new NotFoundException('Grupo no encontrado');
+    const existing = new Set(chat.members.map((m) => m.userId));
+    const toAdd = [...new Set(memberIds ?? [])].filter((id) => id && !existing.has(id));
+    if (toAdd.length) {
+      await this.memberRepo.save(toAdd.map((uid) => this.memberRepo.create({ chatId, userId: uid })));
+    }
+    return this.chatRepo.findOne({ where: { id: chatId }, relations: ['members'] });
+  }
+
+  // Remove a member from a group (requester must be a member).
+  async removeMember(chatId: string, tenantId: string, userId: string, targetUserId: string) {
+    await this.ensureMember(chatId, userId);
+    const chat = await this.chatRepo.findOne({ where: { id: chatId, tenantId, isGroup: true } });
+    if (!chat) throw new NotFoundException('Grupo no encontrado');
+    await this.memberRepo.delete({ chatId, userId: targetUserId });
+    return { ok: true };
+  }
+
+  // Rename a group (requester must be a member).
+  async renameGroup(chatId: string, tenantId: string, userId: string, name: string) {
+    await this.ensureMember(chatId, userId);
+    const clean = (name ?? '').trim();
+    if (!clean) throw new ForbiddenException('El nombre no puede estar vacío');
+    await this.chatRepo.update({ id: chatId, tenantId, isGroup: true }, { name: clean });
+    return { ok: true };
+  }
+
   async getMessages(chatId: string, tenantId: string, userId: string, limit = 50) {
     await this.ensureMember(chatId, userId);
     // Fetch the MOST RECENT `limit` messages (DESC + take), then restore chronological

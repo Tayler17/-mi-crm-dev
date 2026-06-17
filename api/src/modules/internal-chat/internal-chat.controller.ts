@@ -43,6 +43,30 @@ export class InternalChatController {
     return this.svc.findOrCreateDm(tenantId, req.user.id, dto);
   }
 
+  /** Create a group chat */
+  @Post('groups')
+  createGroup(@TenantId() tenantId: string, @Request() req: any, @Body() body: { name: string; memberIds?: string[] }) {
+    return this.svc.createGroup(tenantId, req.user.id, body?.name ?? '', body?.memberIds ?? []);
+  }
+
+  /** Add members to a group */
+  @Post(':id/members')
+  addMembers(@Param('id') chatId: string, @TenantId() tenantId: string, @Request() req: any, @Body() body: { memberIds: string[] }) {
+    return this.svc.addMembers(chatId, tenantId, req.user.id, body?.memberIds ?? []);
+  }
+
+  /** Remove a member from a group */
+  @Delete(':id/members/:userId')
+  removeMember(@Param('id') chatId: string, @Param('userId') targetUserId: string, @TenantId() tenantId: string, @Request() req: any) {
+    return this.svc.removeMember(chatId, tenantId, req.user.id, targetUserId);
+  }
+
+  /** Rename a group */
+  @Patch(':id')
+  renameGroup(@Param('id') chatId: string, @TenantId() tenantId: string, @Request() req: any, @Body() body: { name: string }) {
+    return this.svc.renameGroup(chatId, tenantId, req.user.id, body?.name ?? '');
+  }
+
   @Get(':id/messages')
   getMessages(
     @Param('id') chatId: string,

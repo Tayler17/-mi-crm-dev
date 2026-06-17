@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   getMyChats, createOrFindDm, getChatMessages, sendChatMessage, markChatRead,
   editChatMessage, deleteChatMessage, uploadChatFile,
+  createGroupChat, addGroupMembers, removeGroupMember,
   getAgents, InternalChat, ChatMessage, Agent, API_URL,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
@@ -54,6 +55,11 @@ function Avatar({ name, email, size = 32 }: { name?: string; email?: string; siz
 }
 
 function getChatPeer(chat: InternalChat, myId: string): { id: string; name: string; email: string } {
+  // Groups show their name + member count; DMs show the other person.
+  if (chat.isGroup) {
+    const count = chat.memberDetails?.length ?? chat.members?.length ?? 0;
+    return { id: '', name: chat.name || 'Grupo', email: `${count} miembros` };
+  }
   const peer = chat.memberDetails?.find((m) => m.id !== myId);
   return { id: peer?.id ?? '', name: peer?.full_name ?? peer?.email ?? '?', email: peer?.email ?? '' };
 }
@@ -79,6 +85,11 @@ export default function ChatPage() {
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cancelRecordRef = useRef(false);
   const [showNewDm, setShowNewDm] = useState(false);
+  const [newMode, setNewMode] = useState<'dm' | 'group'>('dm');
+  const [groupName, setGroupName] = useState('');
+  const [groupMembers, setGroupMembers] = useState<Set<string>>(new Set());
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentSearch, setAgentSearch] = useState('');
   const [loadingChats, setLoadingChats] = useState(true);
@@ -267,6 +278,50 @@ export default function ChatPage() {
     } catch {}
   }
 
+  function closeNewModal() {
+    setShowNewDm(false); setAgentSearch(''); setNewMode('dm');
+    setGroupName(''); setGroupMembers(new Set());
+  }
+
+  function toggleGroupMember(id: string) {
+    setGroupMembers((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  async function handleCreateGroup() {
+    if (!groupName.trim() || groupMembers.size === 0 || creatingGroup) return;
+    setCreatingGroup(true);
+    try {
+      const chat = await createGroupChat(groupName.trim(), [...groupMembers]);
+      closeNewModal();
+      await loadChats();
+      if (chat) openChat(chat as any);
+    } catch (e: any) { alert(e?.message || 'No se pudo crear el grupo'); }
+    finally { setCreatingGroup(false); }
+  }
+
+  async function handleAddMember(agentId: string) {
+    if (!activeChat) return;
+    try {
+      const updated = await addGroupMembers(activeChat.id, [agentId]);
+      if (updated) setActiveChat(updated as any);
+      await loadChats();
+    } catch (e: any) { alert(e?.message || 'Error'); }
+  }
+
+  async function handleRemoveMember(userId: string) {
+    if (!activeChat || !confirm('¿Quitar a este miembro del grupo?')) return;
+    try {
+      await removeGroupMember(activeChat.id, userId);
+      const fresh = (await getMyChats()).find((c) => c.id === activeChat.id);
+      if (fresh) setActiveChat(fresh);
+      await loadChats();
+    } catch (e: any) { alert(e?.message || 'Error'); }
+  }
+
   const filteredAgents = agents.filter(
     (a) => a.id !== myId && (
       a.fullName.toLowerCase().includes(agentSearch.toLowerCase()) ||
@@ -372,11 +427,16 @@ export default function ChatPage() {
                 style={{ display: 'none', background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: 'var(--text)', padding: '0 8px 0 0', flexShrink: 0 }}
                 aria-label={i.back}
               >←</button>
-              <Avatar name={peer!.name} email={peer!.email} size={36} />
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 15 }}>{peer!.name}</div>
+              <Avatar name={activeChat.isGroup ? '👥' : peer!.name} email={peer!.email} size={36} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 15 }}>{activeChat.isGroup ? '👥 ' : ''}{peer!.name}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{peer!.email}</div>
               </div>
+              {activeChat.isGroup && (
+                <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px', flexShrink: 0 }} onClick={() => setShowMembers(true)}>
+                  👥 Miembros
+                </button>
+              )}
             </div>
 
             <div ref={messagesContainerRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -533,44 +593,122 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* New DM modal */}
+      {/* New DM / Group modal */}
       {showNewDm && (
-        <div className="modal-overlay" onClick={() => { setShowNewDm(false); setAgentSearch(''); }}>
-          <div className="modal" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={closeNewModal}>
+          <div className="modal" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 style={{ margin: 0, fontSize: 16 }}>{i.newDirectMessage}</h2>
-              <button className="btn btn-ghost" onClick={() => { setShowNewDm(false); setAgentSearch(''); }}>✕</button>
+              <h2 style={{ margin: 0, fontSize: 16 }}>{newMode === 'group' ? 'Nuevo grupo' : i.newDirectMessage}</h2>
+              <button className="btn btn-ghost" onClick={closeNewModal}>✕</button>
             </div>
-            <div style={{ padding: '12px 0' }}>
+
+            {/* DM / Group toggle */}
+            <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+              <button className={`btn ${newMode === 'dm' ? 'btn-primary' : 'btn-secondary'}`} style={{ flex: 1, fontSize: 13 }} onClick={() => setNewMode('dm')}>💬 Directo</button>
+              <button className={`btn ${newMode === 'group' ? 'btn-primary' : 'btn-secondary'}`} style={{ flex: 1, fontSize: 13 }} onClick={() => setNewMode('group')}>👥 Grupo</button>
+            </div>
+
+            {newMode === 'group' && (
+              <input
+                className="form-input"
+                style={{ marginTop: 10 }}
+                placeholder="Nombre del grupo"
+                value={groupName}
+                onChange={(e) => setGroupName(e.target.value)}
+              />
+            )}
+
+            <div style={{ padding: '10px 0 0' }}>
               <input
                 className="form-input"
                 placeholder={i.searchAgentHint}
                 value={agentSearch}
                 onChange={(e) => setAgentSearch(e.target.value)}
-                autoFocus
               />
-              <div style={{ maxHeight: 280, overflowY: 'auto', marginTop: 8 }}>
+              <div style={{ maxHeight: 260, overflowY: 'auto', marginTop: 8 }}>
                 {filteredAgents.length === 0 ? (
                   <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '12px 0', textAlign: 'center' }}>
                     {i.noAgentsFound}
                   </div>
                 ) : (
-                  filteredAgents.map((agent) => (
-                    <div
-                      key={agent.id}
-                      onClick={() => startDm(agent)}
-                      style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 4px', cursor: 'pointer', borderRadius: 6 }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-secondary)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <Avatar name={agent.fullName} email={agent.email} size={34} />
-                      <div>
-                        <div style={{ fontWeight: 500, fontSize: 14 }}>{agent.fullName}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{agent.email}</div>
+                  filteredAgents.map((agent) => {
+                    const selected = groupMembers.has(agent.id);
+                    return (
+                      <div
+                        key={agent.id}
+                        onClick={() => newMode === 'group' ? toggleGroupMember(agent.id) : startDm(agent)}
+                        style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 4px', cursor: 'pointer', borderRadius: 6 }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-secondary)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        {newMode === 'group' && (
+                          <input type="checkbox" checked={selected} readOnly style={{ pointerEvents: 'none' }} />
+                        )}
+                        <Avatar name={agent.fullName} email={agent.email} size={34} />
+                        <div>
+                          <div style={{ fontWeight: 500, fontSize: 14 }}>{agent.fullName}</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{agent.email}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
+              </div>
+
+              {newMode === 'group' && (
+                <button
+                  className="btn btn-primary"
+                  style={{ width: '100%', marginTop: 10 }}
+                  disabled={!groupName.trim() || groupMembers.size === 0 || creatingGroup}
+                  onClick={handleCreateGroup}
+                >
+                  {creatingGroup ? 'Creando…' : `Crear grupo (${groupMembers.size})`}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Group members panel */}
+      {showMembers && activeChat?.isGroup && (
+        <div className="modal-overlay" onClick={() => { setShowMembers(false); setAgentSearch(''); }}>
+          <div className="modal" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 style={{ margin: 0, fontSize: 16 }}>👥 {activeChat.name || 'Grupo'}</h2>
+              <button className="btn btn-ghost" onClick={() => { setShowMembers(false); setAgentSearch(''); }}>✕</button>
+            </div>
+            <div style={{ padding: '12px 0' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>MIEMBROS ({activeChat.memberDetails?.length ?? 0})</div>
+              <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                {activeChat.memberDetails?.map((m) => (
+                  <div key={m.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 4px' }}>
+                    <Avatar name={m.full_name} email={m.email} size={30} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13 }}>{m.full_name || m.email}{m.id === myId ? ' (tú)' : ''}</div>
+                    </div>
+                    {m.id !== myId && (
+                      <button className="btn btn-ghost" style={{ fontSize: 12, padding: '2px 8px', color: 'var(--danger)' }} onClick={() => handleRemoveMember(m.id)}>Quitar</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', margin: '12px 0 6px' }}>AGREGAR</div>
+              <input className="form-input" placeholder={i.searchAgentHint} value={agentSearch} onChange={(e) => setAgentSearch(e.target.value)} />
+              <div style={{ maxHeight: 180, overflowY: 'auto', marginTop: 8 }}>
+                {agents.filter((a) => a.id !== myId
+                  && !activeChat.memberDetails?.some((m) => m.id === a.id)
+                  && (a.fullName.toLowerCase().includes(agentSearch.toLowerCase()) || a.email.toLowerCase().includes(agentSearch.toLowerCase())))
+                  .map((a) => (
+                    <div key={a.id} onClick={() => handleAddMember(a.id)}
+                      style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 4px', cursor: 'pointer', borderRadius: 6 }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-secondary)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
+                      <Avatar name={a.fullName} email={a.email} size={28} />
+                      <div style={{ fontSize: 13 }}>{a.fullName}</div>
+                      <span style={{ marginLeft: 'auto', color: 'var(--primary)', fontSize: 16 }}>＋</span>
+                    </div>
+                  ))}
               </div>
             </div>
           </div>

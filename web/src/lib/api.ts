@@ -1000,6 +1000,14 @@ export interface ChatSendPayload {
 export const getMyChats = () => apiGet<InternalChat[]>('/internal-chat');
 export const createOrFindDm = (targetUserId: string) =>
   apiPost<InternalChat>('/internal-chat', { targetUserId });
+export const createGroupChat = (name: string, memberIds: string[]) =>
+  apiPost<InternalChat>('/internal-chat/groups', { name, memberIds });
+export const addGroupMembers = (chatId: string, memberIds: string[]) =>
+  apiPost<InternalChat>(`/internal-chat/${chatId}/members`, { memberIds });
+export const removeGroupMember = (chatId: string, userId: string) =>
+  apiDelete(`/internal-chat/${chatId}/members/${userId}`);
+export const renameGroupChat = (chatId: string, name: string) =>
+  apiPatch(`/internal-chat/${chatId}`, { name });
 export const getChatMessages = (chatId: string) =>
   apiGet<ChatMessage[]>(`/internal-chat/${chatId}/messages`);
 export const sendChatMessage = (chatId: string, payload: string | ChatSendPayload) =>
