@@ -173,10 +173,12 @@ export class CallBotMediaStreamService {
           const botId = data.start?.customParameters?.botId ?? '';
           this.logger.log(`[media-stream] start call=${callSid} bot=${botId}`);
           try {
-            const [row] = await this.db.query(`SELECT * FROM call_bots WHERE id=$1 LIMIT 1`, [botId]);
-            bot = row;
+            // getBot resolves the voice catalog (voice_catalog_id) into tts_provider/tts_voice_id,
+            // so streaming uses the same ElevenLabs voice as the standard bot.
+            bot = await this.twilio.getBot(botId);
             const ai = await this.platformSettings.getAI();
             aiCfg = { apiKey: ai.apiKey, provider: ai.provider, model: ai.model };
+            this.logger.log(`[media-stream] bot loaded: ttsProvider=${bot?.tts_provider} voiceId=${bot?.tts_voice_id || '(default)'}`);
           } catch (e: any) { this.logger.error(`[media-stream] bot load failed: ${e.message}`); }
           await openDeepgram();
           const welcome = bot?.welcome_message || ((bot?.language || 'es').startsWith('es')

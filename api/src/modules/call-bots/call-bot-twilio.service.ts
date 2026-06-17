@@ -226,7 +226,7 @@ export class CallBotTwilioService {
 
   // ── Cached getters ────────────────────────────────────────────────────────────
 
-  private async getBot(botId: string): Promise<any> {
+  async getBot(botId: string): Promise<any> {
     const c = this.botCache.get(botId);
     if (c && c.exp > Date.now()) return c.v;
     const [bot] = await this.db.query(
