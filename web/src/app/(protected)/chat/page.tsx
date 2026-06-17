@@ -451,8 +451,12 @@ export default function ChatPage() {
                   👥 Miembros
                 </button>
               )}
-              <button className="btn btn-ghost" title="Eliminar conversación" style={{ fontSize: 14, padding: '4px 8px', flexShrink: 0, color: 'var(--danger)' }} onClick={handleDeleteChat}>
-                🗑
+              <button
+                title="Eliminar conversación"
+                style={{ fontSize: 12, padding: '4px 10px', flexShrink: 0, color: '#fff', background: 'var(--danger, #ef4444)', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+                onClick={handleDeleteChat}
+              >
+                🗑 Eliminar
               </button>
             </div>
 
