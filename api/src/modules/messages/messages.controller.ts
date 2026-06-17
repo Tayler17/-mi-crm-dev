@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, UseGuards, Request, UploadedFile, UseInterceptors, UsePipes, ValidationPipe, BadRequestException, Query } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, Request, UploadedFile, UseInterceptors, UsePipes, ValidationPipe, BadRequestException, NotFoundException, ForbiddenException, Query } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
@@ -69,6 +69,67 @@ export class MessagesController {
     }
 
     return msg;
+  }
+
+  /** Edit a sent message. On WhatsApp Web the edit is pushed to the recipient
+   *  (allowed by WhatsApp within ~15 min); other channels update only in the CRM. */
+  @Patch('messages/:messageId')
+  async editMessage(
+    @Param('conversationId') cid: string,
+    @Param('messageId') messageId: string,
+    @Body() body: { body?: string },
+    @TenantId() tenantId: string,
+  ) {
+    const msg = await this.service.findOneOwned(messageId, cid, tenantId);
+    if (!msg) throw new NotFoundException('Mensaje no encontrado');
+    if (msg.direction !== 'outbound') throw new ForbiddenException('Solo se pueden editar mensajes enviados');
+    if (msg.deletedAt) throw new ForbiddenException('El mensaje está eliminado');
+    const text = (body?.body ?? '').trim();
+    if (!text) throw new BadRequestException('El mensaje no puede quedar vacío');
+
+    let channelWarning: string | undefined;
+    if (msg.externalId) {
+      const [conv] = await this.db.query(
+        `SELECT c.connection_id, c.external_id, COALESCE(cc.channel_type, c.channel_type) AS channel_type
+         FROM conversations c LEFT JOIN channel_connections cc ON cc.id = c.connection_id
+         WHERE c.id=$1 AND c.tenant_id=$2 LIMIT 1`,
+        [cid, tenantId],
+      );
+      if (conv?.channel_type === 'whatsapp_web' && conv.connection_id && conv.external_id) {
+        const ok = await this.waSvc.editMessage(conv.connection_id, conv.external_id, msg.externalId, text);
+        if (!ok) channelWarning = 'No se pudo editar en WhatsApp (quizá pasaron más de 15 min). Se actualizó solo en el CRM.';
+      }
+    }
+    await this.service.markEdited(messageId, text);
+    this.notifications.emit({ tenantId, type: 'message_updated', payload: { conversationId: cid, messageId, body: text, editedAt: new Date().toISOString() } });
+    return { ok: true, warning: channelWarning };
+  }
+
+  /** Delete a sent message. On WhatsApp Web it's revoked for everyone; other
+   *  channels (and inbound) are removed only from the CRM view. */
+  @Delete('messages/:messageId')
+  async deleteMessage(
+    @Param('conversationId') cid: string,
+    @Param('messageId') messageId: string,
+    @TenantId() tenantId: string,
+  ) {
+    const msg = await this.service.findOneOwned(messageId, cid, tenantId);
+    if (!msg) throw new NotFoundException('Mensaje no encontrado');
+
+    if (msg.direction === 'outbound' && msg.externalId) {
+      const [conv] = await this.db.query(
+        `SELECT c.connection_id, c.external_id, COALESCE(cc.channel_type, c.channel_type) AS channel_type
+         FROM conversations c LEFT JOIN channel_connections cc ON cc.id = c.connection_id
+         WHERE c.id=$1 AND c.tenant_id=$2 LIMIT 1`,
+        [cid, tenantId],
+      );
+      if (conv?.channel_type === 'whatsapp_web' && conv.connection_id && conv.external_id) {
+        await this.waSvc.revokeMessage(conv.connection_id, conv.external_id, msg.externalId);
+      }
+    }
+    await this.service.markDeleted(messageId);
+    this.notifications.emit({ tenantId, type: 'message_deleted', payload: { conversationId: cid, messageId } });
+    return { ok: true };
   }
 
   @Get('notes')

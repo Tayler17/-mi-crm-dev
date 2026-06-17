@@ -32,6 +32,15 @@ export class Message {
   @Column({ default: 'sent' })
   status: string;
 
+  @Column({ name: 'external_id', nullable: true })
+  externalId: string;
+
+  @Column({ name: 'edited_at', type: 'timestamptz', nullable: true })
+  editedAt: Date | null;
+
+  @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
+  deletedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

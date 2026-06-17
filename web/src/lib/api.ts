@@ -441,8 +441,14 @@ export interface Message {
   contentType: string;
   isPrivate: boolean;
   status?: string;
+  editedAt?: string | null;
+  deletedAt?: string | null;
   createdAt: string;
 }
+export const editConversationMessage = (conversationId: string, messageId: string, body: string) =>
+  apiPatch<{ ok: boolean; warning?: string }>(`/conversations/${conversationId}/messages/${messageId}`, { body });
+export const deleteConversationMessage = (conversationId: string, messageId: string) =>
+  apiDelete(`/conversations/${conversationId}/messages/${messageId}`);
 
 // ── Quick Responses (Canned Responses) ───────────────────────────────────────
 

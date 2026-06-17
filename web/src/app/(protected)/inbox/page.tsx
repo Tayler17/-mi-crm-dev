@@ -12,6 +12,7 @@ import {
   getContacts, getInboxes, getCannedResponses, getTags, getAgents,
   getTeams, getQueues, assignConversation,
   getAiPrompts, runAiPrompt, openNotificationsStream, uploadMessageFile,
+  editConversationMessage, deleteConversationMessage,
   getConversationTags, addConversationTag, removeConversationTag,
   getConvBotSession, updateConvBotSession,
   getContactTimeline, requestCsat,
@@ -535,6 +536,10 @@ export default function InboxPage() {
   // File attachment staged (caption uses the main body textarea)
   const [pendingFile, setPendingFile] = useState<File | null>(null);
 
+  // Message edit/delete
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editMsgText, setEditMsgText] = useState('');
+
   // Voice note recording
   const [recording, setRecording] = useState(false);
   const [recordSecs, setRecordSecs] = useState(0);
@@ -842,6 +847,34 @@ export default function InboxPage() {
       loadList(true);
     } catch (err: unknown) { alert(err instanceof Error ? err.message : i.inbxErrUpload); }
     finally { setSending(false); setPendingFile(null); }
+  }
+
+  function startEditMsg(m: Message) {
+    setEditingMsgId(m.id);
+    setEditMsgText(m.body);
+  }
+
+  async function saveEditMsg() {
+    if (!activeId || !editingMsgId || !editMsgText.trim()) return;
+    try {
+      const r = await editConversationMessage(activeId, editingMsgId, editMsgText.trim());
+      setEditingMsgId(null); setEditMsgText('');
+      const m = await getMessages(activeId); setMessages(m);
+      if (r?.warning) alert(r.warning);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Error'); }
+  }
+
+  async function deleteMsg(m: Message) {
+    if (!activeId) return;
+    const onlyHere = m.direction !== 'outbound';
+    const msg = onlyHere
+      ? '¿Eliminar este mensaje del CRM? (no afecta WhatsApp)'
+      : '¿Eliminar este mensaje? Se borrará también para el cliente en WhatsApp.';
+    if (!confirm(msg)) return;
+    try {
+      await deleteConversationMessage(activeId, m.id);
+      const mm = await getMessages(activeId); setMessages(mm);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Error'); }
   }
 
   async function startRecording() {
@@ -1598,6 +1631,21 @@ export default function InboxPage() {
                   return (
                     <div key={m.id} className={`msg ${m.isPrivate ? 'msg-note' : m.direction === 'outbound' ? 'msg-out' : 'msg-in'}`} style={isTranscript ? { maxWidth: '95%', alignSelf: 'stretch' } : undefined}>
                       <div className="msg-bubble" style={isTranscript ? { background: 'transparent', border: '1px solid var(--border)', padding: '12px 14px' } : undefined}>
+                        {m.deletedAt ? (
+                          <span style={{ fontStyle: 'italic', opacity: 0.7 }}>🚫 Mensaje eliminado</span>
+                        ) : editingMsgId === m.id ? (
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+                            <textarea
+                              value={editMsgText}
+                              onChange={(e) => setEditMsgText(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEditMsg(); } if (e.key === 'Escape') { setEditingMsgId(null); setEditMsgText(''); } }}
+                              rows={1} autoFocus
+                              style={{ resize: 'none', minWidth: 180, padding: '6px 10px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text)', fontSize: 14 }}
+                            />
+                            <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: 12 }} onClick={saveEditMsg}>✓</button>
+                            <button className="btn btn-ghost" style={{ padding: '4px 6px', fontSize: 12 }} onClick={() => { setEditingMsgId(null); setEditMsgText(''); }}>✕</button>
+                          </div>
+                        ) : (<>
                         {ctype === 'image' && fileUrl ? (
                           <a href={`${API_URL}${fileUrl}`} target="_blank" rel="noopener">
                             <img src={`${API_URL}${fileUrl}`} alt={fileName} style={{ maxWidth: 220, maxHeight: 200, borderRadius: 6, display: 'block' }} />
@@ -1631,14 +1679,26 @@ export default function InboxPage() {
                             📎 <span style={{ textDecoration: 'underline', wordBreak: 'break-all' }}>{fileName}</span>
                           </a>
                         ) : renderBody(m.body)}
+                        </>)}
                       </div>
-                      <div className="msg-time" style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: m.direction === 'outbound' ? 'flex-end' : 'flex-start' }}>
-                        {m.createdAt ? new Date(m.createdAt).toLocaleString(i.locale, { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : ''}
+                      <div className="msg-time" style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: m.direction === 'outbound' ? 'flex-end' : 'flex-start' }}>
+                        <span>
+                          {m.createdAt ? new Date(m.createdAt).toLocaleString(i.locale, { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : ''}
+                          {m.editedAt && !m.deletedAt ? ' · editado' : ''}
+                        </span>
                         {m.direction === 'outbound' && conv?.channelType?.startsWith('whatsapp') && (
                           <span title={m.status} style={{ fontSize: 12, lineHeight: 1 }}>
                             {m.status === 'read'      ? <span style={{ color: '#3b82f6' }}>✓✓</span>
                            : m.status === 'delivered' ? <span style={{ color: 'var(--text-muted)' }}>✓✓</span>
                            :                            <span style={{ color: 'var(--text-muted)', opacity: 0.6 }}>✓</span>}
+                          </span>
+                        )}
+                        {!m.isPrivate && !m.deletedAt && editingMsgId !== m.id && m.contentType !== 'activity' && (
+                          <span className="msg-actions" style={{ display: 'inline-flex', gap: 6 }}>
+                            {m.direction === 'outbound' && !fileUrl && (
+                              <button onClick={() => startEditMsg(m)} title="Editar" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}>✎</button>
+                            )}
+                            <button onClick={() => deleteMsg(m)} title="Eliminar" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}>🗑</button>
                           </span>
                         )}
                       </div>

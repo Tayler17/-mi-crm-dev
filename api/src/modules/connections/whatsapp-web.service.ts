@@ -380,6 +380,32 @@ export class WhatsappWebService implements OnModuleInit {
     }
   }
 
+  /** Delete a previously-sent message for everyone (WhatsApp "revoke"). */
+  async revokeMessage(connectionId: string, remoteJid: string, messageId: string): Promise<boolean> {
+    const session = this.sessions.get(connectionId);
+    if (!session?.sock || session.status !== 'connected') return false;
+    try {
+      await session.sock.sendMessage(remoteJid, { delete: { remoteJid, fromMe: true, id: messageId } });
+      return true;
+    } catch (e: any) {
+      this.logger.warn(`revokeMessage failed for ${connectionId}: ${e.message}`);
+      return false;
+    }
+  }
+
+  /** Edit a previously-sent message (WhatsApp allows this within ~15 minutes). */
+  async editMessage(connectionId: string, remoteJid: string, messageId: string, newText: string): Promise<boolean> {
+    const session = this.sessions.get(connectionId);
+    if (!session?.sock || session.status !== 'connected') return false;
+    try {
+      await session.sock.sendMessage(remoteJid, { text: newText, edit: { remoteJid, fromMe: true, id: messageId } });
+      return true;
+    } catch (e: any) {
+      this.logger.warn(`editMessage failed for ${connectionId}: ${e.message}`);
+      return false;
+    }
+  }
+
   /** Transcode an audio file to an ogg/opus buffer (WhatsApp voice-note format). Null on failure. */
   private async toOggOpusBuffer(inputPath: string): Promise<Buffer | null> {
     const outPath = inputPath.replace(/\.[^.]+$/, '') + `.ptt-${Date.now()}.ogg`;
