@@ -55,6 +55,7 @@ export class CallBotMediaStreamService {
     let processing = false;
     let closed = false;
     let ttsAbort: AbortController | null = null;
+    let finalsBuffer: string[] = [];
 
     const sendToTwilio = (obj: any) => {
       if (twilioWs.readyState === WebSocket.OPEN) twilioWs.send(JSON.stringify(obj));
@@ -101,13 +102,15 @@ export class CallBotMediaStreamService {
           res.data.on('end', () => resolve());
           res.data.on('error', reject);
         });
-        sendToTwilio({ event: 'mark', streamSid, mark: { name: 'end-of-turn' } });
+        // Keep `speaking = true` until Twilio echoes this mark (= it finished
+        // PLAYING the audio). Otherwise barge-in can't interrupt during playback,
+        // since we send all frames in <1s but Twilio plays them over several.
+        if (speaking && !closed) sendToTwilio({ event: 'mark', streamSid, mark: { name: 'end-of-turn' } });
       } catch (e: any) {
+        speaking = false;
         if (e?.name !== 'CanceledError' && e?.code !== 'ERR_CANCELED') {
           this.logger.warn(`[media-stream] TTS failed: ${e.message}`);
         }
-      } finally {
-        speaking = false;
       }
     };
 
@@ -140,6 +143,11 @@ export class CallBotMediaStreamService {
       dgWs = new WebSocket(`wss://api.deepgram.com/v1/listen?${qs.toString()}`, {
         headers: { Authorization: `Token ${dgKey}` },
       });
+      const flushUtterance = () => {
+        const text = finalsBuffer.join(' ').replace(/\s+/g, ' ').trim();
+        finalsBuffer = [];
+        if (text) onUserUtterance(text);
+      };
       dgWs.on('open', () => this.logger.log(`[media-stream] Deepgram open (call ${callSid})`));
       dgWs.on('message', (raw: RawData) => {
         let msg: any;
@@ -147,8 +155,14 @@ export class CallBotMediaStreamService {
         if (msg.type === 'SpeechStarted') { stopSpeaking(); return; }   // barge-in
         if (msg.type === 'Results') {
           const transcript: string = msg.channel?.alternatives?.[0]?.transcript ?? '';
-          if (transcript && msg.is_final && msg.speech_final) onUserUtterance(transcript);
+          if (msg.is_final && transcript) finalsBuffer.push(transcript);
+          // speech_final = Deepgram is confident speech ended → respond now.
+          if (msg.speech_final) flushUtterance();
+          return;
         }
+        // Fallback: end-of-utterance by silence timer, even if speech_final never came
+        // (this is what fixed the bot "getting stuck" waiting forever).
+        if (msg.type === 'UtteranceEnd') flushUtterance();
       });
       dgWs.on('error', (e) => this.logger.warn(`[media-stream] Deepgram error: ${(e as any).message}`));
       dgWs.on('close', () => { dgWs = null; });
@@ -189,6 +203,11 @@ export class CallBotMediaStreamService {
         case 'media': {
           const payload = data.media?.payload;
           if (payload && dgWs?.readyState === WebSocket.OPEN) dgWs.send(Buffer.from(payload, 'base64'));
+          break;
+        }
+        case 'mark': {
+          // Twilio finished playing our audio up to this mark → the bot is done talking.
+          if (data.mark?.name === 'end-of-turn') speaking = false;
           break;
         }
         case 'stop': {
