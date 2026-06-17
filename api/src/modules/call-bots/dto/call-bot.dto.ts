@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsEnum, IsInt, Min, Max, IsObject, IsArray, IsUUID } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsEnum, IsInt, Min, Max, IsObject, IsArray, IsUUID, IsBoolean } from 'class-validator';
 
 export class CreateCallBotDto {
   @IsString() @IsNotEmpty()
@@ -115,6 +115,9 @@ export class UpdateCallBotDto {
 
   @IsUUID('4') @IsOptional()
   voiceCatalogId?: string;
+
+  @IsBoolean() @IsOptional()
+  streamingMode?: boolean;
 
   @IsObject() @IsOptional()
   visualConfig?: Record<string, any>;

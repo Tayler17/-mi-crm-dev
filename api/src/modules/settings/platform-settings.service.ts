@@ -41,11 +41,12 @@ export const PLATFORM_KEYS = [
   'linkedin.org_id',
   'stability.api_key',
   'fal.api_key',
+  'deepgram.api_key',
 ] as const;
 
 export type PlatformKey = (typeof PLATFORM_KEYS)[number];
 
-const SENSITIVE = new Set<PlatformKey>(['ai.api_key', 'voice.auth_token', 'meta.app_secret', 'meta.verify_token', 'elevenlabs.api_key', 'stripe.secret_key', 'stripe.webhook_secret', 'backup.s3_secret_key', 'smtp.password', 'twitter.api_secret', 'twitter.access_secret', 'linkedin.access_token', 'stability.api_key', 'fal.api_key']);
+const SENSITIVE = new Set<PlatformKey>(['ai.api_key', 'voice.auth_token', 'meta.app_secret', 'meta.verify_token', 'elevenlabs.api_key', 'stripe.secret_key', 'stripe.webhook_secret', 'backup.s3_secret_key', 'smtp.password', 'twitter.api_secret', 'twitter.access_secret', 'linkedin.access_token', 'stability.api_key', 'fal.api_key', 'deepgram.api_key']);
 const MASK = '••••••••';
 
 /** Maps each platform key to its env-var fallback (for local dev / initial setup). */
@@ -88,6 +89,7 @@ const ENV_FALLBACKS: Record<PlatformKey, string> = {
   'linkedin.org_id':       'LINKEDIN_ORG_ID',
   'stability.api_key':     'STABILITY_API_KEY',
   'fal.api_key':           'FAL_API_KEY',
+  'deepgram.api_key':      'DEEPGRAM_API_KEY',
 };
 
 @Injectable()

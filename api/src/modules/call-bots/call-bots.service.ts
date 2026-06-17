@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, OnModuleInit, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { CallBot } from './entities/call-bot.entity';
@@ -8,7 +8,7 @@ import { PlatformSettingsService } from '../settings/platform-settings.service';
 import axios from 'axios';
 
 @Injectable()
-export class CallBotsService {
+export class CallBotsService implements OnModuleInit {
   constructor(
     @InjectRepository(CallBot)
     private readonly botRepo: Repository<CallBot>,
@@ -18,6 +18,11 @@ export class CallBotsService {
     private readonly db: DataSource,
     private readonly platformSettings: PlatformSettingsService,
   ) {}
+
+  async onModuleInit() {
+    // Real-time voice (Twilio Media Streams) toggle — no migrations in this project.
+    await this.db.query(`ALTER TABLE call_bots ADD COLUMN IF NOT EXISTS streaming_mode BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
+  }
 
   /** Convert a raw snake_case DB row to the camelCase shape the frontend expects. */
   private toCamel<T = any>(row: any): T {

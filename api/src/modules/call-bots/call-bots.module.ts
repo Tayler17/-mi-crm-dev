@@ -5,6 +5,7 @@ import { CallLog } from './entities/call-log.entity';
 import { CallBotsService } from './call-bots.service';
 import { CallBotsController } from './call-bots.controller';
 import { CallBotTwilioService } from './call-bot-twilio.service';
+import { CallBotMediaStreamService } from './call-bot-media-stream.service';
 import { CallBotWebhooksController } from './call-bot-webhooks.controller';
 import { ElevenLabsTtsService } from './elevenlabs-tts.service';
 import { SettingsModule } from '../settings/settings.module';
@@ -16,7 +17,7 @@ import { PhoneNumbersController } from './phone-numbers.controller';
 @Module({
   imports: [TypeOrmModule.forFeature([CallBot, CallLog]), SettingsModule, KnowledgeBaseModule],
   controllers: [CallBotsController, CallBotWebhooksController, PhoneNumbersController],
-  providers: [CallBotsService, CallBotTwilioService, BotActionsService, ElevenLabsTtsService, PhoneNumbersService],
-  exports: [CallBotsService],
+  providers: [CallBotsService, CallBotTwilioService, CallBotMediaStreamService, BotActionsService, ElevenLabsTtsService, PhoneNumbersService],
+  exports: [CallBotsService, CallBotMediaStreamService],
 })
 export class CallBotsModule {}

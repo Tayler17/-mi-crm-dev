@@ -65,6 +65,9 @@ export class CallBot {
   @Column({ name: 'tts_voice_id', nullable: true })
   ttsVoiceId?: string;
 
+  @Column({ name: 'streaming_mode', default: false })
+  streamingMode: boolean;
+
   @Column({ name: 'transfer_to_number', nullable: true })
   transferToNumber?: string;
 

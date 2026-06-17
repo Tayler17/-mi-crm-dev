@@ -15,6 +15,7 @@ import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { AppModule } from './app.module';
 import { SentryInterceptor } from './common/interceptors/sentry.interceptor';
+import { CallBotMediaStreamService } from './modules/call-bots/call-bot-media-stream.service';
 import { Logger } from 'nestjs-pino';
 
 // Prevent unhandled WebSocket / EventEmitter errors from crashing the process
@@ -86,6 +87,13 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID'],
     credentials: true,
   });
+
+  // Twilio Media Streams WebSocket (real-time voice for call bots)
+  try {
+    app.get(CallBotMediaStreamService).bind(app.getHttpServer());
+  } catch (e: any) {
+    app.get(Logger).warn(`[media-stream] bind failed: ${e?.message ?? e}`);
+  }
 
   const port = process.env.PORT || 4000;
   await app.listen(port);

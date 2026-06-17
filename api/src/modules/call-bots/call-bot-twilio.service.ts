@@ -387,6 +387,19 @@ export class CallBotTwilioService {
       return twiml(`<Say>This service is not available. Goodbye.</Say><Hangup/>`);
     }
 
+    // Real-time mode (Media Streams): hand the call audio to our WebSocket.
+    // The whole conversation is then driven by CallBotMediaStreamService.
+    if (bot.streaming_mode) {
+      const wssUrl = baseUrl.replace(/^http/i, 'ws') + '/call-bots/twilio/media-stream';
+      return twiml(`
+        <Connect>
+          <Stream url="${wssUrl}">
+            <Parameter name="botId" value="${botId}"/>
+          </Stream>
+        </Connect>
+      `);
+    }
+
     this.callLastSeen.set(callSid, Date.now());
 
     // Check if this is a transferred call (same callSid re-entering from <Redirect>)
@@ -785,6 +798,37 @@ ${addTagInstruction}
    * with GPT-4o and Claude), that text is used directly, making the response
    * feel natural without any template.
    */
+  /**
+   * Public entry for the Media Streams pipeline: text in → bot reply out.
+   * Reuses the same LLM + tools + per-call history as the Gather flow.
+   */
+  async generateVoiceReply(
+    bot: any,
+    sessionId: string,
+    userText: string,
+    aiCfg: { apiKey: string; provider: string; model: string },
+  ): Promise<{ text: string; hangup: boolean; transfer: boolean }> {
+    if (!this.callHistories.has(sessionId)) {
+      this.callHistories.set(sessionId, [{ role: 'system', content: bot.system_prompt ?? '' }]);
+      this.callMeta.set(sessionId, { contactId: null, tenantId: bot.tenant_id, botId: bot.id });
+    }
+    const rag = await this.kbSvc.searchRelevantContext(bot.id, bot.tenant_id, userText).catch(() => '');
+    const raw = await this.callAi(bot, sessionId, userText, aiCfg.provider, aiCfg.apiKey, aiCfg.model, rag);
+    if (!raw) {
+      return { text: bot.fallback_message || (bot.language?.startsWith('es') ? 'Disculpa, ¿puedes repetir?' : 'Sorry, could you repeat that?'), hangup: false, transfer: false };
+    }
+    const hangup   = raw.includes('[HANGUP]');
+    const transfer = raw.includes('[TRANSFER]');
+    const text = raw.replace(/\[TRANSFER\]/g, '').replace(/\[HANGUP\]/g, '').replace(/\[QUEUE:[^\]]+\]/g, '').trim();
+    return { text, hangup, transfer };
+  }
+
+  /** Release per-call memory when a streaming call ends. */
+  endVoiceSession(sessionId: string) {
+    this.callHistories.delete(sessionId);
+    this.callMeta.delete(sessionId);
+  }
+
   private async callAi(
     bot: any,
     callSid: string,
