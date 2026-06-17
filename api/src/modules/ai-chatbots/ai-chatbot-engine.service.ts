@@ -642,7 +642,10 @@ export class AiChatbotEngineService {
           const transcription = await this.transcribeAudio(openAiKey, filePath);
           this.logger.log(`[audio] transcription="${transcription}"`);
           if (transcription) {
-            return { text: `[Nota de voz]: ${transcription}` };
+            // Pass the transcription as the user's plain message. A "[Nota de voz]:"
+            // prefix made the model treat it as an unprocessable audio tag and reply
+            // "I can't hear voice notes" even with the transcription present.
+            return { text: transcription };
           }
         } catch (e: any) {
           this.logger.warn(`[audio] Transcription API failed: ${e.message}`);
