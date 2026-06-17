@@ -67,6 +67,12 @@ export class InternalChatController {
     return this.svc.renameGroup(chatId, tenantId, req.user.id, body?.name ?? '');
   }
 
+  /** Delete a conversation or group */
+  @Delete(':id')
+  deleteChat(@Param('id') chatId: string, @TenantId() tenantId: string, @Request() req: any) {
+    return this.svc.deleteChat(chatId, tenantId, req.user.id);
+  }
+
   @Get(':id/messages')
   getMessages(
     @Param('id') chatId: string,

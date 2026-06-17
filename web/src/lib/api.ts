@@ -1008,6 +1008,8 @@ export const removeGroupMember = (chatId: string, userId: string) =>
   apiDelete(`/internal-chat/${chatId}/members/${userId}`);
 export const renameGroupChat = (chatId: string, name: string) =>
   apiPatch(`/internal-chat/${chatId}`, { name });
+export const deleteChatConversation = (chatId: string) =>
+  apiDelete(`/internal-chat/${chatId}`);
 export const getChatMessages = (chatId: string) =>
   apiGet<ChatMessage[]>(`/internal-chat/${chatId}/messages`);
 export const sendChatMessage = (chatId: string, payload: string | ChatSendPayload) =>

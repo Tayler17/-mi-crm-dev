@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   getMyChats, createOrFindDm, getChatMessages, sendChatMessage, markChatRead,
   editChatMessage, deleteChatMessage, uploadChatFile,
-  createGroupChat, addGroupMembers, removeGroupMember,
+  createGroupChat, addGroupMembers, removeGroupMember, deleteChatConversation,
   getAgents, InternalChat, ChatMessage, Agent, API_URL,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
@@ -312,6 +312,20 @@ export default function ChatPage() {
     } catch (e: any) { alert(e?.message || 'Error'); }
   }
 
+  async function handleDeleteChat() {
+    if (!activeChat) return;
+    const what = activeChat.isGroup ? 'el grupo' : 'esta conversación';
+    if (!confirm(`¿Eliminar ${what}? Se borrará para todos los miembros y no se puede deshacer.`)) return;
+    try {
+      await deleteChatConversation(activeChat.id);
+      setShowMembers(false);
+      setActiveChat(null);
+      setMessages([]);
+      setMobilePanel('list');
+      await loadChats();
+    } catch (e: any) { alert(e?.message || 'No se pudo eliminar'); }
+  }
+
   async function handleRemoveMember(userId: string) {
     if (!activeChat || !confirm('¿Quitar a este miembro del grupo?')) return;
     try {
@@ -437,6 +451,9 @@ export default function ChatPage() {
                   👥 Miembros
                 </button>
               )}
+              <button className="btn btn-ghost" title="Eliminar conversación" style={{ fontSize: 14, padding: '4px 8px', flexShrink: 0, color: 'var(--danger)' }} onClick={handleDeleteChat}>
+                🗑
+              </button>
             </div>
 
             <div ref={messagesContainerRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>

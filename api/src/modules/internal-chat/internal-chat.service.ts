@@ -161,6 +161,18 @@ export class InternalChatService implements OnModuleInit {
     return { ok: true };
   }
 
+  // Delete a chat (DM or group) for everyone: messages, members, reads, chat row.
+  async deleteChat(chatId: string, tenantId: string, userId: string) {
+    await this.ensureMember(chatId, userId);
+    const chat = await this.chatRepo.findOne({ where: { id: chatId, tenantId } });
+    if (!chat) throw new NotFoundException('Conversación no encontrada');
+    await this.msgRepo.delete({ chatId });
+    await this.memberRepo.delete({ chatId });
+    await this.msgRepo.query(`DELETE FROM internal_chat_reads WHERE chat_id=$1`, [chatId]).catch(() => {});
+    await this.chatRepo.delete({ id: chatId });
+    return { ok: true };
+  }
+
   async getMessages(chatId: string, tenantId: string, userId: string, limit = 50) {
     await this.ensureMember(chatId, userId);
     // Fetch the MOST RECENT `limit` messages (DESC + take), then restore chronological
