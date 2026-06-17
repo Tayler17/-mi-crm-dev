@@ -337,10 +337,12 @@ export class WhatsappWebService implements OnModuleInit {
       return false;
     }
     try {
-      const { readFileSync } = await import('fs');
+      const { readFileSync, existsSync } = await import('fs');
       const { join } = await import('path');
       const filePath = join(process.cwd(), fileUrl); // fileUrl is like /uploads/xxx.jpg
+      console.log(`[sendFile] type=${contentType} path=${filePath} exists=${existsSync(filePath)}`);
       const buffer = readFileSync(filePath);
+      console.log(`[sendFile] read ${buffer.length} bytes`);
       const filename = fileUrl.split('/').pop() ?? 'file';
       const ext = filename.split('.').pop()?.toLowerCase() ?? '';
 
@@ -365,8 +367,10 @@ export class WhatsappWebService implements OnModuleInit {
       } else {
         result = await session.sock.sendMessage(remoteJid, { document: buffer, mimetype, fileName: filename, caption: caption ?? '' });
       }
+      console.log(`[sendFile] sent ok, key=${result?.key?.id}`);
       return result?.key?.id ?? true as any;
     } catch (e: any) {
+      console.log(`[sendFile] ERROR: ${e.message}`);
       this.logger.error(`sendFile failed for ${connectionId}: ${e.message}`);
       return false;
     }
