@@ -297,6 +297,17 @@ export class WhatsappWebService implements OnModuleInit {
 
   /** Send an outbound text message through an active WhatsApp Web session */
   async sendMessage(connectionId: string, remoteJid: string, text: string): Promise<string | false> {
+    // Choke-point safety: a "/uploads/..." body is an uploaded file, never text.
+    // Redirect to a media send so no caller can leak the raw path to the recipient.
+    if (/^\/uploads\/\S+/.test(text ?? '')) {
+      console.log(`[waSvc.sendMessage] redirecting /uploads body to file send. caller:\n${new Error().stack?.split('\n').slice(2, 7).join('\n')}`);
+      const [fileUrl, , cap] = text.split('|');
+      const ext = (fileUrl.split('.').pop() ?? '').toLowerCase();
+      const ct = /^(jpe?g|png|gif|webp|bmp|heic)$/.test(ext) ? 'image'
+        : /^(mp3|ogg|oga|m4a|wav|opus|aac)$/.test(ext) ? 'audio'
+        : /^(mp4|mov|avi|webm|3gp)$/.test(ext) ? 'video' : 'file';
+      return this.sendFile(connectionId, remoteJid, fileUrl, ct, cap || undefined);
+    }
     const session = this.sessions.get(connectionId);
     if (!session?.sock || session.status !== 'connected') {
       this.logger.warn(`sendMessage: no active session for ${connectionId}`);
