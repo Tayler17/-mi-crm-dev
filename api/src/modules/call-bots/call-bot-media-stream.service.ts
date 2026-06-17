@@ -152,9 +152,13 @@ export class CallBotMediaStreamService {
       dgWs.on('message', (raw: RawData) => {
         let msg: any;
         try { msg = JSON.parse(raw.toString()); } catch { return; }
-        if (msg.type === 'SpeechStarted') { stopSpeaking(); return; }   // barge-in
+        // NOTE: we deliberately do NOT barge-in on SpeechStarted (raw VAD) — it
+        // fired on any noise (keyboard, objects) and cut the bot off. We only
+        // interrupt when Deepgram actually recognizes WORDS (below).
         if (msg.type === 'Results') {
           const transcript: string = msg.channel?.alternatives?.[0]?.transcript ?? '';
+          // Barge-in: real words while the bot is talking → stop and listen.
+          if (speaking && /[a-zA-Záéíóúñ]{2,}/i.test(transcript)) stopSpeaking();
           if (msg.is_final && transcript) finalsBuffer.push(transcript);
           // speech_final = Deepgram is confident speech ended → respond now.
           if (msg.speech_final) flushUtterance();
