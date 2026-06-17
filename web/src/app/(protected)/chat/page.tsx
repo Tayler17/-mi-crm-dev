@@ -346,7 +346,7 @@ export default function ChatPage() {
   const peer = activeChat ? getChatPeer(activeChat, myId) : null;
 
   return (
-    <div className="chat-layout" data-panel={mobilePanel} style={{ display: 'flex', height: '100vh', overflow: 'hidden', position: 'fixed', top: 0, left: 'var(--sidebar-w, 220px)', right: 0, bottom: 0 }}>
+    <div className="chat-layout" data-panel={mobilePanel} style={{ display: 'flex', overflow: 'hidden', position: 'fixed', top: 'var(--header-h, 56px)', left: 'var(--sidebar-w, 220px)', right: 0, bottom: 0 }}>
 
       {/* Left: chat list */}
       <div className="chat-list-panel" style={{ width: 280, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: 'var(--bg)', flexShrink: 0 }}>
