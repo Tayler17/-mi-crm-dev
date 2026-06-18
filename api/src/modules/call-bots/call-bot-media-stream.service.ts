@@ -56,6 +56,7 @@ export class CallBotMediaStreamService {
     let closed = false;
     let ttsAbort: AbortController | null = null;
     let finalsBuffer: string[] = [];
+    let speakTimer: ReturnType<typeof setTimeout> | null = null;
 
     const sendToTwilio = (obj: any) => {
       if (twilioWs.readyState === WebSocket.OPEN) twilioWs.send(JSON.stringify(obj));
@@ -63,6 +64,7 @@ export class CallBotMediaStreamService {
 
     /** Stop whatever the bot is saying (barge-in). */
     const stopSpeaking = () => {
+      if (speakTimer) { clearTimeout(speakTimer); speakTimer = null; }
       if (!speaking) return;
       speaking = false;
       try { ttsAbort?.abort(); } catch { /* ignore */ }
@@ -80,6 +82,7 @@ export class CallBotMediaStreamService {
 
       speaking = true;
       ttsAbort = new AbortController();
+      let bytes = 0;
       try {
         const res = await axios.post(
           `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?output_format=ulaw_8000&optimize_streaming_latency=3`,
@@ -91,21 +94,33 @@ export class CallBotMediaStreamService {
             timeout: 30000,
           },
         );
-        await new Promise<void>((resolve, reject) => {
-          res.data.on('data', (chunk: Buffer) => {
-            if (!speaking || closed) return;
-            for (let i = 0; i < chunk.length; i += 320) {
-              const slice = chunk.subarray(i, i + 320);
-              sendToTwilio({ event: 'media', streamSid, media: { payload: slice.toString('base64') } });
-            }
-          });
-          res.data.on('end', () => resolve());
-          res.data.on('error', reject);
-        });
-        // Keep `speaking = true` until Twilio echoes this mark (= it finished
-        // PLAYING the audio). Otherwise barge-in can't interrupt during playback,
-        // since we send all frames in <1s but Twilio plays them over several.
-        if (speaking && !closed) sendToTwilio({ event: 'mark', streamSid, mark: { name: 'end-of-turn' } });
+        // Stream the audio, but never let this promise hang forever (would freeze
+        // the whole turn loop → the "stuck" the user reported).
+        await Promise.race([
+          new Promise<void>((resolve, reject) => {
+            res.data.on('data', (chunk: Buffer) => {
+              if (!speaking || closed) return;
+              bytes += chunk.length;
+              for (let i = 0; i < chunk.length; i += 320) {
+                const slice = chunk.subarray(i, i + 320);
+                sendToTwilio({ event: 'media', streamSid, media: { payload: slice.toString('base64') } });
+              }
+            });
+            res.data.on('end', () => resolve());
+            res.data.on('error', reject);
+          }),
+          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('tts-stream-timeout')), 20000)),
+        ]);
+        // We send all frames in <1s but Twilio PLAYS them over several seconds.
+        // Hold `speaking` for the real playback duration (mulaw 8kHz = 8000 B/s)
+        // so barge-in can interrupt — WITHOUT depending on Twilio's mark echo,
+        // which isn't always sent and was leaving the bot stuck.
+        if (speaking && !closed) {
+          sendToTwilio({ event: 'mark', streamSid, mark: { name: 'end-of-turn' } });
+          const playMs = Math.ceil((bytes / 8000) * 1000) + 300;
+          if (speakTimer) clearTimeout(speakTimer);
+          speakTimer = setTimeout(() => { speaking = false; speakTimer = null; }, playMs);
+        }
       } catch (e: any) {
         speaking = false;
         if (e?.name !== 'CanceledError' && e?.code !== 'ERR_CANCELED') {
@@ -118,6 +133,9 @@ export class CallBotMediaStreamService {
     const onUserUtterance = (text: string) => {
       if (processing || closed || !bot || !aiCfg) return;
       processing = true;
+      // Safety: never let a hung LLM/TTS leave `processing` stuck (= bot ignores
+      // every later turn → "stuck"). Force-release after 25s no matter what.
+      const watchdog = setTimeout(() => { processing = false; }, 25000);
       this.logger.log(`[media-stream] user said: "${text}"`);
       stopSpeaking();
       this.twilio.generateVoiceReply(bot, callSid, text, aiCfg!)
@@ -126,7 +144,7 @@ export class CallBotMediaStreamService {
           if (hangup) setTimeout(() => { try { twilioWs.close(); } catch { /* ignore */ } }, 1500);
         })
         .catch((e) => this.logger.warn(`[media-stream] reply failed: ${e.message}`))
-        .finally(() => { processing = false; });
+        .finally(() => { clearTimeout(watchdog); processing = false; });
     };
 
     /** Open the Deepgram streaming STT connection. */
@@ -214,8 +232,12 @@ export class CallBotMediaStreamService {
           break;
         }
         case 'mark': {
-          // Twilio finished playing our audio up to this mark → the bot is done talking.
-          if (data.mark?.name === 'end-of-turn') speaking = false;
+          // Twilio finished playing our audio up to this mark → the bot is done
+          // talking (faster than the playback timer when Twilio does echo it).
+          if (data.mark?.name === 'end-of-turn') {
+            speaking = false;
+            if (speakTimer) { clearTimeout(speakTimer); speakTimer = null; }
+          }
           break;
         }
         case 'stop': {
