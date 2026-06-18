@@ -521,4 +521,481 @@ Requisitos: claves de Deepgram y ElevenLabs configuradas, y el bloque WebSocket 
 
 Los números de Twilio se administran desde el owner y se asignan a los bots de cada tenant.`,
   },
+
+  // ════════════════════════════ ENGLISH (lang: 'en') ════════════════════════════
+
+  // ───────────────────────── Getting started (global) ─────────────────────────
+  {
+    seedKey: 'gs-welcome-en',
+    categorySeedKey: 'getting-started',
+    isGlobal: true,
+    position: 1,
+    lang: 'en',
+    title: 'Welcome to AutoMarkIQ',
+    body: `# Welcome to AutoMarkIQ
+
+AutoMarkIQ is your all-in-one CRM: manage **contacts**, **sales opportunities (deals)**, a unified **Inbox** for WhatsApp and other channels, **internal chat** for your team, and **AI assistants** that reply to messages and calls for you.
+
+## Navigation
+
+The sidebar is organized into sections:
+
+- **Core CRM** — Dashboard, Contacts, Companies, Deals, Kanban, Tasks.
+- **Communication** — Inbox, Internal Chat, Queues, Teams.
+- **Automation** — Flows, Automations, AI Prompts, Chatbots, Call Bots.
+
+## Recommended first steps
+
+1. Complete **your profile** (name and photo) from the user menu, top right.
+2. Invite your **team** (see *Set up your account and team*).
+3. Connect **WhatsApp** to start receiving messages in the Inbox.
+4. Create your first **contacts** and **deals**.
+
+> Tip: use the search box (shortcut **Ctrl + K**) to jump quickly to any section.`,
+  },
+  {
+    seedKey: 'gs-account-team-en',
+    categorySeedKey: 'getting-started',
+    isGlobal: true,
+    position: 2,
+    lang: 'en',
+    title: 'Set up your account and team',
+    body: `# Set up your account and team
+
+## Your profile
+
+From the user menu (top right) → **My profile** you can change your name and photo. Your availability status (**online / away / busy**) is shown to teammates in the internal chat.
+
+## Team roles
+
+AutoMarkIQ has three access levels:
+
+| Role | For whom | Can |
+| --- | --- | --- |
+| **Admin** | Business owner | Everything in their account: users, settings, integrations, reports |
+| **Agent** | Support staff | Inbox, contacts, deals and assigned tasks |
+
+## Inviting users
+
+If you are an **admin**, go to **Settings → Users** and click **New user**. Set their name, email, role and initial password. The user can log in right away.
+
+> The number of users depends on your plan. If you hit the limit, get in touch to increase it.`,
+  },
+
+  // ───────────────────────── Contacts (global) ─────────────────────────
+  {
+    seedKey: 'contacts-manage-en',
+    categorySeedKey: 'contacts',
+    isGlobal: true,
+    position: 1,
+    lang: 'en',
+    title: 'Managing contacts',
+    body: `# Managing contacts
+
+## Create a contact
+
+Go to **Contacts → New contact**. At minimum you need a name or a phone number. Contacts are also created **automatically** when someone messages you on WhatsApp.
+
+## Contact profile
+
+When you open a contact you'll see:
+
+- **Details** — name, phone, email, creation date.
+- **Tags** — click **+ Tag** to classify (e.g. *Customer*, *Lead*, *VIP*). If none appear, create them first in **Settings → Tags**.
+- **Custom fields** — extra information specific to your business.
+- **Conversations** — chat and call history. **Click any conversation to open it in the Inbox.**
+
+## Tags
+
+Tags let you segment and then filter contacts or launch campaigns. A contact can have several.`,
+  },
+  {
+    seedKey: 'contacts-companies-en',
+    categorySeedKey: 'contacts',
+    isGlobal: true,
+    position: 2,
+    lang: 'en',
+    title: 'Companies',
+    body: `# Companies
+
+**Companies** group contacts that belong to the same organization.
+
+## Create and link
+
+1. Go to **Companies → New company**.
+2. From a contact's profile you can link it to a company.
+
+This way, when you open a company you see all of its contacts and related deals in one place — handy for B2B sales.`,
+  },
+
+  // ───────────────────────── Deals (global) ─────────────────────────
+  {
+    seedKey: 'deals-basics-en',
+    categorySeedKey: 'deals',
+    isGlobal: true,
+    position: 1,
+    lang: 'en',
+    title: 'Create and move deals',
+    body: `# Create and move deals
+
+A **deal** (opportunity) represents a potential sale.
+
+## Create a deal
+
+Go to **Deals → New deal** and set:
+
+- **Title** (required).
+- **Value** and **currency**.
+- **Expected close date**.
+- Associated **contact** or **company**.
+- **Priority** (low / medium / high) and pipeline **stage**.
+
+## Pipeline and Kanban
+
+In **Kanban & Pipelines** you see your deals as cards in columns (stages). **Drag a card** from one column to another to change its stage — for example from *Contacted* to *Proposal sent*.
+
+## Edit a deal
+
+Open the deal, change the fields and click **Save**. The **value** must be numeric; leave it at 0 if you don't know it yet.`,
+  },
+
+  // ───────────────────────── Inbox (global) ─────────────────────────
+  {
+    seedKey: 'inbox-conversations-en',
+    categorySeedKey: 'inbox',
+    isGlobal: true,
+    position: 1,
+    lang: 'en',
+    title: 'Replying to conversations',
+    body: `# Replying to conversations
+
+The **Inbox** brings all your channels (WhatsApp, calls, etc.) into a single place.
+
+## Conversation states
+
+- **Serving** — active conversation.
+- **Waiting** — pending a reply.
+- **Resolved** — closed. You can reopen it if the customer writes again.
+
+Use the top tabs to filter, or **All** to see every conversation.
+
+## Reply and assign
+
+1. Select a conversation from the list.
+2. Type in the box at the bottom. **Enter** sends; **Shift + Enter** adds a new line (on mobile, Enter adds a new line).
+3. In the right-hand panel you can **assign** the conversation to an agent, team or queue, and add **internal notes** (visible only to your team).
+
+## Internal notes and mentions
+
+Switch to the **Internal note** tab to leave a private note. Type **@** to mention a teammate.`,
+  },
+  {
+    seedKey: 'inbox-voice-media-en',
+    categorySeedKey: 'inbox',
+    isGlobal: true,
+    position: 2,
+    lang: 'en',
+    title: 'Voice notes, images and files',
+    body: `# Voice notes, images and files
+
+## Send images and files
+
+Click the **attach** icon in the composer and choose the image or document. The customer receives it directly in their WhatsApp.
+
+## Record and send voice notes
+
+1. Click the **microphone** icon in the composer.
+2. Speak your message.
+3. Release/stop to review and **send**.
+
+The voice note is delivered as a playable audio in WhatsApp (native voice format). **Incoming** voice notes from the customer also play directly in the Inbox.`,
+  },
+  {
+    seedKey: 'inbox-edit-delete-en',
+    categorySeedKey: 'inbox',
+    isGlobal: true,
+    position: 3,
+    lang: 'en',
+    title: 'Edit and delete sent messages',
+    body: `# Edit and delete sent messages
+
+Made a mistake in a message you already sent? Hover over the message and use the actions:
+
+- **Delete** — removes the message for both sides (in WhatsApp it shows *"This message was deleted"*).
+- **Edit** — fix the text. WhatsApp allows editing **for up to 15 minutes** after sending.
+
+> These actions depend on what the channel allows. After WhatsApp's edit window, you can only delete.`,
+  },
+  {
+    seedKey: 'inbox-whatsapp-en',
+    categorySeedKey: 'inbox',
+    isGlobal: true,
+    position: 4,
+    lang: 'en',
+    title: 'Connect WhatsApp',
+    body: `# Connect WhatsApp
+
+1. Go to **Connections** and click **Connect WhatsApp**.
+2. A **QR code** will appear.
+3. On your phone: WhatsApp → **Linked devices → Link a device** and scan the QR.
+
+When the status turns to **connected**, messages will start arriving in the Inbox.
+
+## Tips
+
+- Keep the phone connected to the internet.
+- If the QR expires, reload it and scan again.
+- A temporary disconnection reconnects on its own; if not, repeat the scan.`,
+  },
+
+  // ───────────────────────── Internal chat (global) ─────────────────────────
+  {
+    seedKey: 'chat-team-en',
+    categorySeedKey: 'internal-chat',
+    isGlobal: true,
+    position: 1,
+    lang: 'en',
+    title: 'Team messaging',
+    body: `# Team messaging
+
+**Internal Chat** is your team's private messaging — separate from the customer Inbox.
+
+## Direct conversations
+
+Pick a teammate from the list and start typing. You'll see their status (**online / away / busy**) in real time.
+
+## Conveniences
+
+- When you open a chat, it automatically jumps to the **latest message**.
+- If you type something and switch chats, your **draft is kept**.
+- You can **edit** or **delete** your messages, and **share images and audio**.`,
+  },
+  {
+    seedKey: 'chat-groups-en',
+    categorySeedKey: 'internal-chat',
+    isGlobal: true,
+    position: 2,
+    lang: 'en',
+    title: 'Groups',
+    body: `# Groups
+
+Create **groups** to coordinate by department or project.
+
+## Create a group
+
+1. In Internal Chat click **New group**.
+2. Name it and add members.
+
+## Manage
+
+Inside the group you can **add or remove members**, **rename it** and, if no longer needed, **delete the group**. You can also **delete a direct conversation** from your list.`,
+  },
+  {
+    seedKey: 'chat-voice-en',
+    categorySeedKey: 'internal-chat',
+    isGlobal: true,
+    position: 3,
+    lang: 'en',
+    title: 'Voice notes in chat',
+    body: `# Voice notes in chat
+
+Besides text and images, you can record **voice notes** inside the internal chat:
+
+1. Click the **microphone** icon.
+2. Record your message.
+3. Send it — teammates can play it instantly.
+
+Great for explaining something quickly without typing.`,
+  },
+
+  // ───────────────────────── Tasks (global) ─────────────────────────
+  {
+    seedKey: 'tasks-manage-en',
+    categorySeedKey: 'tasks',
+    isGlobal: true,
+    position: 1,
+    lang: 'en',
+    title: 'Managing tasks',
+    body: `# Managing tasks
+
+**Tasks** help you never miss a follow-up.
+
+## Create a task
+
+Go to **Tasks → New task** and set a title, due date, priority and assignee. You can link it to a **contact** or **deal** for context.
+
+## Tracking
+
+Mark tasks as completed as you go. Overdue tasks are highlighted so you can prioritize them.`,
+  },
+
+  // ───────────────────────── AI chatbots (global) ─────────────────────────
+  {
+    seedKey: 'chatbots-create-en',
+    categorySeedKey: 'ai-chatbots',
+    isGlobal: true,
+    position: 1,
+    lang: 'en',
+    title: 'Create an AI chatbot',
+    body: `# Create an AI chatbot
+
+An **AI chatbot** automatically replies to your customers in the Inbox, 24/7.
+
+## Steps
+
+1. Go to **AI Chatbots → New chatbot**.
+2. Write its **instructions (prompt)**: how it should behave, what tone to use and what information it can give. Be specific (e.g. *"You are the assistant for Clinic X. Answer questions about hours and services. If they ask for an appointment, offer to schedule one."*).
+3. **Assign it to an Inbox** so it starts replying on that channel.
+
+## Best practices
+
+- Give it context about your business (services, hours, pricing).
+- Tell it when to **hand off to a human**.
+- The bot also understands **voice notes**: it transcribes the customer's audio and replies.
+
+> Test it by messaging yourself before turning it on for real customers.`,
+  },
+
+  // ───────────────────────── Call bots (global) ─────────────────────────
+  {
+    seedKey: 'callbots-use-en',
+    categorySeedKey: 'call-bots',
+    isGlobal: true,
+    position: 1,
+    lang: 'en',
+    title: 'Using call bots',
+    body: `# Using call bots
+
+A **call bot** handles phone calls by voice: it greets, converses with the caller and logs everything in the CRM.
+
+## Set up your bot
+
+1. Go to **Call Bots → New bot**.
+2. Define its **instructions (prompt)**: how it introduces itself and what it can resolve.
+3. Assign it an **Inbox** so every call is logged as a conversation.
+
+## What happens during a call
+
+- The bot **adapts to the caller's language**.
+- When it ends, the call appears in the **Inbox** and in the **call logs**, with its **transcript** and linked to the **contact**.
+- If the caller says goodbye, the bot ends the call politely.
+
+> Advanced voice configuration (voice provider, real-time mode, phone numbers) is managed by the platform owner.`,
+  },
+
+  // ═════════════════════════ OWNER-ONLY (no global) ═════════════════════════
+  {
+    seedKey: 'owner-platform-keys-en',
+    categorySeedKey: 'owner-admin',
+    isGlobal: false,
+    position: 1,
+    lang: 'en',
+    title: 'Platform settings and API keys',
+    body: `# Platform settings and API keys
+
+> 🔒 **Owner only.** Tenants do not see this article.
+
+In **Settings** (owner section) you store the keys for the external services used by ALL tenants:
+
+| Service | Used for | Variable |
+| --- | --- | --- |
+| **OpenAI** | AI chatbots and transcription | \`OPENAI_API_KEY\` |
+| **Deepgram** | Real-time transcription (streaming call bots) | \`DEEPGRAM_API_KEY\` |
+| **ElevenLabs** | Call-bot voice | key in the panel |
+| **Twilio** | Telephony (inbound/outbound calls) | account credentials |
+
+## Recommendations
+
+- These keys are **sensitive**: never share or publish them.
+- If you rotate a key at the provider, update it here so the service isn't interrupted.
+- An exhausted balance on OpenAI/Deepgram/ElevenLabs **stops** the related feature; check the balance if a bot stops responding.`,
+  },
+  {
+    seedKey: 'owner-billing-plans-en',
+    categorySeedKey: 'owner-admin',
+    isGlobal: false,
+    position: 2,
+    lang: 'en',
+    title: 'Plans, pricing and billing',
+    body: `# Plans, pricing and billing
+
+> 🔒 **Owner only.** Tenants do not see this article.
+
+Each tenant has a **plan** that defines its limits (users, contacts, connections, etc.).
+
+## Manage plans
+
+- Review and adjust each tenant's plan from the tenant administration.
+- When a tenant reaches a limit, the affected actions are blocked with a notice (e.g. creating users).
+- To raise a limit, upgrade the tenant's plan.
+
+## Best practices
+
+- Set limits consistent with each plan's price.
+- Communicate any pricing changes to customers in advance.`,
+  },
+  {
+    seedKey: 'owner-deploy-infra-en',
+    categorySeedKey: 'owner-admin',
+    isGlobal: false,
+    position: 3,
+    lang: 'en',
+    title: 'Deployment and infrastructure (VPS)',
+    body: `# Deployment and infrastructure (VPS)
+
+> 🔒 **Owner only.** Tenants do not see this article.
+
+The platform runs on Docker on a VPS, behind Nginx + HTTPS.
+
+## Deployment commands
+
+\`\`\`bash
+# Only the backend (API) changed
+cd /opt/crm && git pull && docker compose up -d --force-recreate api
+
+# The frontend (web) changed — --build is REQUIRED
+cd /opt/crm && git pull && docker compose up -d --build web
+
+# Both changed
+cd /opt/crm && git pull && docker compose up -d --build web && docker compose up -d --force-recreate api
+
+# A new backend dependency was added
+cd /opt/crm && git pull && docker compose up -d --build --renew-anon-volumes api
+\`\`\`
+
+## Notes
+
+- \`--force-recreate\` does **not** rebuild images; only \`--build\` does.
+- The frontend is served from a pre-built image: without \`--build\`, web changes are **not** deployed.
+- HTTPS is handled with Nginx + Certbot; domains point to the VPS.`,
+  },
+  {
+    seedKey: 'owner-voice-callbots-en',
+    categorySeedKey: 'owner-admin',
+    isGlobal: false,
+    position: 4,
+    lang: 'en',
+    title: 'Voice catalog and real-time call bots',
+    body: `# Voice catalog and real-time call bots
+
+> 🔒 **Owner only.** Tenants do not see this article.
+
+## Global voice catalog
+
+In **Voice Catalog** you define the voices (ElevenLabs / Twilio) available for tenants to assign to their bots, without them having to touch credentials.
+
+## Real-time mode (streaming)
+
+Call bots can run in **streaming mode** (low latency) using:
+
+- **Deepgram** for live transcription.
+- **ElevenLabs** for the voice.
+- **Twilio Media Streams** for bidirectional audio, with interruption cutoff (*barge-in*).
+
+Requirements: Deepgram and ElevenLabs keys configured, and the Nginx WebSocket block for \`/call-bots/twilio/media-stream\`. In streaming mode the Twilio voice isn't available; use the voice catalog.
+
+## Phone numbers
+
+Twilio numbers are managed by the owner and assigned to each tenant's bots.`,
+  },
 ];
