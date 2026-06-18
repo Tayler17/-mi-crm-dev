@@ -812,6 +812,10 @@ ${addTagInstruction}
       this.callHistories.set(sessionId, [{ role: 'system', content: bot.system_prompt ?? '' }]);
       this.callMeta.set(sessionId, { contactId: null, tenantId: bot.tenant_id, botId: bot.id });
     }
+    // Build the transcript so the call_log + inbox conversation get saved on call end
+    // (the status-callback finalizer reads callTranscripts[CallSid]).
+    this.callTranscripts.set(sessionId, (this.callTranscripts.get(sessionId) ?? '') + `[Usuario]: ${userText}\n`);
+
     const rag = await this.kbSvc.searchRelevantContext(bot.id, bot.tenant_id, userText).catch(() => '');
     const raw = await this.callAi(bot, sessionId, userText, aiCfg.provider, aiCfg.apiKey, aiCfg.model, rag);
     if (!raw) {
@@ -820,6 +824,7 @@ ${addTagInstruction}
     const hangup   = raw.includes('[HANGUP]');
     const transfer = raw.includes('[TRANSFER]');
     const text = raw.replace(/\[TRANSFER\]/g, '').replace(/\[HANGUP\]/g, '').replace(/\[QUEUE:[^\]]+\]/g, '').trim();
+    this.callTranscripts.set(sessionId, (this.callTranscripts.get(sessionId) ?? '') + `[Bot]: ${text}\n`);
     return { text, hangup, transfer };
   }
 
