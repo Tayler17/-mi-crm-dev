@@ -4,18 +4,20 @@ import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { HelpCategory } from './entities/help-category.entity';
 import { HelpArticle } from './entities/help-article.entity';
-import { HELP_CATEGORIES, HELP_ARTICLES } from './help-seed.content';
+import { HELP_CATEGORIES, HELP_ARTICLES, SeedArticle } from './help-seed.content';
 
 /**
- * Seeds the Help Center with the official, code-managed articles.
+ * Documents NEW features in the EXISTING help center — it does not rebuild it.
  *
- * - GLOBAL content (isGlobal=true)  → every tenant sees it (end-user features).
- * - OWNER-ONLY content (isGlobal=false on the owner's tenant) → only the owner
- *   sees it (platform settings/API keys, billing, deploy, voice-catalog config).
+ * - Articles with `categoryNames` are slotted into an existing hand-made category
+ *   (matched by name); they inherit that category's visibility.
+ * - Articles with `categorySeedKey` go into a NEW category defined in the seed.
+ * - OWNER-ONLY content (isGlobal=false on the owner's tenant) is never shown to
+ *   tenants.
  *
- * Idempotent: every row carries a stable `seed_key`. On each boot we UPSERT by
- * (tenant_id, seed_key), so re-deploys refresh the text without duplicating and
- * without ever touching content the user created by hand (seed_key IS NULL).
+ * Idempotent: every seeded row carries a stable `seed_key`. We UPSERT by
+ * (tenant_id, seed_key) and PRUNE any seed-managed row that is no longer listed
+ * here. The user's hand-made content (seed_key IS NULL) is never touched.
  */
 @Injectable()
 export class HelpSeedService implements OnModuleInit {
@@ -30,12 +32,12 @@ export class HelpSeedService implements OnModuleInit {
 
   async onModuleInit() {
     try {
-      // 1. seed_key columns (no migrations in this project) + dedup safety index.
+      // 1. seed_key columns (no migrations in this project).
       await this.categoryRepo.query(`ALTER TABLE help_categories ADD COLUMN IF NOT EXISTS seed_key VARCHAR`);
       await this.articleRepo.query(`ALTER TABLE help_articles ADD COLUMN IF NOT EXISTS seed_key VARCHAR`);
 
-      // 2. Resolve the owner's tenant. All seeded rows live under it; isGlobal
-      //    decides visibility. If there is no owner yet, skip silently.
+      // 2. Resolve the owner's tenant. Seeded rows live under it; isGlobal decides
+      //    visibility. If there is no owner yet, skip silently.
       const owner = await this.categoryRepo.query(
         `SELECT tenant_id FROM users WHERE role = 'owner' AND is_active = true ORDER BY created_at ASC LIMIT 1`,
       );
@@ -45,25 +47,55 @@ export class HelpSeedService implements OnModuleInit {
         return;
       }
 
-      // 3. Categories first (need their ids to link articles).
+      // 3. NEW categories (need their ids to link articles).
       const catIdBySeedKey = new Map<string, string>();
       for (const def of HELP_CATEGORIES) {
         catIdBySeedKey.set(def.seedKey, await this.upsertCategory(ownerTenantId, def));
       }
 
-      // 4. Articles.
-      let count = 0;
+      // 4. Articles — resolve the target category, then upsert.
       for (const def of HELP_ARTICLES) {
-        const categoryId = catIdBySeedKey.get(def.categorySeedKey) ?? null;
-        await this.upsertArticle(ownerTenantId, categoryId, def);
-        count++;
+        let categoryId: string | null = null;
+        let isGlobal = def.isGlobal;
+
+        if (def.categorySeedKey) {
+          categoryId = catIdBySeedKey.get(def.categorySeedKey) ?? null;
+        } else if (def.categoryNames?.length) {
+          const existing = await this.findCategoryByName(ownerTenantId, def.categoryNames);
+          if (existing) {
+            categoryId = existing.id;
+            isGlobal = existing.is_global; // match the host category's visibility
+          } else {
+            this.logger.warn(`No existing category found for "${def.title}" (tried: ${def.categoryNames.join(', ')})`);
+          }
+        }
+
+        await this.upsertArticle(ownerTenantId, categoryId, isGlobal, def);
       }
 
-      this.logger.log(`Help center seeded: ${HELP_CATEGORIES.length} categories, ${count} articles`);
+      // 5. PRUNE seed-managed rows that are no longer listed (removes old
+      //    duplicates from previous deploys). Only touches this seed's own rows.
+      await this.pruneOrphans(ownerTenantId);
+
+      this.logger.log(`Help center updated: +${HELP_CATEGORIES.length} categories, ${HELP_ARTICLES.length} articles`);
     } catch (e) {
       // Never block boot on seeding.
       this.logger.error(`Help-center seed failed: ${(e as Error).message}`);
     }
+  }
+
+  private async findCategoryByName(
+    tenantId: string,
+    names: string[],
+  ): Promise<{ id: string; is_global: boolean } | null> {
+    const rows = await this.categoryRepo.query(
+      `SELECT id, is_global FROM help_categories
+        WHERE (tenant_id = $1 OR is_global = true) AND lower(name) = ANY($2)
+        ORDER BY is_global DESC
+        LIMIT 1`,
+      [tenantId, names.map((n) => n.toLowerCase())],
+    );
+    return rows[0] ?? null;
   }
 
   private async upsertCategory(
@@ -93,7 +125,8 @@ export class HelpSeedService implements OnModuleInit {
   private async upsertArticle(
     tenantId: string,
     categoryId: string | null,
-    def: { seedKey: string; title: string; body: string; position: number; isGlobal: boolean; lang: string },
+    isGlobal: boolean,
+    def: SeedArticle,
   ): Promise<void> {
     const found = await this.articleRepo.query(
       `SELECT id FROM help_articles WHERE tenant_id = $1 AND seed_key = $2 LIMIT 1`,
@@ -104,14 +137,46 @@ export class HelpSeedService implements OnModuleInit {
         `UPDATE help_articles
            SET title = $1, body = $2, category_id = $3, position = $4, is_global = $5, lang = $6, is_published = true, updated_at = now()
          WHERE id = $7`,
-        [def.title, def.body, categoryId, def.position, def.isGlobal, def.lang, found[0].id],
+        [def.title, def.body, categoryId, def.position, isGlobal, def.lang, found[0].id],
       );
       return;
     }
     await this.articleRepo.query(
       `INSERT INTO help_articles (id, tenant_id, category_id, title, body, position, is_published, is_global, lang, seed_key, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, $9, now(), now())`,
-      [randomUUID(), tenantId, categoryId, def.title, def.body, def.position, def.isGlobal, def.lang, def.seedKey],
+      [randomUUID(), tenantId, categoryId, def.title, def.body, def.position, isGlobal, def.lang, def.seedKey],
+    );
+  }
+
+  /**
+   * Deletes seed-managed rows (seed_key NOT NULL on the owner tenant) that are no
+   * longer in the current seed lists — i.e. duplicates created by earlier deploys.
+   * Never touches hand-made content (seed_key IS NULL).
+   */
+  private async pruneOrphans(tenantId: string): Promise<void> {
+    const keepArticleKeys = HELP_ARTICLES.map((a) => a.seedKey);
+    const keepCategoryKeys = HELP_CATEGORIES.map((c) => c.seedKey);
+
+    await this.articleRepo.query(
+      `DELETE FROM help_articles
+        WHERE seed_key IS NOT NULL AND tenant_id = $1 AND NOT (seed_key = ANY($2))`,
+      [tenantId, keepArticleKeys.length ? keepArticleKeys : ['']],
+    );
+
+    // Detach any remaining articles pointing at categories we are about to remove.
+    await this.articleRepo.query(
+      `UPDATE help_articles SET category_id = NULL
+        WHERE category_id IN (
+          SELECT id FROM help_categories
+           WHERE seed_key IS NOT NULL AND tenant_id = $1 AND NOT (seed_key = ANY($2))
+        )`,
+      [tenantId, keepCategoryKeys.length ? keepCategoryKeys : ['']],
+    );
+
+    await this.categoryRepo.query(
+      `DELETE FROM help_categories
+        WHERE seed_key IS NOT NULL AND tenant_id = $1 AND NOT (seed_key = ANY($2))`,
+      [tenantId, keepCategoryKeys.length ? keepCategoryKeys : ['']],
     );
   }
 }
