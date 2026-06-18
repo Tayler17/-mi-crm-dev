@@ -27,6 +27,9 @@ export class Deal extends BaseTenantEntity {
   @Column({ name: 'closed_at', type: 'timestamptz', nullable: true })
   closedAt: Date;
 
+  @Column({ name: 'expected_close_date', type: 'date', nullable: true })
+  expectedCloseDate: string | null;
+
   @Column({ name: 'contact_id', nullable: true })
   contactId: string;
 

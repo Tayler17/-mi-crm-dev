@@ -41,6 +41,10 @@ export class CreateDealDto {
   @IsOptional()
   closedAt?: string;
 
+  @IsDateString()
+  @IsOptional()
+  expectedCloseDate?: string;
+
   @IsString()
   @IsOptional()
   notes?: string;
@@ -83,9 +87,17 @@ export class UpdateDealDto {
   @IsOptional()
   closedAt?: string;
 
+  @IsDateString()
+  @IsOptional()
+  expectedCloseDate?: string;
+
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsUUID()
+  @IsOptional()
+  assignedTo?: string;
 }
 
 export class UpdateDealStageDto {

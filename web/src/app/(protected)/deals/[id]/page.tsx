@@ -62,7 +62,7 @@ function EditModal({ deal, onSave, onClose }: { deal: any; onSave: (d: any) => P
     value: deal.value || '',
     status: deal.status || 'active',
     priority: deal.priority || 'medium',
-    expectedCloseDate: deal.expected_close_date ? deal.expected_close_date.slice(0, 10) : '',
+    expectedCloseDate: (deal.expected_close_date || (deal as any).expectedCloseDate || '').slice(0, 10),
     notes: deal.notes || '',
     contactId: deal.contact_id || deal.contactId || '',
     companyId: deal.company_id || deal.companyId || '',
@@ -86,6 +86,7 @@ function EditModal({ deal, onSave, onClose }: { deal: any; onSave: (d: any) => P
         ...form,
         contactId: form.contactId || null,
         companyId: form.companyId || null,
+        expectedCloseDate: form.expectedCloseDate || null,
       });
       onClose();
     }

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, FindManyOptions } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -8,7 +8,7 @@ import { UpdateDealStageDto } from './dto/deal.dto';
 import { AuditService } from '../audit/audit.service';
 
 @Injectable()
-export class DealsService extends BaseTenantService<Deal> {
+export class DealsService extends BaseTenantService<Deal> implements OnModuleInit {
   constructor(
     @InjectRepository(Deal)
     private readonly dealsRepo: Repository<Deal>,
@@ -16,6 +16,12 @@ export class DealsService extends BaseTenantService<Deal> {
     protected readonly eventEmitter: EventEmitter2,
   ) {
     super(dealsRepo, auditService, eventEmitter);
+  }
+
+  async onModuleInit() {
+    // "Fecha estimada de cierre" exists in the UI but had no column → deal edits
+    // failed validation. Add it (no migrations in this project).
+    await this.dealsRepo.query(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS expected_close_date DATE`).catch(() => {});
   }
 
   findAll(tenantId: string, options?: FindManyOptions<Deal>): Promise<Deal[]> {
