@@ -72,12 +72,14 @@ export class CallBotMediaStreamService {
       sendToTwilio({ event: 'clear', streamSid });
     };
 
-    /** ElevenLabs streaming TTS (ulaw_8000) → Twilio media frames. */
-    const speak = async (text: string) => {
+    /** ElevenLabs streaming TTS (ulaw_8000) → Twilio media frames.
+     *  Returns the estimated playback duration in ms (so a hang-up can wait for
+     *  the farewell to finish playing instead of cutting it off). */
+    const speak = async (text: string): Promise<number> => {
       const clean = (text ?? '').trim();
-      if (!clean || closed) return;
+      if (!clean || closed) return 0;
       const elevenKey = (await this.platformSettings.get('elevenlabs.api_key').catch(() => '')) as string;
-      if (!elevenKey) { this.logger.warn('[media-stream] no ElevenLabs key; cannot speak'); return; }
+      if (!elevenKey) { this.logger.warn('[media-stream] no ElevenLabs key; cannot speak'); return 0; }
       const voiceId = bot?.tts_voice_id || '21m00Tcm4TlvDq8ikWAM';
 
       speaking = true;
@@ -120,6 +122,7 @@ export class CallBotMediaStreamService {
           const playMs = Math.ceil((bytes / 8000) * 1000) + 300;
           if (speakTimer) clearTimeout(speakTimer);
           speakTimer = setTimeout(() => { speaking = false; speakTimer = null; }, playMs);
+          return playMs;
         }
       } catch (e: any) {
         speaking = false;
@@ -127,6 +130,7 @@ export class CallBotMediaStreamService {
           this.logger.warn(`[media-stream] TTS failed: ${e.message}`);
         }
       }
+      return 0;
     };
 
     /** A finished user utterance → LLM reply → speak. */
@@ -140,8 +144,10 @@ export class CallBotMediaStreamService {
       stopSpeaking();
       this.twilio.generateVoiceReply(bot, callSid, text, aiCfg!)
         .then(async ({ text: spoken, hangup }) => {
-          if (spoken) await speak(spoken);
-          if (hangup) setTimeout(() => { try { twilioWs.close(); } catch { /* ignore */ } }, 1500);
+          let playMs = 0;
+          if (spoken) playMs = await speak(spoken);
+          // Wait for the farewell to finish PLAYING before hanging up (was cutting off).
+          if (hangup) setTimeout(() => { try { twilioWs.close(); } catch { /* ignore */ } }, playMs + 800);
         })
         .catch((e) => this.logger.warn(`[media-stream] reply failed: ${e.message}`))
         .finally(() => { clearTimeout(watchdog); processing = false; });

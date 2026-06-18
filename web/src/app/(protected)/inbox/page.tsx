@@ -677,6 +677,13 @@ export default function InboxPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
+    // Open an existing conversation directly (e.g. from a contact's profile)
+    const openConv = params.get('conversation');
+    if (openConv) {
+      selectConv(openConv);
+      window.history.replaceState({}, '', '/inbox'); // clean URL so refresh doesn't re-trigger
+      return;
+    }
     const cid = params.get('contactId');
     if (!cid) return;
     const cname = params.get('contactName') ?? '';
@@ -1119,7 +1126,8 @@ export default function InboxPage() {
                     maxWidth: '82%',
                     padding: '6px 10px',
                     borderRadius: t.role === 'bot' ? '12px 4px 12px 12px' : '4px 12px 12px 12px',
-                    background: t.role === 'bot' ? 'var(--primary)' : 'var(--bg-alt, #f3f4f6)',
+                    background: t.role === 'bot' ? 'var(--primary)' : 'var(--surface)',
+                    border: t.role === 'bot' ? 'none' : '1px solid var(--border)',
                     color: t.role === 'bot' ? '#fff' : 'var(--text)',
                     fontSize: 13,
                     lineHeight: 1.4,

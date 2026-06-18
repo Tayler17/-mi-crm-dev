@@ -229,7 +229,8 @@ export default function ContactProfilePage() {
   );
 
   const c = profile.contact;
-  const name = c.fullName || i.ctctNoName;
+  const name = c.fullName || (c as any).full_name || i.ctctNoName;
+  const createdAt = c.createdAt || (c as any).created_at;
   const assignedTags = profile.tags ?? [];
   const unassignedTags = allTags.filter((t) => !assignedTags.find((at) => at.id === t.id));
   const totalDealValue = profile.deals.filter((d) => !['won','lost'].includes(d.status)).reduce((s, d) => s + Number(d.value || 0), 0);
@@ -284,7 +285,7 @@ export default function ContactProfilePage() {
               {c.website && (
                 <a href={c.website} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: 'var(--primary)', textDecoration: 'none' }}>🌐 {c.website}</a>
               )}
-              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>📅 {fmtDate(c.createdAt, i.locale)}</span>
+              {createdAt && <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>📅 {fmtDate(createdAt, i.locale)}</span>}
             </div>
 
             {/* Tags row */}
@@ -297,9 +298,9 @@ export default function ContactProfilePage() {
               ))}
               <div style={{ position: 'relative' }}>
                 <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setShowTagPicker(!showTagPicker)}>+ Tag</button>
-                {showTagPicker && unassignedTags.length > 0 && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', padding: 8, minWidth: 160, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {unassignedTags.map((tag) => (
+                {showTagPicker && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', padding: 8, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {unassignedTags.length > 0 ? unassignedTags.map((tag) => (
                       <button key={tag.id} onClick={() => handleAddTag(tag)}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', padding: '4px 8px', borderRadius: 6, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
                         onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-secondary)')}
@@ -307,7 +308,11 @@ export default function ContactProfilePage() {
                         <span style={{ width: 10, height: 10, borderRadius: '50%', background: tag.color, flexShrink: 0 }} />
                         {tag.name}
                       </button>
-                    ))}
+                    )) : (
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 8px' }}>
+                        {allTags.length === 0 ? 'No hay tags. Créalos en Configuración → Tags.' : 'Todos los tags ya están asignados.'}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -388,7 +393,7 @@ export default function ContactProfilePage() {
               const sc = CONV_STATUS_COLORS[conv.status] ?? { color: '#6b7280' };
               const label = convStatusLabels[conv.status] ?? conv.status;
               return (
-                <div key={conv.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                <div key={conv.id} onClick={() => router.push(`/inbox?conversation=${conv.id}`)} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 13 }}>{CHANNEL_ICON[conv.inbox?.channelType] ?? '💬'} {conv.inbox?.name ?? 'Inbox'}</span>
                     <span style={{ fontSize: 11, fontWeight: 600, color: sc.color }}>{label}</span>
@@ -452,7 +457,7 @@ export default function ContactProfilePage() {
             const sc = CONV_STATUS_COLORS[conv.status] ?? { color: '#6b7280' };
             const label = convStatusLabels[conv.status] ?? conv.status;
             return (
-              <div key={conv.id} className="card" style={{ padding: '12px 16px' }}>
+              <div key={conv.id} className="card" onClick={() => router.push(`/inbox?conversation=${conv.id}`)} style={{ padding: '12px 16px', cursor: 'pointer' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <span style={{ fontSize: 20 }}>{CHANNEL_ICON[conv.inbox?.channelType] ?? '💬'}</span>
