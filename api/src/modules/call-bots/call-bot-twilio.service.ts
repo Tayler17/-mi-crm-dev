@@ -387,19 +387,6 @@ export class CallBotTwilioService {
       return twiml(`<Say>This service is not available. Goodbye.</Say><Hangup/>`);
     }
 
-    // Real-time mode (Media Streams): hand the call audio to our WebSocket.
-    // The whole conversation is then driven by CallBotMediaStreamService.
-    if (bot.streaming_mode) {
-      const wssUrl = baseUrl.replace(/^http/i, 'ws') + '/call-bots/twilio/media-stream';
-      return twiml(`
-        <Connect>
-          <Stream url="${wssUrl}">
-            <Parameter name="botId" value="${botId}"/>
-          </Stream>
-        </Connect>
-      `);
-    }
-
     this.callLastSeen.set(callSid, Date.now());
 
     // Check if this is a transferred call (same callSid re-entering from <Redirect>)
@@ -456,6 +443,20 @@ export class CallBotTwilioService {
       this.logger.log(`[callbot] Call ${callSid} identified contact "${contact.name}" (${contact.id}) transferred=${isTransferredCall}`);
     } else {
       this.logger.log(`[callbot] Call ${callSid} from ${from} — no CRM contact found (transferred=${isTransferredCall})`);
+    }
+
+    // Real-time mode (Media Streams): hand the call audio to our WebSocket.
+    // Done AFTER contact resolution so callMeta carries the contact → the
+    // conversation/call-log link to the right CRM contact, not "No contact".
+    if (bot.streaming_mode) {
+      const wssUrl = baseUrl.replace(/^http/i, 'ws') + '/call-bots/twilio/media-stream';
+      return twiml(`
+        <Connect>
+          <Stream url="${wssUrl}">
+            <Parameter name="botId" value="${botId}"/>
+          </Stream>
+        </Connect>
+      `);
     }
 
     // Initialize conversation history with enriched system prompt
@@ -809,8 +810,15 @@ ${addTagInstruction}
     aiCfg: { apiKey: string; provider: string; model: string },
   ): Promise<{ text: string; hangup: boolean; transfer: boolean }> {
     if (!this.callHistories.has(sessionId)) {
-      this.callHistories.set(sessionId, [{ role: 'system', content: bot.system_prompt ?? '' }]);
-      this.callMeta.set(sessionId, { contactId: null, tenantId: bot.tenant_id, botId: bot.id });
+      const isEs = bot.language?.startsWith('es') ?? true;
+      const hangupRule = isEs
+        ? '\n\nIMPORTANTE: Cuando el cliente se despida o dé por terminada la conversación (ej. "gracias, adiós", "eso es todo", "hasta luego"), responde una despedida breve y termina tu mensaje con [HANGUP].'
+        : '\n\nIMPORTANT: When the caller says goodbye or ends the conversation, reply with a short farewell and end your message with [HANGUP].';
+      this.callHistories.set(sessionId, [{ role: 'system', content: (bot.system_prompt ?? '') + hangupRule }]);
+      // Keep the contact resolved by handleIncomingCall; only default if missing.
+      if (!this.callMeta.has(sessionId)) {
+        this.callMeta.set(sessionId, { contactId: null, tenantId: bot.tenant_id, botId: bot.id });
+      }
     }
     // Build the transcript so the call_log + inbox conversation get saved on call end
     // (the status-callback finalizer reads callTranscripts[CallSid]).
