@@ -315,17 +315,22 @@ export class WhatsappWebService implements OnModuleInit {
     try {
       const result = await session.sock.sendMessage(remoteJid, { text });
       // Mark the last inbound message from this JID as read now that we've replied
-      const pending = this.pendingReadKeys.get(connectionId);
-      if (pending?.has(remoteJid)) {
-        const key = pending.get(remoteJid)!;
-        pending.delete(remoteJid);
-        try { await session.sock.readMessages([key]); } catch {}
-      }
+      await this.markPendingRead(connectionId, remoteJid);
       return result?.key?.id ?? true as any;
     } catch (e: any) {
       this.logger.error(`sendMessage failed for ${connectionId}: ${e.message}`);
       return false;
     }
+  }
+
+  /** Mark the last inbound message from this JID as read (WhatsApp blue ticks). */
+  private async markPendingRead(connectionId: string, remoteJid: string): Promise<void> {
+    const session = this.sessions.get(connectionId);
+    const pending = this.pendingReadKeys.get(connectionId);
+    if (!session?.sock || !pending?.has(remoteJid)) return;
+    const key = pending.get(remoteJid)!;
+    pending.delete(remoteJid);
+    try { await session.sock.readMessages([key]); } catch {}
   }
 
   /** Send a media file through an active WhatsApp Web session */
@@ -373,6 +378,8 @@ export class WhatsappWebService implements OnModuleInit {
       } else {
         result = await session.sock.sendMessage(remoteJid, { document: buffer, mimetype, fileName: filename, caption: caption ?? '' });
       }
+      // Replying with media also attends the conversation → mark inbound as read.
+      await this.markPendingRead(connectionId, remoteJid);
       return result?.key?.id ?? true as any;
     } catch (e: any) {
       this.logger.error(`sendFile failed for ${connectionId}: ${e.message}`);
