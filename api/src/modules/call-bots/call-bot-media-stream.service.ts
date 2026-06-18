@@ -170,6 +170,10 @@ export class CallBotMediaStreamService {
       dgWs.on('message', (raw: RawData) => {
         let msg: any;
         try { msg = JSON.parse(raw.toString()); } catch { return; }
+        // Diagnostic: surface anything Deepgram sends that isn't a routine result
+        // (Metadata, errors, warnings) — to spot credit/auth issues vs no-audio.
+        if (msg.type && msg.type !== 'Results') this.logger.log(`[media-stream] Deepgram msg type=${msg.type}${msg.description ? ' desc=' + msg.description : ''}`);
+        if (msg.type === 'Metadata' || msg.error || msg.message) this.logger.log(`[media-stream] Deepgram meta=${JSON.stringify(msg).slice(0, 200)}`);
         // NOTE: we deliberately do NOT barge-in on SpeechStarted (raw VAD) — it
         // fired on any noise (keyboard, objects) and cut the bot off. We only
         // interrupt when Deepgram actually recognizes WORDS (below).
@@ -191,7 +195,10 @@ export class CallBotMediaStreamService {
         if (msg.type === 'UtteranceEnd') flushUtterance();
       });
       dgWs.on('error', (e) => this.logger.warn(`[media-stream] Deepgram error: ${(e as any).message}`));
-      dgWs.on('close', () => { dgWs = null; });
+      dgWs.on('close', (code: number, reason: Buffer) => {
+        this.logger.warn(`[media-stream] Deepgram closed code=${code} reason=${reason?.toString() || '(none)'}`);
+        dgWs = null;
+      });
     };
 
     const cleanup = () => {
