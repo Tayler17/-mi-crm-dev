@@ -84,6 +84,7 @@ function EditModal({ deal, onSave, onClose }: { deal: any; onSave: (d: any) => P
     try {
       await onSave({
         ...form,
+        value: form.value === '' || form.value === null || isNaN(Number(form.value)) ? 0 : Number(form.value),
         contactId: form.contactId || null,
         companyId: form.companyId || null,
         expectedCloseDate: form.expectedCloseDate || null,
