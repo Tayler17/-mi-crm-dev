@@ -497,6 +497,9 @@ export class MessagesController {
             secure,
             auth: creds.user ? { user: String(creds.user).trim(), pass: String(creds.password ?? '') } : undefined,
             tls: { rejectUnauthorized: false },
+            connectionTimeout: 10000,
+            greetingTimeout: 8000,
+            socketTimeout: 15000,
           });
 
           const fromName = creds.fromName || 'Soporte';
@@ -522,15 +525,20 @@ export class MessagesController {
             textBody = cap || '';
           }
 
-          const info = await transport.sendMail({
-            from: fromAddr ? `${fromName} <${fromAddr}>` : fromName,
-            to: toEmail,
-            subject,
-            text: textBody || ' ',
-            html: textBody ? textBody.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') : undefined,
-            attachments,
-            ...threadRefs,
-          });
+          let info: any;
+          try {
+            info = await transport.sendMail({
+              from: fromAddr ? `${fromName} <${fromAddr}>` : fromName,
+              to: toEmail,
+              subject,
+              text: textBody || ' ',
+              html: textBody ? textBody.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') : undefined,
+              attachments,
+              ...threadRefs,
+            });
+          } finally {
+            transport.close(); // release the SMTP connection (Hostinger limits concurrent connections)
+          }
 
           console.log(`[email-send] sent ok id=${info?.messageId} accepted=${JSON.stringify(info?.accepted)} rejected=${JSON.stringify(info?.rejected)}`);
 
