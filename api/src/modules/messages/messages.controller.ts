@@ -45,6 +45,42 @@ export class MessagesController {
     return this.service.findByConversation(cid, tenantId);
   }
 
+  /** Best-effort: store a copy of a sent email in the mailbox "Sent" folder via IMAP. */
+  private async appendToSent(creds: any, mailOptions: any): Promise<void> {
+    try {
+      if (!creds?.imapHost && !creds?.host) return;
+      const MailComposer = (await import('nodemailer/lib/mail-composer')).default as any;
+      const raw: Buffer = await new MailComposer(mailOptions).compile().build();
+
+      const { ImapFlow } = await import('imapflow' as any);
+      const imapPort = Number(creds.imapPort) || 993;
+      const client = new ImapFlow({
+        host: String(creds.imapHost || creds.host).trim(),
+        port: imapPort,
+        secure: imapPort !== 143,
+        auth: { user: String(creds.imapUser || creds.user).trim(), pass: String(creds.imapPassword || creds.password || '') },
+        logger: false,
+        tls: { rejectUnauthorized: false },
+      });
+      await client.connect();
+      try {
+        // Resolve the Sent mailbox: prefer the \Sent special-use, else common names.
+        let sentBox = 'Sent';
+        try {
+          const boxes: any[] = await client.list();
+          const found = boxes.find((b) => b.specialUse === '\\Sent')
+            || boxes.find((b) => /^(INBOX\.)?Sent( Items| Messages)?$/i.test(b.path));
+          if (found) sentBox = found.path;
+        } catch { /* use default */ }
+        await client.append(sentBox, raw, ['\\Seen']);
+      } finally {
+        await client.logout().catch(() => {});
+      }
+    } catch (e: any) {
+      console.error(`[email-sent-copy] ${e.message}`);
+    }
+  }
+
   /** Append the agent's signature to an outbound text body, per channel. */
   private async applySignature(conversationId: string, tenantId: string, userId: string | undefined, body: string): Promise<string> {
     if (!userId) return body;
@@ -561,6 +597,19 @@ export class MessagesController {
           if (messageId && info?.messageId) {
             await this.db.query(`UPDATE messages SET external_id=$1 WHERE id=$2`, [info.messageId, messageId]).catch(() => {});
           }
+
+          // Best-effort: save a copy to the mailbox "Sent" folder (fire-and-forget,
+          // never blocks or fails the send).
+          void this.appendToSent(creds, {
+            from: fromAddr ? `${fromName} <${fromAddr}>` : fromName,
+            to: toEmail,
+            subject,
+            text: textBody || ' ',
+            html: textBody ? textBody.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') : undefined,
+            attachments,
+            messageId: info?.messageId,
+            ...threadRefs,
+          });
           break;
         }
 
