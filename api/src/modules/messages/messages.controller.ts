@@ -368,7 +368,8 @@ export class MessagesController {
     try {
       const [conv] = await this.db.query(
         `SELECT c.channel_type, c.connection_id, c.external_id, c.subject,
-                cc.channel_type AS conn_channel_type, cc.credentials
+                cc.channel_type AS conn_channel_type, cc.credentials,
+                (SELECT email FROM contacts ct WHERE ct.id = c.contact_id) AS contact_email
          FROM conversations c
          LEFT JOIN channel_connections cc ON cc.id = c.connection_id
          WHERE c.id = $1 AND c.tenant_id = $2 LIMIT 1`,
@@ -479,7 +480,8 @@ export class MessagesController {
         }
 
         case 'email': {
-          const toEmail = conv.external_id;
+          // Email conversations may have no external_id; the recipient is the contact's email.
+          const toEmail = conv.external_id || conv.contact_email;
           const creds = conv.credentials ?? {};
           if (!toEmail || !creds.host) {
             console.error(`[email-send] cannot send: to=${toEmail ?? 'null'} host=${creds.host ?? 'null'} connId=${conv.connection_id ?? 'null'} conv=${conversationId}`);

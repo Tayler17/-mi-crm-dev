@@ -122,10 +122,10 @@ export class EmailPollerService {
     } else {
       const [nc] = await this.db.query(
         `INSERT INTO conversations
-           (id, tenant_id, inbox_id, contact_id, connection_id, channel_type, subject, status, created_at, updated_at)
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, 'email', $5, 'open', NOW(), NOW())
+           (id, tenant_id, inbox_id, contact_id, connection_id, channel_type, external_id, subject, status, created_at, updated_at)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, 'email', $5, $6, 'open', NOW(), NOW())
          RETURNING id`,
-        [conn.tenant_id, conn.inbox_id, contactId, conn.id, subject],
+        [conn.tenant_id, conn.inbox_id, contactId, conn.id, fromEmail, subject],
       );
       convId = nc.id;
     }
