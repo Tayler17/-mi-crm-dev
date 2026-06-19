@@ -481,7 +481,11 @@ export class MessagesController {
         case 'email': {
           const toEmail = conv.external_id;
           const creds = conv.credentials ?? {};
-          if (!toEmail || !creds.host) return;
+          if (!toEmail || !creds.host) {
+            console.error(`[email-send] cannot send: to=${toEmail ?? 'null'} host=${creds.host ?? 'null'} connId=${conv.connection_id ?? 'null'} conv=${conversationId}`);
+            return;
+          }
+          console.log(`[email-send] sending to=${toEmail} host=${creds.host} port=${creds.port}`);
 
           const nodemailer = await import('nodemailer');
           const secure = String(creds.encryption ?? '').toUpperCase() === 'SSL' || Number(creds.port) === 465;
@@ -525,6 +529,8 @@ export class MessagesController {
             attachments,
             ...threadRefs,
           });
+
+          console.log(`[email-send] sent ok id=${info?.messageId} accepted=${JSON.stringify(info?.accepted)} rejected=${JSON.stringify(info?.rejected)}`);
 
           // Store the sent Message-ID so the next reply threads correctly.
           if (messageId && info?.messageId) {
