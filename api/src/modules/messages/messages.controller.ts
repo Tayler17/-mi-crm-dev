@@ -49,8 +49,12 @@ export class MessagesController {
   private async appendToSent(creds: any, mailOptions: any): Promise<void> {
     try {
       if (!creds?.imapHost && !creds?.host) return;
-      const MailComposer = (await import('nodemailer/lib/mail-composer')).default as any;
-      const raw: Buffer = await new MailComposer(mailOptions).compile().build();
+      // nodemailer's MailComposer is a CommonJS class (module.exports = MailComposer).
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const MailComposer: any = require('nodemailer/lib/mail-composer');
+      const raw: Buffer = await new Promise((resolve, reject) =>
+        new MailComposer(mailOptions).compile().build((err: any, msg: Buffer) => (err ? reject(err) : resolve(msg))),
+      );
 
       const { ImapFlow } = await import('imapflow' as any);
       const imapPort = Number(creds.imapPort) || 993;
