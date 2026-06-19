@@ -356,6 +356,8 @@ export const APP: Record<LangCode, {
   inbxActiveFilter: string; inbxActiveFilters: string; inbxClear: string;
   inbxMarkResolved: string; inbxPreview: string;
   inbxMsgTab: string; inbxNoteTab: string;
+  inbxReply: string; inbxCancelReply: string;
+  ctImage: string; ctVoice: string; ctVideo: string; ctFile: string; ctCall: string;
   inbxSearchResp: string; inbxVarsAvail: string; inbxClickCopy: string;
   inbxAttach: string; inbxExportPdf: string; inbxScheduleFor: string; inbxCancelSchedule: string;
   inbxScheduleMsg: string; inbxMsgHint: string; inbxNoteHint: string;
@@ -857,6 +859,8 @@ export const APP: Record<LangCode, {
     inbxActiveFilter: 'filtro activo', inbxActiveFilters: 'filtros activos', inbxClear: '× Limpiar',
     inbxMarkResolved: 'Marcar como resuelta', inbxPreview: 'Vista previa',
     inbxMsgTab: 'Mensaje', inbxNoteTab: '📝 Nota interna',
+    inbxReply: 'Responder', inbxCancelReply: 'Cancelar',
+    ctImage: 'Imagen', ctVoice: 'Nota de voz', ctVideo: 'Video', ctFile: 'Archivo', ctCall: 'Llamada',
     inbxSearchResp: 'Buscar respuesta…', inbxVarsAvail: 'Variables disponibles:', inbxClickCopy: 'Clic para copiar',
     inbxAttach: 'Adjuntar archivo', inbxExportPdf: 'Exportar como PDF', inbxScheduleFor: 'Programar para después', inbxCancelSchedule: 'Cancelar programación',
     inbxScheduleMsg: 'Escribe el mensaje a programar…', inbxMsgHint: 'Escribe un mensaje… (Enter envía, Shift+Enter nueva línea)', inbxNoteHint: 'Nota interna — solo visible para el equipo…',
@@ -1301,6 +1305,8 @@ export const APP: Record<LangCode, {
     inbxActiveFilter: 'active filter', inbxActiveFilters: 'active filters', inbxClear: '× Clear',
     inbxMarkResolved: 'Mark as resolved', inbxPreview: 'Preview',
     inbxMsgTab: 'Message', inbxNoteTab: '📝 Internal note',
+    inbxReply: 'Reply', inbxCancelReply: 'Cancel',
+    ctImage: 'Image', ctVoice: 'Voice note', ctVideo: 'Video', ctFile: 'File', ctCall: 'Call',
     inbxSearchResp: 'Search response…', inbxVarsAvail: 'Available variables:', inbxClickCopy: 'Click to copy',
     inbxAttach: 'Attach file', inbxExportPdf: 'Export as PDF', inbxScheduleFor: 'Schedule for later', inbxCancelSchedule: 'Cancel schedule',
     inbxScheduleMsg: 'Write the message to schedule…', inbxMsgHint: 'Write a message… (Enter sends, Shift+Enter new line)', inbxNoteHint: 'Internal note — only visible to the team…',
@@ -1745,6 +1751,8 @@ export const APP: Record<LangCode, {
     inbxActiveFilter: 'filtro ativo', inbxActiveFilters: 'filtros ativos', inbxClear: '× Limpar',
     inbxMarkResolved: 'Marcar como resolvida', inbxPreview: 'Visualização',
     inbxMsgTab: 'Mensagem', inbxNoteTab: '📝 Nota interna',
+    inbxReply: 'Responder', inbxCancelReply: 'Cancelar',
+    ctImage: 'Imagem', ctVoice: 'Nota de voz', ctVideo: 'Vídeo', ctFile: 'Arquivo', ctCall: 'Chamada',
     inbxSearchResp: 'Buscar resposta…', inbxVarsAvail: 'Variáveis disponíveis:', inbxClickCopy: 'Clique para copiar',
     inbxAttach: 'Anexar arquivo', inbxExportPdf: 'Exportar como PDF', inbxScheduleFor: 'Agendar para depois', inbxCancelSchedule: 'Cancelar agendamento',
     inbxScheduleMsg: 'Escreva a mensagem a agendar…', inbxMsgHint: 'Escreva uma mensagem… (Enter envia, Shift+Enter nova linha)', inbxNoteHint: 'Nota interna — visível apenas para a equipe…',
@@ -2189,6 +2197,8 @@ export const APP: Record<LangCode, {
     inbxActiveFilter: 'aktif filtre', inbxActiveFilters: 'aktif filtre', inbxClear: '× Temizle',
     inbxMarkResolved: 'Çözüldü olarak işaretle', inbxPreview: 'Önizleme',
     inbxMsgTab: 'Mesaj', inbxNoteTab: '📝 İç not',
+    inbxReply: 'Yanıtla', inbxCancelReply: 'İptal',
+    ctImage: 'Görsel', ctVoice: 'Sesli not', ctVideo: 'Video', ctFile: 'Dosya', ctCall: 'Arama',
     inbxSearchResp: 'Yanıt ara…', inbxVarsAvail: 'Mevcut değişkenler:', inbxClickCopy: 'Kopyalamak için tıklayın',
     inbxAttach: 'Dosya ekle', inbxExportPdf: 'PDF olarak dışa aktar', inbxScheduleFor: 'Sonraya planla', inbxCancelSchedule: 'Planlamayı iptal et',
     inbxScheduleMsg: 'Planlanacak mesajı yazın…', inbxMsgHint: 'Mesaj yazın… (Enter gönderir, Shift+Enter yeni satır)', inbxNoteHint: 'İç not — yalnızca ekibe görünür…',
@@ -2633,6 +2643,8 @@ export const APP: Record<LangCode, {
     inbxActiveFilter: 'فلتر نشط', inbxActiveFilters: 'فلاتر نشطة', inbxClear: '× مسح',
     inbxMarkResolved: 'تعيين كمحلولة', inbxPreview: 'معاينة',
     inbxMsgTab: 'رسالة', inbxNoteTab: '📝 ملاحظة داخلية',
+    inbxReply: 'رد', inbxCancelReply: 'إلغاء',
+    ctImage: 'صورة', ctVoice: 'رسالة صوتية', ctVideo: 'فيديو', ctFile: 'ملف', ctCall: 'مكالمة',
     inbxSearchResp: 'بحث في الردود…', inbxVarsAvail: 'المتغيرات المتاحة:', inbxClickCopy: 'انقر للنسخ',
     inbxAttach: 'إرفاق ملف', inbxExportPdf: 'تصدير PDF', inbxScheduleFor: 'جدولة لوقت لاحق', inbxCancelSchedule: 'إلغاء الجدولة',
     inbxScheduleMsg: 'اكتب الرسالة المجدولة…', inbxMsgHint: 'اكتب رسالة… (Enter للإرسال، Shift+Enter لسطر جديد)', inbxNoteHint: 'ملاحظة داخلية — مرئية للفريق فقط…',

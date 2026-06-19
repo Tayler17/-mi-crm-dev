@@ -649,7 +649,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                   <button style={dropItemStyle} onClick={() => { setUserMenuOpen(false); setProfileName(user?.fullName ?? ''); setProfileAvatar(user?.avatarUrl ?? ''); setProfileOpen(true); }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}>
-                    👤 {lang === 'en' ? 'My profile' : lang === 'pt' ? 'Meu perfil' : 'Mi perfil'}
+                    👤 {lang === 'en' ? 'My profile' : lang === 'pt' ? 'Meu perfil' : lang === 'tr' ? 'Profilim' : lang === 'ar' ? 'ملفي الشخصي' : 'Mi perfil'}
                   </button>
 
                   <button style={dropItemStyle} onClick={() => { setUserMenuOpen(false); toggleNotif(); }}
@@ -692,7 +692,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
           <div style={{ background: 'var(--surface)', borderRadius: 14, padding: 28, width: 360, maxWidth: 'calc(100vw - 32px)', boxShadow: '0 8px 40px rgba(0,0,0,.25)' }}
             onClick={(e) => e.stopPropagation()}>
             <h3 style={{ margin: '0 0 20px', fontSize: 16, fontWeight: 700 }}>
-              👤 {lang === 'en' ? 'My profile' : lang === 'pt' ? 'Meu perfil' : 'Mi perfil'}
+              👤 {lang === 'en' ? 'My profile' : lang === 'pt' ? 'Meu perfil' : lang === 'tr' ? 'Profilim' : lang === 'ar' ? 'ملفي الشخصي' : 'Mi perfil'}
             </h3>
 
             {/* Avatar */}
@@ -710,7 +710,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                 <label className="btn btn-secondary" style={{ cursor: 'pointer', fontSize: 12 }}>
                   {avatarUploading
                     ? '⏳ …'
-                    : (lang === 'en' ? '📷 Upload photo' : lang === 'pt' ? '📷 Enviar foto' : '📷 Subir foto')}
+                    : (lang === 'en' ? '📷 Upload photo' : lang === 'pt' ? '📷 Enviar foto' : lang === 'tr' ? '📷 Fotoğraf yükle' : lang === 'ar' ? '📷 تحميل صورة' : '📷 Subir foto')}
                   <input
                     type="file"
                     accept="image/*"
@@ -741,14 +741,14 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                 {profileAvatar && (
                   <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--danger, #ef4444)' }}
                     onClick={() => setProfileAvatar('')}>
-                    {lang === 'en' ? 'Remove' : lang === 'pt' ? 'Remover' : 'Quitar'}
+                    {lang === 'en' ? 'Remove' : lang === 'pt' ? 'Remover' : lang === 'tr' ? 'Kaldır' : lang === 'ar' ? 'إزالة' : 'Quitar'}
                   </button>
                 )}
               </div>
             </div>
 
             <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-              {lang === 'en' ? 'Full name' : lang === 'pt' ? 'Nome completo' : 'Nombre completo'}
+              {lang === 'en' ? 'Full name' : lang === 'pt' ? 'Nome completo' : lang === 'tr' ? 'Ad soyad' : lang === 'ar' ? 'الاسم الكامل' : 'Nombre completo'}
             </label>
             <input
               className="form-input"
@@ -759,7 +759,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button className="btn btn-secondary" onClick={() => setProfileOpen(false)}>
-                {lang === 'en' ? 'Cancel' : 'Cancelar'}
+                {lang === 'en' ? 'Cancel' : lang === 'pt' ? 'Cancelar' : lang === 'tr' ? 'İptal' : lang === 'ar' ? 'إلغاء' : 'Cancelar'}
               </button>
               <button
                 className="btn btn-primary"
@@ -787,7 +787,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                   } finally { setProfileSaving(false); }
                 }}
               >
-                {profileSaving ? '⏳' : (lang === 'en' ? 'Save' : 'Guardar')}
+                {profileSaving ? '⏳' : (lang === 'en' ? 'Save' : lang === 'pt' ? 'Salvar' : lang === 'tr' ? 'Kaydet' : lang === 'ar' ? 'حفظ' : 'Guardar')}
               </button>
             </div>
           </div>

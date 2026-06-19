@@ -1158,12 +1158,12 @@ export default function InboxPage() {
     if (!body) return '';
     if (/^\/uploads\/\S+/.test(body)) {
       const ext = (body.split('|')[0].split('.').pop() ?? '').toLowerCase();
-      if (/^(jpe?g|png|gif|webp|bmp|heic)$/.test(ext)) return '🖼 Image';
-      if (/^(mp3|ogg|oga|m4a|wav|opus|aac)$/.test(ext)) return '🎤 Voice note';
-      if (/^(mp4|mov|avi|webm|3gp)$/.test(ext)) return '🎬 Video';
-      return '📎 File';
+      if (/^(jpe?g|png|gif|webp|bmp|heic)$/.test(ext)) return '🖼 ' + i.ctImage;
+      if (/^(mp3|ogg|oga|m4a|wav|opus|aac)$/.test(ext)) return '🎤 ' + i.ctVoice;
+      if (/^(mp4|mov|avi|webm|3gp)$/.test(ext)) return '🎬 ' + i.ctVideo;
+      return '📎 ' + i.ctFile;
     }
-    if (body.includes('**Transcript:**')) return '📞 Call';
+    if (body.includes('**Transcript:**')) return '📞 ' + i.ctCall;
     return body.length > 90 ? body.slice(0, 90) + '…' : body;
   }
 
@@ -1728,7 +1728,7 @@ export default function InboxPage() {
                         {!m.isPrivate && !m.deletedAt && editingMsgId !== m.id && m.contentType !== 'activity' && (
                           <span className="msg-actions" style={{ display: 'inline-flex', gap: 6 }}>
                             {!isTranscript && (
-                              <button onClick={() => { setReplyToMsg(m); setComposerTab('message'); textareaRef.current?.focus(); }} title="Responder" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}>↩</button>
+                              <button onClick={() => { setReplyToMsg(m); setComposerTab('message'); textareaRef.current?.focus(); }} title={i.inbxReply} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}>↩</button>
                             )}
                             {m.direction === 'outbound' && !fileUrl && (
                               <button onClick={() => startEditMsg(m)} title="Editar" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}>✎</button>
@@ -1793,7 +1793,7 @@ export default function InboxPage() {
                   <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {quotedPreview(replyToMsg.body)}
                   </div>
-                  <button type="button" onClick={() => setReplyToMsg(null)} title="Cancelar" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--text-muted)' }}>✕</button>
+                  <button type="button" onClick={() => setReplyToMsg(null)} title={i.inbxCancelReply} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--text-muted)' }}>✕</button>
                 </div>
               )}
               {/* Quick Responses dropdown */}
