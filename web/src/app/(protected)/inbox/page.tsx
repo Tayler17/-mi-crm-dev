@@ -709,6 +709,9 @@ export default function InboxPage() {
             const exists = prev.some((m: Message) => m.id === data.message.id);
             return exists ? prev : [...prev, data.message];
           });
+          // A bot may have just engaged (or handed off) → refresh the bot panel
+          // so the activate/deactivate (Take over / Restore) control appears live.
+          getConvBotSession(activeId).then(setBotSession).catch(() => {});
         }
 
         // If it's an inbound message in a NON-active conversation → sound + per-conv unread count
