@@ -133,7 +133,7 @@ tr:hover td { background: var(--bg); }
 .msg { max-width: 70%; }
 .msg-out { align-self: flex-end; }
 .msg-in { align-self: flex-start; }
-.msg-bubble { padding: 10px 14px; border-radius: 10px; font-size: 13.5px; line-height: 1.5; }
+.msg-bubble { padding: 10px 14px; border-radius: 10px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg-out .msg-bubble { background: var(--primary); color: #fff; }
 .msg-in .msg-bubble { background: var(--surface); border: 1px solid var(--border); }
 .msg-note .msg-bubble { background: #fef9c3; border: 1px solid #fde047; color: #713f12; font-style: italic; }

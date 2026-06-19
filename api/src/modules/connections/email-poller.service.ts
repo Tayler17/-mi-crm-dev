@@ -155,6 +155,10 @@ function extractBody(parsed: any, subject: string): string {
     .replace(/_{5,}[\s\S]*$/m, '')             // Outlook separator + everything after
     .replace(/^From:.*\nSent:.*\nTo:.*\nSubject:[^\n]*/im, '') // Inline header block
     .replace(/-{5,}\s*Original Message\s*-{5,}[\s\S]*/i, '')  // "-----Original Message-----"
+    // Plain-text link artifacts: "label<http://url>" → keep the real URL so it
+    // renders as a clean clickable link instead of "label<http://url>".
+    .replace(/\S*<(https?:\/\/[^>\s]+)>/g, '$1')
+    .replace(/<(https?:\/\/[^>\s]+)>/g, '$1')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 

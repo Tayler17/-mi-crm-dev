@@ -1144,13 +1144,19 @@ export default function InboxPage() {
       }
     }
 
-    // Default: handle @mentions
-    const parts = text.split(/(@[\w.]+)/g);
-    return parts.map((p, pIdx) =>
-      /^@[\w.]+$/.test(p)
-        ? <span key={pIdx} style={{ color: 'var(--primary)', fontWeight: 600 }}>{p}</span>
-        : p
-    );
+    // Default: make URLs clickable and highlight @mentions. Line breaks are
+    // preserved by the bubble's white-space: pre-wrap.
+    const parts = text.split(/(https?:\/\/[^\s]+|www\.[^\s]+|@[\w.]+)/g);
+    return parts.map((p, pIdx) => {
+      if (/^https?:\/\//i.test(p) || /^www\./i.test(p)) {
+        const href = p.startsWith('http') ? p : `https://${p}`;
+        return <a key={pIdx} href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>{p}</a>;
+      }
+      if (/^@[\w.]+$/.test(p)) {
+        return <span key={pIdx} style={{ color: 'var(--primary)', fontWeight: 600 }}>{p}</span>;
+      }
+      return p;
+    });
   }
 
   /** Short one-line preview of a message, for the "replying to" quote block. */
