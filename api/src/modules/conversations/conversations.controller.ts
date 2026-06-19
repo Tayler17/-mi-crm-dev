@@ -26,13 +26,15 @@ export class ConversationsController {
   @Get()
   findAll(
     @TenantId() tenantId: string,
+    @Request() req: any,
     @Query('status')     status?: string,
     @Query('assignedTo') assignedTo?: string,
     @Query('inboxId')    inboxId?: string,
     @Query('tagId')      tagId?: string,
     @Query('queueId')    queueId?: string,
   ) {
-    return this.service.findAllEnriched(tenantId, status, assignedTo, inboxId, tagId, queueId);
+    const viewer = req?.user ? { id: req.user.id, role: req.user.role ?? 'agent' } : undefined;
+    return this.service.findAllEnriched(tenantId, status, assignedTo, inboxId, tagId, queueId, viewer);
   }
 
   @Get(':id')

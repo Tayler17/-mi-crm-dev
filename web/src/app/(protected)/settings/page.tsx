@@ -849,7 +849,7 @@ export default function SettingsPage() {
 
   const [form, setForm] = useState({
     name: '', logo_url: '', timezone: 'America/New_York', language: 'es', currency: 'USD',
-    primaryColor: '#6366f1', supportEmail: '', supportPhone: '',
+    primaryColor: '#6366f1', supportEmail: '', supportPhone: '', restrictAgentsToTeams: false,
   });
 
   const [aiKeys, setAiKeys] = useState({ openai: '', anthropic: '', gemini: '' });
@@ -923,6 +923,7 @@ export default function SettingsPage() {
         primaryColor: s.settings?.primaryColor ?? '#6366f1',
         supportEmail: s.settings?.supportEmail ?? '',
         supportPhone: s.settings?.supportPhone ?? '',
+        restrictAgentsToTeams: s.settings?.restrictAgentsToTeams ?? false,
       });
       const keys = s.settings?.aiKeys ?? {};
       setAiKeys({
@@ -1016,6 +1017,7 @@ export default function SettingsPage() {
           primaryColor: form.primaryColor,
           supportEmail: form.supportEmail,
           supportPhone: form.supportPhone,
+          restrictAgentsToTeams: form.restrictAgentsToTeams,
         },
       });
       if (form.primaryColor) localStorage.setItem('primaryColor', form.primaryColor);
@@ -1124,6 +1126,19 @@ export default function SettingsPage() {
             </Row>
             <Row label={i.supportPhoneLabel}>
               <input className="form-input" value={form.supportPhone} onChange={(e) => set('supportPhone', e.target.value)} placeholder="+1 555 000 0000" />
+            </Row>
+            <Row
+              label={lang === 'en' ? 'Restrict agents to their teams' : lang === 'pt' ? 'Restringir agentes às suas equipes' : lang === 'tr' ? 'Temsilcileri ekipleriyle sınırla' : lang === 'ar' ? 'تقييد الوكلاء بفرقهم' : 'Restringir agentes a sus equipos'}
+              hint={lang === 'en' ? 'When on, an agent only sees conversations of their teams/queues (plus unassigned ones). Admins and owner always see everything.'
+                : lang === 'pt' ? 'Quando ativo, um agente só vê as conversas das suas equipes/filas (e as não atribuídas). Admins e owner veem tudo.'
+                : lang === 'tr' ? 'Açıkken, bir temsilci yalnızca kendi ekiplerinin/kuyruklarının (ve atanmamış olanların) görüşmelerini görür. Yöneticiler ve owner her şeyi görür.'
+                : lang === 'ar' ? 'عند التفعيل، يرى الوكيل محادثات فرقه/قوائمه فقط (والمحادثات غير المُسندة). يرى المسؤولون والمالك كل شيء.'
+                : 'Si se activa, cada agente solo verá las conversaciones de sus equipos/colas (y las sin asignar). Admins y owner ven todo.'}
+            >
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={form.restrictAgentsToTeams} onChange={(e) => setForm((f) => ({ ...f, restrictAgentsToTeams: e.target.checked }))} />
+                <span style={{ fontSize: 13 }}>{form.restrictAgentsToTeams ? (lang === 'en' ? 'On' : lang === 'ar' ? 'مُفعّل' : lang === 'tr' ? 'Açık' : 'Activado') : (lang === 'en' ? 'Off' : lang === 'ar' ? 'مُعطّل' : lang === 'tr' ? 'Kapalı' : 'Desactivado')}</span>
+              </label>
             </Row>
           </Section>
 

@@ -69,6 +69,7 @@ export class ConversationsService extends BaseTenantService<Conversation> {
     inboxId?: string,
     tagId?: string,
     queueId?: string,
+    viewer?: { id: string; role: string },
   ) {
     const params: any[] = [tenantId];
     const clauses: string[] = [];
@@ -77,6 +78,26 @@ export class ConversationsService extends BaseTenantService<Conversation> {
     if (assignedTo) { params.push(assignedTo); clauses.push(`c.assigned_to = $${params.length}`); }
     if (inboxId)    { params.push(inboxId);    clauses.push(`c.inbox_id = $${params.length}`); }
     if (queueId)    { params.push(queueId);    clauses.push(`c.queue_id = $${params.length}`); }
+
+    // Team-based visibility: when the tenant enables it, an AGENT only sees
+    // conversations of their teams (or their teams' queues), ones assigned to
+    // them, or still-unassigned ones. Admins/owners always see everything.
+    if (viewer && viewer.role !== 'admin' && viewer.role !== 'owner') {
+      const [t] = await this.convRepo.query(
+        `SELECT settings->>'restrictAgentsToTeams' AS flag FROM tenants WHERE id = $1`,
+        [tenantId],
+      );
+      if (t?.flag === 'true') {
+        params.push(viewer.id);
+        const n = params.length;
+        clauses.push(`(
+          c.assigned_to = $${n} OR c.assigned_user_id = $${n}
+          OR c.team_id IN (SELECT team_id FROM team_members WHERE user_id = $${n})
+          OR c.queue_id IN (SELECT id FROM queues WHERE team_id IN (SELECT team_id FROM team_members WHERE user_id = $${n}))
+          OR (c.team_id IS NULL AND c.queue_id IS NULL)
+        )`);
+      }
+    }
     if (tagId)      {
       params.push(tagId);
       // Match conversations tagged directly OR whose contact has the tag
