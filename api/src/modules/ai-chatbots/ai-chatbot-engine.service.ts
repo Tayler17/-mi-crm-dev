@@ -1167,7 +1167,20 @@ export class AiChatbotEngineService {
       }
       case 'email': {
         const toEmail = conv.external_id || conv.contact_email;
-        const creds = conv.credentials ?? {};
+        let creds = conv.credentials ?? {};
+        if (!creds.host) {
+          const [ec] = await this.db.query(
+            `SELECT id, credentials FROM channel_connections
+              WHERE tenant_id=$1 AND channel_type='email' AND is_active=true
+                AND (credentials->>'host') IS NOT NULL AND (credentials->>'host') != ''
+              ORDER BY updated_at DESC LIMIT 1`,
+            [tenantId],
+          );
+          if (ec?.credentials) {
+            creds = ec.credentials;
+            await this.db.query(`UPDATE conversations SET connection_id=$1 WHERE id=$2 AND connection_id IS NULL`, [ec.id, conversationId]).catch(() => {});
+          }
+        }
         if (!toEmail || !creds.host) {
           this.logger.warn(`[bot email] cannot send: to=${toEmail ?? 'null'} host=${creds.host ?? 'null'} conv=${conversationId}`);
           return;
