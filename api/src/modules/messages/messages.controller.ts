@@ -367,7 +367,7 @@ export class MessagesController {
     }
     try {
       const [conv] = await this.db.query(
-        `SELECT c.channel_type, c.connection_id, c.external_id,
+        `SELECT c.channel_type, c.connection_id, c.external_id, c.subject,
                 cc.channel_type AS conn_channel_type, cc.credentials
          FROM conversations c
          LEFT JOIN channel_connections cc ON cc.id = c.connection_id
@@ -475,6 +475,61 @@ export class MessagesController {
               signal: AbortSignal.timeout(8000),
             },
           ).catch(() => {});
+          break;
+        }
+
+        case 'email': {
+          const toEmail = conv.external_id;
+          const creds = conv.credentials ?? {};
+          if (!toEmail || !creds.host) return;
+
+          const nodemailer = await import('nodemailer');
+          const secure = String(creds.encryption ?? '').toUpperCase() === 'SSL' || Number(creds.port) === 465;
+          const transport = nodemailer.createTransport({
+            host: String(creds.host).trim(),
+            port: Number(creds.port) || 587,
+            secure,
+            auth: creds.user ? { user: String(creds.user).trim(), pass: String(creds.password ?? '') } : undefined,
+            tls: { rejectUnauthorized: false },
+          });
+
+          const fromName = creds.fromName || 'Soporte';
+          const fromAddr = String(creds.user || '').trim();
+          const baseSubject = conv.subject && conv.subject !== '(sin asunto)' ? conv.subject : 'Mensaje';
+          const subject = /^re:/i.test(baseSubject) ? baseSubject : `Re: ${baseSubject}`;
+
+          // Thread the reply onto the customer's last email (so it lands in the same thread).
+          const [lastIn] = await this.db.query(
+            `SELECT external_id FROM messages
+              WHERE conversation_id = $1 AND direction = 'inbound' AND external_id IS NOT NULL
+              ORDER BY created_at DESC LIMIT 1`,
+            [conversationId],
+          );
+          const threadRefs = lastIn?.external_id ? { inReplyTo: lastIn.external_id, references: lastIn.external_id } : {};
+
+          // Media bodies → real email attachment; the caption (if any) is the body.
+          let textBody = text;
+          let attachments: any[] = [];
+          if (contentType === 'image' || contentType === 'audio' || contentType === 'video' || contentType === 'file') {
+            const [fileUrl, fileName, cap] = text.split('|');
+            attachments = [{ filename: fileName || fileUrl.split('/').pop() || 'file', path: join(process.cwd(), fileUrl) }];
+            textBody = cap || '';
+          }
+
+          const info = await transport.sendMail({
+            from: fromAddr ? `${fromName} <${fromAddr}>` : fromName,
+            to: toEmail,
+            subject,
+            text: textBody || ' ',
+            html: textBody ? textBody.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') : undefined,
+            attachments,
+            ...threadRefs,
+          });
+
+          // Store the sent Message-ID so the next reply threads correctly.
+          if (messageId && info?.messageId) {
+            await this.db.query(`UPDATE messages SET external_id=$1 WHERE id=$2`, [info.messageId, messageId]).catch(() => {});
+          }
           break;
         }
 
