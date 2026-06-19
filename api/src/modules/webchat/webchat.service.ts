@@ -1,14 +1,24 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AiChatbotEngineService } from '../ai-chatbots/ai-chatbot-engine.service';
 
 @Injectable()
-export class WebchatService {
+export class WebchatService implements OnModuleInit {
+  private readonly logger = new Logger('Webchat');
+
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly engine: AiChatbotEngineService,
   ) {}
+
+  async onModuleInit() {
+    // Conversations are now created lazily (on the visitor's first message), so a
+    // session may exist without a conversation. Make sure the column allows NULL.
+    await this.db
+      .query(`ALTER TABLE webchat_sessions ALTER COLUMN conversation_id DROP NOT NULL`)
+      .catch(() => {});
+  }
 
   // ── Public config ─────────────────────────────────────────────────────────────
 
@@ -49,7 +59,9 @@ export class WebchatService {
 
     const tenantId: string = bot.tenant_id;
 
-    // Reuse existing open session for this visitor
+    // Reuse existing session for this visitor. A session may not have a
+    // conversation yet (it's created lazily on the first real message), so we
+    // also reuse sessions whose conversation_id is still null.
     const existing = await this.db.query(
       `SELECT ws.*, c.status AS conv_status
        FROM webchat_sessions ws
@@ -59,16 +71,59 @@ export class WebchatService {
       [botId, visitorId],
     );
 
-    if (existing.length && existing[0].conversation_id && existing[0].conv_status !== 'resolved') {
+    if (existing.length && (!existing[0].conversation_id || existing[0].conv_status !== 'resolved')) {
       const s = existing[0];
       await this.db.query(
         `UPDATE webchat_sessions SET last_active_at=NOW() WHERE id=$1`, [s.id],
       );
-      const messages = await this.getMessages(s.id);
-      return { sessionId: s.id, conversationId: s.conversation_id, messages, isNew: false };
+      // If a conversation already exists, return its history; otherwise show
+      // just the welcome (nothing has been persisted yet).
+      const messages = s.conversation_id
+        ? await this.getMessages(s.id)
+        : this.welcomeMessages(bot.welcome_message);
+      return { sessionId: s.id, conversationId: s.conversation_id ?? null, messages, isNew: false };
     }
 
-    // Find or create contact
+    // Create the session WITHOUT a conversation. The conversation (and contact)
+    // are created lazily on the visitor's first real message — so the inbox is
+    // never polluted with empty "No messages" webchat conversations from page
+    // loads, bots, or uptime monitors.
+    const [session] = await this.db.query(
+      `INSERT INTO webchat_sessions
+         (bot_id, tenant_id, conversation_id, contact_id, visitor_id, visitor_name, visitor_email, created_at, last_active_at)
+       VALUES ($1,$2,NULL,NULL,$3,$4,$5,NOW(),NOW()) RETURNING id`,
+      [botId, tenantId, visitorId, visitorName ?? null, visitorEmail ?? null],
+    );
+
+    return {
+      sessionId: session.id,
+      conversationId: null,
+      messages: this.welcomeMessages(bot.welcome_message),
+      isNew: true,
+    };
+  }
+
+  /** Welcome message rendered for display only (not persisted until a conversation exists). */
+  private welcomeMessages(welcome?: string | null) {
+    return welcome
+      ? [{ id: 'welcome', body: welcome, direction: 'outbound', sender_type: 'bot', created_at: new Date().toISOString() }]
+      : [];
+  }
+
+  /**
+   * Lazily creates the conversation (and contact/inbox) for a session the first
+   * time the visitor actually sends a message. Idempotent: returns the existing
+   * conversation id if one was already created.
+   */
+  private async ensureConversation(session: any): Promise<string> {
+    if (session.conversation_id) return session.conversation_id;
+
+    const tenantId: string = session.tenant_id;
+    const visitorName: string | null = session.visitor_name;
+    const visitorEmail: string | null = session.visitor_email;
+    const visitorId: string = session.visitor_id;
+
+    // Find or create contact (only if the visitor identified themselves by email)
     let contactId: string | null = null;
     if (visitorEmail) {
       const [contact] = await this.db.query(
@@ -79,8 +134,7 @@ export class WebchatService {
         contactId = contact.id;
         if (visitorName) {
           await this.db.query(
-            `UPDATE contacts SET full_name=$1 WHERE id=$2`,
-            [visitorName, contactId],
+            `UPDATE contacts SET full_name=$1 WHERE id=$2`, [visitorName, contactId],
           ).catch(() => {});
         }
       } else {
@@ -114,26 +168,21 @@ export class WebchatService {
       [tenantId, inbox.id, contactId, `Webchat: ${visitorName ?? visitorId}`],
     );
 
-    // Create webchat session
-    const [session] = await this.db.query(
-      `INSERT INTO webchat_sessions
-         (bot_id, tenant_id, conversation_id, contact_id, visitor_id, visitor_name, visitor_email, created_at, last_active_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),NOW()) RETURNING id`,
-      [botId, tenantId, conv.id, contactId, visitorId, visitorName ?? null, visitorEmail ?? null],
+    await this.db.query(
+      `UPDATE webchat_sessions SET conversation_id=$1, contact_id=$2 WHERE id=$3`,
+      [conv.id, contactId, session.id],
     );
 
-    // Send welcome message if bot has one
-    let welcomeMsg: string | null = null;
-    if (bot.welcome_message) {
+    // Persist the welcome message as the first turn so the agent has context.
+    const [bot] = await this.db.query(
+      `SELECT welcome_message FROM ai_chatbots WHERE id=$1`, [session.bot_id],
+    );
+    if (bot?.welcome_message) {
       await this.saveMessage(tenantId, conv.id, bot.welcome_message, 'outbound', 'bot');
-      welcomeMsg = bot.welcome_message;
     }
 
-    const messages = welcomeMsg
-      ? [{ id: 'welcome', body: welcomeMsg, direction: 'outbound', sender_type: 'bot', created_at: new Date().toISOString() }]
-      : [];
-
-    return { sessionId: session.id, conversationId: conv.id, messages, isNew: true };
+    session.conversation_id = conv.id;
+    return conv.id;
   }
 
   // ── Send message ──────────────────────────────────────────────────────────────
@@ -150,7 +199,10 @@ export class WebchatService {
     );
     if (!session) throw new NotFoundException('Sesión no encontrada');
 
-    const { bot_id: botId, tenant_id: tenantId, conversation_id: conversationId } = session;
+    const { bot_id: botId, tenant_id: tenantId } = session;
+
+    // Create the conversation lazily on the first real message.
+    const conversationId = await this.ensureConversation(session);
 
     // Save inbound message
     await this.saveMessage(tenantId, conversationId, userMessage.trim(), 'inbound', 'contact');
