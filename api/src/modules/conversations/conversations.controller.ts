@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -38,7 +38,11 @@ export class ConversationsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string, @TenantId() tenantId: string) {
+  async findOne(@Param('id') id: string, @TenantId() tenantId: string, @Request() req: any) {
+    const viewer = req?.user ? { id: req.user.id, role: req.user.role ?? 'agent' } : undefined;
+    if (!(await this.service.canViewerAccess(id, tenantId, viewer))) {
+      throw new NotFoundException('Conversation not found');
+    }
     return this.service.findOne(id, tenantId);
   }
 

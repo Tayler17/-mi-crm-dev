@@ -40,8 +40,31 @@ export class MessagesController {
   ) {}
 
   @Get('messages')
-  getMessages(@Param('conversationId') cid: string, @TenantId() tenantId: string) {
+  async getMessages(@Param('conversationId') cid: string, @TenantId() tenantId: string, @Request() req: any) {
+    await this.assertAccess(cid, tenantId, req?.user);
     return this.service.findByConversation(cid, tenantId);
+  }
+
+  /** Enforce team-based conversation scoping for agents (when the tenant enables it). */
+  private async assertAccess(conversationId: string, tenantId: string, user?: any) {
+    const role = user?.role ?? 'agent';
+    if (role === 'admin' || role === 'owner') return;
+    const [t] = await this.db.query(
+      `SELECT settings->>'restrictAgentsToTeams' AS flag FROM tenants WHERE id = $1`,
+      [tenantId],
+    );
+    if (t?.flag !== 'true') return;
+    const rows = await this.db.query(
+      `SELECT 1 FROM conversations c
+        WHERE c.id = $2 AND c.tenant_id = $1 AND (
+          c.assigned_to = $3 OR c.assigned_user_id = $3
+          OR c.team_id IN (SELECT team_id FROM team_members WHERE user_id = $3)
+          OR c.queue_id IN (SELECT id FROM queues WHERE team_id IN (SELECT team_id FROM team_members WHERE user_id = $3))
+          OR (c.team_id IS NULL AND c.queue_id IS NULL)
+        ) LIMIT 1`,
+      [tenantId, conversationId, user?.id ?? ''],
+    );
+    if (rows.length === 0) throw new NotFoundException('Conversation not found');
   }
 
   @Post('messages')

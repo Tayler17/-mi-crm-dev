@@ -141,6 +141,34 @@ export class ConversationsService extends BaseTenantService<Conversation> {
     return rows;
   }
 
+  /**
+   * Whether a viewer may access a single conversation under team scoping.
+   * Admins/owners and tenants without the restriction always pass.
+   */
+  async canViewerAccess(
+    conversationId: string,
+    tenantId: string,
+    viewer?: { id: string; role: string },
+  ): Promise<boolean> {
+    if (!viewer || viewer.role === 'admin' || viewer.role === 'owner') return true;
+    const [t] = await this.convRepo.query(
+      `SELECT settings->>'restrictAgentsToTeams' AS flag FROM tenants WHERE id = $1`,
+      [tenantId],
+    );
+    if (t?.flag !== 'true') return true;
+    const rows = await this.convRepo.query(
+      `SELECT 1 FROM conversations c
+        WHERE c.id = $2 AND c.tenant_id = $1 AND (
+          c.assigned_to = $3 OR c.assigned_user_id = $3
+          OR c.team_id IN (SELECT team_id FROM team_members WHERE user_id = $3)
+          OR c.queue_id IN (SELECT id FROM queues WHERE team_id IN (SELECT team_id FROM team_members WHERE user_id = $3))
+          OR (c.team_id IS NULL AND c.queue_id IS NULL)
+        ) LIMIT 1`,
+      [tenantId, conversationId, viewer.id],
+    );
+    return rows.length > 0;
+  }
+
   findAllFiltered(tenantId: string, status?: string) {
     const where: any = { tenantId };
     if (status) where.status = status;

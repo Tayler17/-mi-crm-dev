@@ -25,4 +25,13 @@ export class NotificationsService {
       map((e) => ({ data: { type: e.type, ...e.payload } } as MessageEvent)),
     );
   }
+
+  /** Raw events for a tenant (unmapped) — used when per-viewer filtering is needed. */
+  eventsForTenant(tenantId: string): Observable<NotificationEvent> {
+    return this.bus$.pipe(filter((e) => e.tenantId === tenantId));
+  }
+
+  static toMessageEvent(e: NotificationEvent): MessageEvent {
+    return { data: { type: e.type, ...e.payload } } as MessageEvent;
+  }
 }
