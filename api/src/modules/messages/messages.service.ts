@@ -15,7 +15,8 @@ export class MessagesService implements OnModuleInit {
     await this.repo.query(`
       ALTER TABLE messages
         ADD COLUMN IF NOT EXISTS edited_at  TIMESTAMPTZ,
-        ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ
+        ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS reply_to_message_id UUID
     `).catch(() => {});
   }
 
@@ -58,6 +59,7 @@ export class MessagesService implements OnModuleInit {
       direction: dto.direction || 'outbound',
       senderType: 'agent',
       isPrivate: false,
+      replyToMessageId: dto.replyToMessageId || null,
     }));
   }
 

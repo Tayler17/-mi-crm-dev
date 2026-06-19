@@ -12,6 +12,10 @@ export class CreateMessageDto {
   @IsEnum(['inbound', 'outbound'])
   @IsOptional()
   direction?: string;
+
+  @IsString()
+  @IsOptional()
+  replyToMessageId?: string;
 }
 
 export class CreateNoteDto {

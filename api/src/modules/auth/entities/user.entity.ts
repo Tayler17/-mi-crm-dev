@@ -20,6 +20,9 @@ export class User {
   @Column({ default: 'agent' })
   role: string;
 
+  @Column({ name: 'avatar_url', nullable: true, type: 'varchar' })
+  avatarUrl: string | null;
+
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 

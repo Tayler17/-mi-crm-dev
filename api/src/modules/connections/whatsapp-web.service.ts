@@ -296,7 +296,7 @@ export class WhatsappWebService implements OnModuleInit {
   }
 
   /** Send an outbound text message through an active WhatsApp Web session */
-  async sendMessage(connectionId: string, remoteJid: string, text: string): Promise<string | false> {
+  async sendMessage(connectionId: string, remoteJid: string, text: string, quoted?: any): Promise<string | false> {
     // Choke-point safety: a "/uploads/..." body is an uploaded file, never text.
     // Redirect to a media send so no caller can leak the raw path to the recipient.
     if (/^\/uploads\/\S+/.test(text ?? '')) {
@@ -305,7 +305,7 @@ export class WhatsappWebService implements OnModuleInit {
       const ct = /^(jpe?g|png|gif|webp|bmp|heic)$/.test(ext) ? 'image'
         : /^(mp3|ogg|oga|m4a|wav|opus|aac)$/.test(ext) ? 'audio'
         : /^(mp4|mov|avi|webm|3gp)$/.test(ext) ? 'video' : 'file';
-      return this.sendFile(connectionId, remoteJid, fileUrl, ct, cap || undefined);
+      return this.sendFile(connectionId, remoteJid, fileUrl, ct, cap || undefined, quoted);
     }
     const session = this.sessions.get(connectionId);
     if (!session?.sock || session.status !== 'connected') {
@@ -313,7 +313,7 @@ export class WhatsappWebService implements OnModuleInit {
       return false;
     }
     try {
-      const result = await session.sock.sendMessage(remoteJid, { text });
+      const result = await session.sock.sendMessage(remoteJid, { text }, quoted ? { quoted } : undefined);
       // Mark the last inbound message from this JID as read now that we've replied
       await this.markPendingRead(connectionId, remoteJid);
       return result?.key?.id ?? true as any;
@@ -334,7 +334,7 @@ export class WhatsappWebService implements OnModuleInit {
   }
 
   /** Send a media file through an active WhatsApp Web session */
-  async sendFile(connectionId: string, remoteJid: string, fileUrl: string, contentType: string, caption?: string): Promise<string | false> {
+  async sendFile(connectionId: string, remoteJid: string, fileUrl: string, contentType: string, caption?: string, quoted?: any): Promise<string | false> {
     const session = this.sessions.get(connectionId);
     if (!session?.sock || session.status !== 'connected') {
       this.logger.warn(`sendFile: no active session for ${connectionId}`);
@@ -359,9 +359,10 @@ export class WhatsappWebService implements OnModuleInit {
       };
       const mimetype = mimeMap[ext] ?? 'application/octet-stream';
 
+      const opts = quoted ? { quoted } : undefined;
       let result: any;
       if (contentType === 'image') {
-        result = await session.sock.sendMessage(remoteJid, { image: buffer, mimetype, caption: caption ?? '' });
+        result = await session.sock.sendMessage(remoteJid, { image: buffer, mimetype, caption: caption ?? '' }, opts);
       } else if (contentType === 'audio') {
         // WhatsApp voice notes must be ogg/opus + ptt. If the file isn't ogg,
         // transcode on the fly so it delivers as a real, playable voice note.
@@ -372,11 +373,11 @@ export class WhatsappWebService implements OnModuleInit {
           if (oggBuf) audioBuf = oggBuf;
           else audioMime = mimetype; // transcode failed → send original as-is
         }
-        result = await session.sock.sendMessage(remoteJid, { audio: audioBuf, mimetype: audioMime, ptt: true });
+        result = await session.sock.sendMessage(remoteJid, { audio: audioBuf, mimetype: audioMime, ptt: true }, opts);
       } else if (contentType === 'video') {
-        result = await session.sock.sendMessage(remoteJid, { video: buffer, mimetype, caption: caption ?? '' });
+        result = await session.sock.sendMessage(remoteJid, { video: buffer, mimetype, caption: caption ?? '' }, opts);
       } else {
-        result = await session.sock.sendMessage(remoteJid, { document: buffer, mimetype, fileName: filename, caption: caption ?? '' });
+        result = await session.sock.sendMessage(remoteJid, { document: buffer, mimetype, fileName: filename, caption: caption ?? '' }, opts);
       }
       // Replying with media also attends the conversation → mark inbound as read.
       await this.markPendingRead(connectionId, remoteJid);

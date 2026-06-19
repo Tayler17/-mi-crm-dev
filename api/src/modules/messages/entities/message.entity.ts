@@ -35,6 +35,9 @@ export class Message {
   @Column({ name: 'external_id', nullable: true })
   externalId: string;
 
+  @Column({ name: 'reply_to_message_id', type: 'uuid', nullable: true })
+  replyToMessageId: string | null;
+
   @Column({ name: 'edited_at', type: 'timestamptz', nullable: true })
   editedAt: Date | null;
 

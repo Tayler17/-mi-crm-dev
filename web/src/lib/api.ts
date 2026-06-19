@@ -443,6 +443,7 @@ export interface Message {
   status?: string;
   editedAt?: string | null;
   deletedAt?: string | null;
+  replyToMessageId?: string | null;
   createdAt: string;
 }
 export const editConversationMessage = (conversationId: string, messageId: string, body: string) =>
@@ -1700,8 +1701,8 @@ export const removeAllowedDomain = (id: string) => apiDelete(`/knowledge-base/do
 
 export const getMessages = (conversationId: string) =>
   apiGet<Message[]>(`/conversations/${conversationId}/messages`);
-export const sendMessage = (conversationId: string, body: string) =>
-  apiPost<Message>(`/conversations/${conversationId}/messages`, { body, contentType: 'text', direction: 'outbound' });
+export const sendMessage = (conversationId: string, body: string, replyToMessageId?: string) =>
+  apiPost<Message>(`/conversations/${conversationId}/messages`, { body, contentType: 'text', direction: 'outbound', ...(replyToMessageId ? { replyToMessageId } : {}) });
 
 export async function uploadMessageFile(conversationId: string, file: File, caption?: string, kind?: string): Promise<Message> {
   const formData = new FormData();

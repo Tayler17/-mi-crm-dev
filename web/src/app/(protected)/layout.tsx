@@ -100,8 +100,8 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   // ── Comunicación ──
   { group: '💬 COMUNICACIÓN',  href: '/inbox',            label: 'Inbox',                icon: '✉' },
   { group: '💬 COMUNICACIÓN',  href: '/chat',             label: 'Chat Interno',         icon: '💬' },
-  { group: '💬 COMUNICACIÓN',  href: '/queues',           label: 'Colas',                icon: '📬', minRole: 'admin' },
-  { group: '💬 COMUNICACIÓN',  href: '/teams',            label: 'Equipos',              icon: '🏆', minRole: 'admin' },
+  { group: '💬 COMUNICACIÓN',  href: '/queues',           label: 'Colas',                icon: '📬' },
+  { group: '💬 COMUNICACIÓN',  href: '/teams',            label: 'Equipos',              icon: '🏆' },
   // ── Automatización ──
   { group: '🤖 AUTOMATIZACIÓN', href: '/flows',           label: 'Flujos',               icon: '🔀', minRole: 'admin' },
   { group: '🤖 AUTOMATIZACIÓN', href: '/automations',     label: 'Automatizaciones',     icon: '⚡', minRole: 'admin' },
@@ -119,7 +119,7 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   { group: '⚙️ CONFIGURACIÓN', href: '/custom-fields',    label: 'Campos Custom',        icon: '🗃', minRole: 'admin' },
   { group: '⚙️ CONFIGURACIÓN', href: '/outbound-webhooks',label: 'Webhooks',             icon: '🔗', minRole: 'admin' },
   { group: '⚙️ CONFIGURACIÓN', href: '/templates',        label: 'Plantillas',           icon: '🗂', minRole: 'admin' },
-  { group: '⚙️ CONFIGURACIÓN', href: '/quick-responses',  label: 'Quick Responses',      icon: '💬', minRole: 'admin' },
+  { group: '⚙️ CONFIGURACIÓN', href: '/quick-responses',  label: 'Quick Responses',      icon: '💬' },
   { group: '⚙️ CONFIGURACIÓN', href: '/tags',             label: 'Tags',                 icon: '🏷' },
   { group: '⚙️ CONFIGURACIÓN', href: '/appointments',     label: 'Schedules',            icon: '📅' },
   // ── Admin ──
@@ -143,7 +143,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   const router   = useRouter();
   const pathname = usePathname();
 
-  const [user,          setUser]          = useState<{ fullName?: string; email?: string; role?: string } | null>(null);
+  const [user,          setUser]          = useState<{ fullName?: string; email?: string; role?: string; avatarUrl?: string } | null>(null);
   const [notifPerm,     setNotifPerm]     = useState<'default' | 'granted' | 'denied'>('default');
   const [notifEnabled,  setNotifEnabled]  = useState(true);
   const [unread,        setUnread]        = useState(0);
@@ -154,6 +154,8 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   const [userMenuOpen,  setUserMenuOpen]  = useState(false);
   const [profileOpen,   setProfileOpen]   = useState(false);
   const [profileName,   setProfileName]   = useState('');
+  const [profileAvatar, setProfileAvatar] = useState('');
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [langMenuOpen,  setLangMenuOpen]  = useState(false);
   const [sidebarOpen,   setSidebarOpen]   = useState(false);
@@ -336,6 +338,9 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   // ── Derived ───────────────────────────────────────────────────────────────
   const currentPage  = NAV.find((n) => pathname === n.href || (n.href !== '/dashboard' && pathname.startsWith(n.href)));
   const initials     = (user?.fullName || user?.email || 'U').slice(0, 2).toUpperCase();
+  const apiBase      = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+  const toAvatarSrc  = (url?: string) => (!url ? '' : url.startsWith('http') ? url : apiBase + url);
+  const avatarSrc    = toAvatarSrc(user?.avatarUrl);
   const notifActive  = notifPerm === 'granted' && notifEnabled;
   const notifDenied  = notifPerm === 'denied';
   const currentLang  = LANGS.find((l) => l.code === lang) ?? LANGS[0];
@@ -563,9 +568,11 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                     width: 30, height: 30, borderRadius: '50%',
                     background: 'var(--primary)', color: '#fff',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 12, fontWeight: 700,
+                    fontSize: 12, fontWeight: 700, overflow: 'hidden',
                   }}>
-                    {initials}
+                    {avatarSrc
+                      ? <img src={avatarSrc} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : initials}
                   </div>
                   <span style={{
                     position: 'absolute', bottom: 0, right: 0,
@@ -639,7 +646,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                     </Link>
                   )}
 
-                  <button style={dropItemStyle} onClick={() => { setUserMenuOpen(false); setProfileName(user?.fullName ?? ''); setProfileOpen(true); }}
+                  <button style={dropItemStyle} onClick={() => { setUserMenuOpen(false); setProfileName(user?.fullName ?? ''); setProfileAvatar(user?.avatarUrl ?? ''); setProfileOpen(true); }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}>
                     👤 {lang === 'en' ? 'My profile' : lang === 'pt' ? 'Meu perfil' : 'Mi perfil'}
@@ -687,6 +694,59 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
             <h3 style={{ margin: '0 0 20px', fontSize: 16, fontWeight: 700 }}>
               👤 {lang === 'en' ? 'My profile' : lang === 'pt' ? 'Meu perfil' : 'Mi perfil'}
             </h3>
+
+            {/* Avatar */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
+              <div style={{
+                width: 64, height: 64, borderRadius: '50%', flexShrink: 0, overflow: 'hidden',
+                background: 'var(--primary)', color: '#fff', display: 'flex',
+                alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 700,
+              }}>
+                {profileAvatar
+                  ? <img src={toAvatarSrc(profileAvatar)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : initials}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label className="btn btn-secondary" style={{ cursor: 'pointer', fontSize: 12 }}>
+                  {avatarUploading
+                    ? '⏳ …'
+                    : (lang === 'en' ? '📷 Upload photo' : lang === 'pt' ? '📷 Enviar foto' : '📷 Subir foto')}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    disabled={avatarUploading}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setAvatarUploading(true);
+                      try {
+                        const token = typeof window !== 'undefined' ? localStorage.getItem('token') ?? '' : '';
+                        const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenantId') ?? '' : '';
+                        const fd = new FormData();
+                        fd.append('file', file);
+                        const up = await fetch(`${apiBase}/internal-chat/upload`, {
+                          method: 'POST',
+                          headers: { Authorization: `Bearer ${token}`, 'X-Tenant-ID': tenantId },
+                          body: fd,
+                        });
+                        if (up.ok) {
+                          const { url } = await up.json();
+                          setProfileAvatar(url);
+                        }
+                      } finally { setAvatarUploading(false); e.target.value = ''; }
+                    }}
+                  />
+                </label>
+                {profileAvatar && (
+                  <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--danger, #ef4444)' }}
+                    onClick={() => setProfileAvatar('')}>
+                    {lang === 'en' ? 'Remove' : lang === 'pt' ? 'Remover' : 'Quitar'}
+                  </button>
+                )}
+              </div>
+            </div>
+
             <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
               {lang === 'en' ? 'Full name' : lang === 'pt' ? 'Nome completo' : 'Nombre completo'}
             </label>
@@ -713,16 +773,16 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                     const res = await fetch(`${API_URL}/auth/me`, {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Tenant-ID': tenantId },
-                      body: JSON.stringify({ fullName: profileName.trim() }),
+                      body: JSON.stringify({ fullName: profileName.trim(), avatarUrl: profileAvatar || null }),
                     });
                     if (res.ok) {
                       const updated = await res.json();
                       if (typeof window !== 'undefined') {
                         const stored = JSON.parse(localStorage.getItem('user') ?? '{}');
-                        localStorage.setItem('user', JSON.stringify({ ...stored, fullName: updated.fullName }));
+                        localStorage.setItem('user', JSON.stringify({ ...stored, fullName: updated.fullName, avatarUrl: updated.avatarUrl ?? null }));
                       }
                       setProfileOpen(false);
-                      window.location.reload(); // refresh header to show new name
+                      window.location.reload(); // refresh header to show new name/photo
                     }
                   } finally { setProfileSaving(false); }
                 }}

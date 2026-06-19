@@ -539,6 +539,8 @@ export default function InboxPage() {
   // Message edit/delete
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editMsgText, setEditMsgText] = useState('');
+  // Message reply (quote)
+  const [replyToMsg, setReplyToMsg] = useState<Message | null>(null);
 
   // Voice note recording
   const [recording, setRecording] = useState(false);
@@ -818,8 +820,8 @@ export default function InboxPage() {
         const s = await getScheduledMessages(activeId);
         setScheduledMsgs(s);
       } else if (composerTab === 'message') {
-        await sendMessage(activeId, body.trim());
-        setBody('');
+        await sendMessage(activeId, body.trim(), replyToMsg?.id);
+        setBody(''); setReplyToMsg(null);
         const [m, n] = await Promise.all([getMessages(activeId), getNotes(activeId)]);
         setMessages(m); setNotes(n);
         loadList(true); // silent — SSE already handles the optimistic update
@@ -1149,6 +1151,20 @@ export default function InboxPage() {
         ? <span key={pIdx} style={{ color: 'var(--primary)', fontWeight: 600 }}>{p}</span>
         : p
     );
+  }
+
+  /** Short one-line preview of a message, for the "replying to" quote block. */
+  function quotedPreview(body: string): string {
+    if (!body) return '';
+    if (/^\/uploads\/\S+/.test(body)) {
+      const ext = (body.split('|')[0].split('.').pop() ?? '').toLowerCase();
+      if (/^(jpe?g|png|gif|webp|bmp|heic)$/.test(ext)) return '🖼 Image';
+      if (/^(mp3|ogg|oga|m4a|wav|opus|aac)$/.test(ext)) return '🎤 Voice note';
+      if (/^(mp4|mov|avi|webm|3gp)$/.test(ext)) return '🎬 Video';
+      return '📎 File';
+    }
+    if (body.includes('**Transcript:**')) return '📞 Call';
+    return body.length > 90 ? body.slice(0, 90) + '…' : body;
   }
 
   return (
@@ -1639,6 +1655,14 @@ export default function InboxPage() {
                   return (
                     <div key={m.id} className={`msg ${m.isPrivate ? 'msg-note' : m.direction === 'outbound' ? 'msg-out' : 'msg-in'}`} style={isTranscript ? { maxWidth: '95%', alignSelf: 'stretch' } : undefined}>
                       <div className="msg-bubble" style={isTranscript ? { background: 'transparent', border: '1px solid var(--border)', padding: '12px 14px' } : undefined}>
+                        {m.replyToMessageId && (() => {
+                          const orig = messages.find((x) => x.id === m.replyToMessageId);
+                          return (
+                            <div style={{ borderLeft: '3px solid currentColor', padding: '2px 8px', marginBottom: 5, background: 'rgba(0,0,0,.12)', borderRadius: 4, fontSize: 12, opacity: 0.85, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              ↩ {orig ? quotedPreview(orig.body) : '…'}
+                            </div>
+                          );
+                        })()}
                         {m.deletedAt ? (
                           <span style={{ fontStyle: 'italic', opacity: 0.7 }}>🚫 Mensaje eliminado</span>
                         ) : editingMsgId === m.id ? (
@@ -1703,6 +1727,9 @@ export default function InboxPage() {
                         )}
                         {!m.isPrivate && !m.deletedAt && editingMsgId !== m.id && m.contentType !== 'activity' && (
                           <span className="msg-actions" style={{ display: 'inline-flex', gap: 6 }}>
+                            {!isTranscript && (
+                              <button onClick={() => { setReplyToMsg(m); setComposerTab('message'); textareaRef.current?.focus(); }} title="Responder" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}>↩</button>
+                            )}
                             {m.direction === 'outbound' && !fileUrl && (
                               <button onClick={() => startEditMsg(m)} title="Editar" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}>✎</button>
                             )}
@@ -1759,6 +1786,16 @@ export default function InboxPage() {
               </button>
             </div>
             <form onSubmit={handleSend} style={{ position: 'relative' }}>
+              {/* Replying-to (quote) bar */}
+              {replyToMsg && composerTab === 'message' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', marginBottom: 6, borderLeft: '3px solid var(--primary)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6 }}>
+                  <span style={{ fontSize: 14 }}>↩</span>
+                  <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {quotedPreview(replyToMsg.body)}
+                  </div>
+                  <button type="button" onClick={() => setReplyToMsg(null)} title="Cancelar" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--text-muted)' }}>✕</button>
+                </div>
+              )}
               {/* Quick Responses dropdown */}
               {showCanned && (
                 <div className="quick-resp-dropdown">

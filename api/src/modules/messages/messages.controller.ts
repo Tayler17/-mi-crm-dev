@@ -54,7 +54,7 @@ export class MessagesController {
     const msg = await this.service.create(cid, dto, tenantId, req.user.id);
 
     // Deliver through the conversation's actual channel (WA Web, Telegram, etc.)
-    await this.deliverOutbound(cid, tenantId, dto.body ?? '', dto.contentType, msg.id);
+    await this.deliverOutbound(cid, tenantId, dto.body ?? '', dto.contentType, msg.id, dto.replyToMessageId);
 
     this.notifications.emit({
       tenantId,
@@ -303,7 +303,7 @@ export class MessagesController {
 
   // ── Channel delivery ──────────────────────────────────────────────────────
 
-  private async deliverOutbound(conversationId: string, tenantId: string, text: string, contentType = 'text', messageId?: string) {
+  private async deliverOutbound(conversationId: string, tenantId: string, text: string, contentType = 'text', messageId?: string, replyToMessageId?: string) {
     if (!text) return;
     // Defensive: any body that points at an uploaded file ("/uploads/...") is a
     // media message (with or without the "|name" suffix). Infer the type from the
@@ -334,12 +334,28 @@ export class MessagesController {
           const remoteJid    = conv.external_id;
           const connectionId = conv.connection_id;
           if (!remoteJid || !connectionId) return;
+
+          // If replying to a specific message, build the WhatsApp "quoted" ref.
+          let quoted: any;
+          if (replyToMessageId) {
+            const [orig] = await this.db.query(
+              `SELECT external_id, body, direction FROM messages WHERE id=$1 AND tenant_id=$2 LIMIT 1`,
+              [replyToMessageId, tenantId],
+            );
+            if (orig?.external_id) {
+              quoted = {
+                key: { remoteJid, fromMe: orig.direction === 'outbound', id: orig.external_id },
+                message: { conversation: (orig.body ?? '').split('|')[0] || ' ' },
+              };
+            }
+          }
+
           let waId: string | false = false;
           if (contentType === 'image' || contentType === 'audio' || contentType === 'video' || contentType === 'file') {
             const [fileUrl, , fileCaption] = text.split('|');
-            waId = await this.waSvc.sendFile(connectionId, remoteJid, fileUrl, contentType, fileCaption || undefined);
+            waId = await this.waSvc.sendFile(connectionId, remoteJid, fileUrl, contentType, fileCaption || undefined, quoted);
           } else {
-            waId = await this.waSvc.sendMessage(connectionId, remoteJid, text);
+            waId = await this.waSvc.sendMessage(connectionId, remoteJid, text, quoted);
           }
           if (!waId) {
             await this.db.query(

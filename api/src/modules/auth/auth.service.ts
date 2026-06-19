@@ -41,7 +41,8 @@ export class AuthService {
         ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMPTZ,
         ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(255),
         ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ,
-        ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ
+        ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500)
     `).catch(() => {});
     await this.db.query(`
       ALTER TABLE tenants ADD COLUMN IF NOT EXISTS lang VARCHAR(10) DEFAULT 'es'
@@ -213,6 +214,7 @@ export class AuthService {
         fullName: user.fullName,
         role: user.role,
         tenantId,
+        avatarUrl: user.avatarUrl ?? null,
       },
     };
   }
@@ -270,7 +272,7 @@ export class AuthService {
     if (Object.keys(update).length)  await this.userRepo.update({ id: userId, tenantId }, update);
     return this.userRepo.findOne({
       where: { id: userId, tenantId },
-      select: ['id', 'fullName', 'email', 'role'] as any,
+      select: ['id', 'fullName', 'email', 'role', 'avatarUrl'] as any,
     });
   }
 
