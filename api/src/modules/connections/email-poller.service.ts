@@ -2,13 +2,19 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class EmailPollerService {
   private readonly logger = new Logger(EmailPollerService.name);
   private readonly inProgress = new Set<string>();
 
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly events: EventEmitter2,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   @Cron('*/2 * * * *')
   async pollAll() {
@@ -132,10 +138,11 @@ export class EmailPollerService {
 
     const body = extractBody(parsed, subject);
 
-    await this.db.query(
+    const [inserted] = await this.db.query(
       `INSERT INTO messages
-         (id, tenant_id, conversation_id, sender_type, body, direction, external_id, status, created_at, updated_at)
-       VALUES (gen_random_uuid(), $1, $2, 'contact', $3, 'inbound', $4, 'received', NOW(), NOW())`,
+         (id, tenant_id, conversation_id, sender_type, body, direction, content_type, external_id, status, created_at, updated_at)
+       VALUES (gen_random_uuid(), $1, $2, 'contact', $3, 'inbound', 'text', $4, 'received', NOW(), NOW())
+       RETURNING id`,
       [conn.tenant_id, convId, body, messageId],
     );
 
@@ -143,6 +150,15 @@ export class EmailPollerService {
       `UPDATE conversations SET updated_at = NOW(), last_message_at = NOW() WHERE id = $1`,
       [convId],
     );
+
+    // Notify the inbox (SSE) and let AI bots / automations react to the email.
+    const message = {
+      id: inserted?.id, conversationId: convId, body,
+      direction: 'inbound', senderType: 'contact', contentType: 'text',
+      isPrivate: false, is_private: false, createdAt: new Date().toISOString(),
+    };
+    this.notifications.emit({ tenantId: conn.tenant_id, type: 'message_created', payload: { conversationId: convId, message } });
+    this.events.emit('conversation.message_received', { tenantId: conn.tenant_id, conversationId: convId, message });
   }
 }
 

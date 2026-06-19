@@ -1093,8 +1093,9 @@ export class AiChatbotEngineService {
   private async deliverOutbound(conversationId: string, tenantId: string, text: string, messageId?: string) {
     if (!text) return;
     const [conv] = await this.db.query(
-      `SELECT c.channel_type, c.connection_id, c.external_id,
-              cc.channel_type AS conn_channel_type, cc.credentials
+      `SELECT c.channel_type, c.connection_id, c.external_id, c.subject,
+              cc.channel_type AS conn_channel_type, cc.credentials,
+              (SELECT email FROM contacts ct WHERE ct.id = c.contact_id) AS contact_email
        FROM conversations c
        LEFT JOIN channel_connections cc ON cc.id = c.connection_id
        WHERE c.id=$1 AND c.tenant_id=$2 LIMIT 1`,
@@ -1162,6 +1163,49 @@ export class AiChatbotEngineService {
             body: JSON.stringify({ recipient: { id: recipientId }, message: { text } }),
             signal: AbortSignal.timeout(8000) },
         ).catch(() => {});
+        break;
+      }
+      case 'email': {
+        const toEmail = conv.external_id || conv.contact_email;
+        const creds = conv.credentials ?? {};
+        if (!toEmail || !creds.host) {
+          this.logger.warn(`[bot email] cannot send: to=${toEmail ?? 'null'} host=${creds.host ?? 'null'} conv=${conversationId}`);
+          return;
+        }
+        const nodemailer = await import('nodemailer');
+        const secure = String(creds.encryption ?? '').toUpperCase() === 'SSL' || Number(creds.port) === 465;
+        const transport = nodemailer.createTransport({
+          host: String(creds.host).trim(),
+          port: Number(creds.port) || 587,
+          secure,
+          auth: creds.user ? { user: String(creds.user).trim(), pass: String(creds.password ?? '') } : undefined,
+          tls: { rejectUnauthorized: false },
+          connectionTimeout: 10000, greetingTimeout: 8000, socketTimeout: 15000,
+        });
+        const fromName = creds.fromName || 'Soporte';
+        const fromAddr = String(creds.user || '').trim();
+        const baseSubject = conv.subject && conv.subject !== '(sin asunto)' ? conv.subject : 'Mensaje';
+        const subject = /^re:/i.test(baseSubject) ? baseSubject : `Re: ${baseSubject}`;
+        const [lastIn] = await this.db.query(
+          `SELECT external_id FROM messages WHERE conversation_id=$1 AND direction='inbound' AND external_id IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
+          [conversationId],
+        );
+        const threadRefs = lastIn?.external_id ? { inReplyTo: lastIn.external_id, references: lastIn.external_id } : {};
+        try {
+          const info = await transport.sendMail({
+            from: fromAddr ? `${fromName} <${fromAddr}>` : fromName,
+            to: toEmail,
+            subject,
+            text,
+            html: text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>'),
+            ...threadRefs,
+          });
+          if (messageId && info?.messageId) {
+            await this.db.query(`UPDATE messages SET external_id=$1 WHERE id=$2`, [info.messageId, messageId]).catch(() => {});
+          }
+        } finally {
+          transport.close();
+        }
         break;
       }
     }
