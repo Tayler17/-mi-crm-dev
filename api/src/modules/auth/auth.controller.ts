@@ -77,11 +77,18 @@ export class AuthController {
     return this.authService.touchLastSeen(req.user.id);
   }
 
-  /** Update own profile: name and/or avatar URL */
+  /** Current user's profile (incl. signature settings). */
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  getMe(@Request() req: any, @TenantId() tenantId: string) {
+    return this.authService.getMe(req.user.id, tenantId);
+  }
+
+  /** Update own profile: name, avatar and signature settings. */
   @Patch('me')
   @UseGuards(JwtAuthGuard)
   updateMe(
-    @Body() body: { fullName?: string; avatarUrl?: string },
+    @Body() body: { fullName?: string; avatarUrl?: string; signatureEnabled?: boolean; signatureEmail?: string | null; signatureChat?: string | null },
     @Request() req: any,
     @TenantId() tenantId: string,
   ) {

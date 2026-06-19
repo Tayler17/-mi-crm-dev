@@ -42,7 +42,10 @@ export class AuthService {
         ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(255),
         ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ,
         ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ,
-        ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500)
+        ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500),
+        ADD COLUMN IF NOT EXISTS signature_enabled BOOLEAN DEFAULT false,
+        ADD COLUMN IF NOT EXISTS signature_email TEXT,
+        ADD COLUMN IF NOT EXISTS signature_chat TEXT
     `).catch(() => {});
     await this.db.query(`
       ALTER TABLE tenants ADD COLUMN IF NOT EXISTS lang VARCHAR(10) DEFAULT 'es'
@@ -265,14 +268,25 @@ export class AuthService {
     return { availability };
   }
 
-  async updateMe(userId: string, tenantId: string, dto: { fullName?: string; avatarUrl?: string }) {
+  async updateMe(
+    userId: string,
+    tenantId: string,
+    dto: { fullName?: string; avatarUrl?: string; signatureEnabled?: boolean; signatureEmail?: string | null; signatureChat?: string | null },
+  ) {
     const update: Record<string, any> = {};
-    if (dto.fullName?.trim())        update.fullName  = dto.fullName.trim();
-    if (dto.avatarUrl !== undefined)  update.avatarUrl = dto.avatarUrl ?? null;
+    if (dto.fullName?.trim())          update.fullName  = dto.fullName.trim();
+    if (dto.avatarUrl !== undefined)    update.avatarUrl = dto.avatarUrl ?? null;
+    if (dto.signatureEnabled !== undefined) update.signatureEnabled = !!dto.signatureEnabled;
+    if (dto.signatureEmail !== undefined)   update.signatureEmail = dto.signatureEmail || null;
+    if (dto.signatureChat !== undefined)    update.signatureChat = dto.signatureChat || null;
     if (Object.keys(update).length)  await this.userRepo.update({ id: userId, tenantId }, update);
+    return this.getMe(userId, tenantId);
+  }
+
+  getMe(userId: string, tenantId: string) {
     return this.userRepo.findOne({
       where: { id: userId, tenantId },
-      select: ['id', 'fullName', 'email', 'role', 'avatarUrl'] as any,
+      select: ['id', 'fullName', 'email', 'role', 'avatarUrl', 'signatureEnabled', 'signatureEmail', 'signatureChat'] as any,
     });
   }
 

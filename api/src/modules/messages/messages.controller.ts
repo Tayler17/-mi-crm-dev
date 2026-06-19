@@ -45,6 +45,28 @@ export class MessagesController {
     return this.service.findByConversation(cid, tenantId);
   }
 
+  /** Append the agent's signature to an outbound text body, per channel. */
+  private async applySignature(conversationId: string, tenantId: string, userId: string | undefined, body: string): Promise<string> {
+    if (!userId) return body;
+    const [u] = await this.db.query(
+      `SELECT signature_enabled, signature_email, signature_chat FROM users WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+      [userId, tenantId],
+    );
+    if (!u?.signature_enabled) return body;
+    const [conv] = await this.db.query(
+      `SELECT COALESCE(cc.channel_type, c.channel_type) AS channel_type
+         FROM conversations c LEFT JOIN channel_connections cc ON cc.id = c.connection_id
+        WHERE c.id = $1 AND c.tenant_id = $2 LIMIT 1`,
+      [conversationId, tenantId],
+    );
+    const channel = conv?.channel_type ?? '';
+    const sig: string = (channel === 'email' ? u.signature_email : u.signature_chat) ?? '';
+    if (!sig.trim()) return body;
+    if (body.trimEnd().endsWith(sig.trim())) return body; // already signed
+    const sep = channel === 'email' ? '\n\n--\n' : '\n\n';
+    return `${body}${sep}${sig}`;
+  }
+
   /** Enforce team-based conversation scoping for agents (when the tenant enables it). */
   private async assertAccess(conversationId: string, tenantId: string, user?: any) {
     const role = user?.role ?? 'agent';
@@ -74,6 +96,11 @@ export class MessagesController {
     @TenantId() tenantId: string,
     @Request() req: any,
   ) {
+    // Append the sending agent's signature (if enabled) to outbound text messages.
+    if ((dto.direction ?? 'outbound') === 'outbound' && dto.body && !/^\/uploads\//.test(dto.body)) {
+      dto.body = await this.applySignature(cid, tenantId, req.user?.id, dto.body);
+    }
+
     const msg = await this.service.create(cid, dto, tenantId, req.user.id);
 
     // Deliver through the conversation's actual channel (WA Web, Telegram, etc.)

@@ -23,6 +23,15 @@ export class User {
   @Column({ name: 'avatar_url', nullable: true, type: 'varchar' })
   avatarUrl: string | null;
 
+  @Column({ name: 'signature_enabled', default: false })
+  signatureEnabled: boolean;
+
+  @Column({ name: 'signature_email', type: 'text', nullable: true })
+  signatureEmail: string | null;
+
+  @Column({ name: 'signature_chat', type: 'text', nullable: true })
+  signatureChat: string | null;
+
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 

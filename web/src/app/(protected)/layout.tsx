@@ -157,6 +157,9 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   const [profileAvatar, setProfileAvatar] = useState('');
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
+  const [sigEnabled,    setSigEnabled]    = useState(false);
+  const [sigEmail,      setSigEmail]      = useState('');
+  const [sigChat,       setSigChat]       = useState('');
   const [langMenuOpen,  setLangMenuOpen]  = useState(false);
   const [sidebarOpen,   setSidebarOpen]   = useState(false);
   const [availability,  setAvailability]  = useState('online');
@@ -646,7 +649,24 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                     </Link>
                   )}
 
-                  <button style={dropItemStyle} onClick={() => { setUserMenuOpen(false); setProfileName(user?.fullName ?? ''); setProfileAvatar(user?.avatarUrl ?? ''); setProfileOpen(true); }}
+                  <button style={dropItemStyle} onClick={async () => {
+                      setUserMenuOpen(false);
+                      setProfileName(user?.fullName ?? ''); setProfileAvatar(user?.avatarUrl ?? '');
+                      setSigEnabled(false); setSigEmail(''); setSigChat('');
+                      setProfileOpen(true);
+                      try {
+                        const token = typeof window !== 'undefined' ? localStorage.getItem('token') ?? '' : '';
+                        const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenantId') ?? '' : '';
+                        const r = await fetch(`${apiBase}/auth/me`, { headers: { Authorization: `Bearer ${token}`, 'X-Tenant-ID': tenantId } });
+                        if (r.ok) {
+                          const me = await r.json();
+                          setProfileAvatar(me.avatarUrl ?? '');
+                          setSigEnabled(!!me.signatureEnabled);
+                          setSigEmail(me.signatureEmail ?? '');
+                          setSigChat(me.signatureChat ?? '');
+                        }
+                      } catch { /* ignore */ }
+                    }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}>
                     👤 {lang === 'en' ? 'My profile' : lang === 'pt' ? 'Meu perfil' : lang === 'tr' ? 'Profilim' : lang === 'ar' ? 'ملفي الشخصي' : 'Mi perfil'}
@@ -757,6 +777,43 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
               onChange={(e) => setProfileName(e.target.value)}
               placeholder={user?.fullName ?? ''}
             />
+
+            {/* Signature */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', marginBottom: 10 }}>
+              <input type="checkbox" checked={sigEnabled} onChange={(e) => setSigEnabled(e.target.checked)} />
+              <span>{lang === 'en' ? 'Auto-add my signature' : lang === 'pt' ? 'Adicionar minha assinatura automaticamente' : lang === 'tr' ? 'İmzamı otomatik ekle' : lang === 'ar' ? 'إضافة توقيعي تلقائياً' : 'Añadir mi firma automáticamente'}</span>
+            </label>
+            {sigEnabled && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
+                  {lang === 'en' ? 'Email signature' : lang === 'pt' ? 'Assinatura de e-mail' : lang === 'tr' ? 'E-posta imzası' : lang === 'ar' ? 'توقيع البريد' : 'Firma de email'}
+                </label>
+                <textarea
+                  className="form-input"
+                  style={{ width: '100%', minHeight: 70, resize: 'vertical', marginBottom: 12, fontSize: 13 }}
+                  value={sigEmail}
+                  onChange={(e) => setSigEmail(e.target.value)}
+                  placeholder={'Tailor Cabrera\nDominican Shipping Ltd\nwww.tscouriers.com'}
+                />
+                <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
+                  {lang === 'en' ? 'Chat / WhatsApp signature' : lang === 'pt' ? 'Assinatura de chat / WhatsApp' : lang === 'tr' ? 'Sohbet / WhatsApp imzası' : lang === 'ar' ? 'توقيع الدردشة / واتساب' : 'Firma de chat / WhatsApp'}
+                </label>
+                <input
+                  className="form-input"
+                  style={{ width: '100%', fontSize: 13 }}
+                  value={sigChat}
+                  onChange={(e) => setSigChat(e.target.value)}
+                  placeholder={'— Tailor'}
+                />
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                  {lang === 'en' ? 'Leave a field empty to skip signing that channel.'
+                    : lang === 'pt' ? 'Deixe um campo vazio para não assinar esse canal.'
+                    : lang === 'tr' ? 'Bir kanalı imzalamamak için ilgili alanı boş bırakın.'
+                    : lang === 'ar' ? 'اترك الحقل فارغاً لعدم توقيع تلك القناة.'
+                    : 'Deja un campo vacío para no firmar ese canal.'}
+                </div>
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button className="btn btn-secondary" onClick={() => setProfileOpen(false)}>
                 {lang === 'en' ? 'Cancel' : lang === 'pt' ? 'Cancelar' : lang === 'tr' ? 'İptal' : lang === 'ar' ? 'إلغاء' : 'Cancelar'}
@@ -773,7 +830,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                     const res = await fetch(`${API_URL}/auth/me`, {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Tenant-ID': tenantId },
-                      body: JSON.stringify({ fullName: profileName.trim(), avatarUrl: profileAvatar || null }),
+                      body: JSON.stringify({ fullName: profileName.trim(), avatarUrl: profileAvatar || null, signatureEnabled: sigEnabled, signatureEmail: sigEmail || null, signatureChat: sigChat || null }),
                     });
                     if (res.ok) {
                       const updated = await res.json();
