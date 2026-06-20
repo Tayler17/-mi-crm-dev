@@ -395,6 +395,7 @@ export class AiChatbotEngineService {
     // Dentally actions: execute and send the authoritative reply our code composes
     // (real slots / booking result / error), then stop. Scoped to this tenant.
     const { dentallyListPractitioners, dentallyCheckAvailability, dentallyBook } = result;
+    this.logger.log(`[dentally] tool flags — list=${!!dentallyListPractitioners} avail=${!!dentallyCheckAvailability} book=${!!dentallyBook}`);
     if (dentallyListPractitioners || dentallyCheckAvailability || dentallyBook) {
       await this.db.query(`UPDATE ai_chatbot_sessions SET message_count=message_count+1 WHERE id=$1`, [session.id]).catch(() => {});
       let outMsg = '';
@@ -797,6 +798,7 @@ export class AiChatbotEngineService {
         crmLines.push('- dentally_list_practitioners: para listar los profesionales/doctores disponibles para citas.');
         crmLines.push('- dentally_check_availability: para ver los horarios libres de un día (parámetro date en formato YYYY-MM-DD; opcionalmente practitioner_name). Úsala cuando el cliente quiera saber disponibilidad u horarios.');
         crmLines.push('- dentally_book_appointment: para AGENDAR una cita cuando el cliente ya eligió día y hora (date YYYY-MM-DD, time HH:MM). Si el cliente NO está registrado como paciente, pídele su fecha de nacimiento (date_of_birth, YYYY-MM-DD) y género (gender: male/female) ANTES de agendar.');
+        crmLines.push('REGLA CRÍTICA DENTALLY: cuando el cliente pida los doctores, la disponibilidad/horarios, o agendar, DEBES llamar la herramienta correspondiente (dentally_list_practitioners / dentally_check_availability / dentally_book_appointment) y usar su resultado real. NUNCA digas "aquí están los doctores", "estos son los horarios" ni inventes nombres/horarios sin llamar la herramienta. No prometas datos que no obtuviste de la herramienta.');
       }
       crmLines.push('Siempre incluye un mensaje de confirmación breve y amigable para el usuario al usar cualquier herramienta.');
       const crmInstructions = crmLines.join('\n');
