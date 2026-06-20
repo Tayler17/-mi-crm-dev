@@ -1078,7 +1078,22 @@ export class AiChatbotEngineService {
       const ragContext = await this.kbSvc.searchRelevantContext(botId, tenantId, message).catch(() => '');
       const dentallyConnected = await this.integrations.isConnected(tenantId, 'dentally').catch(() => false);
       const result = await this.callAi(bot, apiKey, mapped, { text: message }, {}, [], {}, [], [], {}, ragContext, false, dentallyConnected);
-      return { reply: result?.reply ?? null };
+      let reply = result?.reply ?? null;
+
+      // Execute Dentally tools in the test panel too (production does this in
+      // processMessage) so the tester sees the real result instead of a blank.
+      if (result?.dentallyListPractitioners || result?.dentallyCheckAvailability || result?.dentallyBook) {
+        let outMsg = '';
+        try {
+          if (result.dentallyListPractitioners) outMsg = await this.integrations.botListPractitioners(tenantId, 'dentally');
+          else if (result.dentallyCheckAvailability) outMsg = await this.integrations.botCheckAvailability(tenantId, 'dentally', result.dentallyCheckAvailability);
+          else if (result.dentallyBook) outMsg = await this.integrations.botBook(tenantId, 'dentally', { contactId: '', ...result.dentallyBook });
+        } catch (e: any) {
+          outMsg = `No pude completar la acción: ${e?.message || 'error'}.`;
+        }
+        reply = [reply, outMsg].filter((s) => s && String(s).trim()).join('\n\n') || outMsg || reply;
+      }
+      return { reply };
     } catch (err: any) {
       return { reply: null, error: err?.message ?? 'Error al llamar a la IA' };
     }
