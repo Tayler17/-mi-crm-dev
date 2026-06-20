@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -7,7 +7,7 @@ import { KB_QUEUE, KbJobData, RAG_TOP_K, RAG_MIN_SIMILARITY } from './knowledge-
 import { EmbeddingsService } from './embeddings.service';
 
 @Injectable()
-export class KnowledgeBaseService {
+export class KnowledgeBaseService implements OnModuleInit {
   private readonly logger = new Logger(KnowledgeBaseService.name);
 
   constructor(
@@ -15,6 +15,14 @@ export class KnowledgeBaseService {
     @InjectQueue(KB_QUEUE) private readonly queue: Queue<KbJobData>,
     private readonly embeddings: EmbeddingsService,
   ) {}
+
+  async onModuleInit() {
+    // The knowledge base is shared by chat bots (ai_chatbots) AND call bots
+    // (call_bots), keyed by bot_id (uuid). The legacy FK to ai_chatbots blocked
+    // call-bot sources, so drop it (idempotent).
+    await this.db.query(`ALTER TABLE bot_knowledge_sources DROP CONSTRAINT IF EXISTS bot_knowledge_sources_bot_id_fkey`).catch(() => {});
+    await this.db.query(`ALTER TABLE bot_knowledge_chunks  DROP CONSTRAINT IF EXISTS bot_knowledge_chunks_bot_id_fkey`).catch(() => {});
+  }
 
   // ── Domain management ────────────────────────────────────────────────────────
 
