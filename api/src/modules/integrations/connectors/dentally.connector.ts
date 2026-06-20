@@ -198,14 +198,19 @@ export class DentallyConnector implements IntegrationConnector {
     // Dentally requires the search window to span MORE than 24 hours. A single-day
     // request (00:00–23:59) is just under 24h and gets rejected, so we widen the
     // window sent to Dentally and filter the results back to the requested range.
-    const startMs = Date.parse(opts.startDate);
+    const now = Date.now();
+    let startMs = Date.parse(opts.startDate);
+    if (isNaN(startMs)) startMs = now;
+    // Dentally requires start_time in the future — for "today" (00:00 is already
+    // past) clamp to now + a couple of minutes.
+    if (startMs <= now) startMs = now + 2 * 60 * 1000;
     const reqFinishMs = Date.parse(opts.finishDate);
     const minFinishMs = startMs + 24 * 60 * 60 * 1000 + 60 * 1000; // start + 24h + 1min
     const finishTime = (!isNaN(reqFinishMs) && reqFinishMs > minFinishMs)
       ? opts.finishDate
       : new Date(minFinishMs).toISOString();
     const qs = new URLSearchParams({
-      start_time: opts.startDate,
+      start_time: new Date(startMs).toISOString(),
       finish_time: finishTime,
       duration: String(duration),
     });
@@ -213,8 +218,9 @@ export class DentallyConnector implements IntegrationConnector {
     const res = await this.request(this.host(config), token, `/v1/appointments/availability?${qs.toString()}`);
     if (res.status === 401 || res.status === 403) throw new Error('Token inválido o sin permisos para ver disponibilidad.');
     if (res.status >= 400) {
-      const detail = res.json ? JSON.stringify(res.json).slice(0, 400) : '';
-      throw new Error(`Dentally ${res.status} al consultar disponibilidad: ${detail}`);
+      const blob = JSON.stringify(res.json || {}).toLowerCase();
+      if (blob.includes('must be in the future')) throw new Error('La fecha debe ser futura. Elige hoy a una hora próxima o un día siguiente.');
+      throw new Error('No se pudo consultar la disponibilidad en Dentally. Revisa la fecha e inténtalo de nuevo.');
     }
     const slots: any[] = Array.isArray(res.json?.availability) ? res.json.availability : [];
     const mapped = slots.map((s) => ({

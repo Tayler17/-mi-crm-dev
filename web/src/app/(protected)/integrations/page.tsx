@@ -320,7 +320,7 @@ function BookingPanel({ provider }: { provider: string }) {
               {contacts.map((c) => <option key={c.id} value={c.id}>{c.fullName}{c.email ? ` · ${c.email}` : ''}</option>)}
             </select>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-              El contacto debe estar vinculado a un paciente de Dentally (sincroniza primero).
+              Haz clic en el contacto de la lista para seleccionarlo. Se vinculará automáticamente con su ficha de Dentally (por email/teléfono); si no existe, se creará. No hace falta sincronizar todo.
             </div>
           </div>
           <div className="form-group" style={{ margin: 0 }}>
