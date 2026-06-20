@@ -121,12 +121,13 @@ export class KnowledgeBaseService {
       `SELECT COUNT(*) FROM bot_knowledge_chunks WHERE bot_id=$1 AND tenant_id=$2`,
       [botId, tenantId],
     );
-    if (Number(count) === 0) return '';
+    if (Number(count) === 0) { this.logger.warn(`[rag] bot=${botId} has NO indexed chunks`); return ''; }
 
     let apiKey: string;
     try {
       apiKey = await this.embeddings.getApiKey(tenantId);
     } catch {
+      this.logger.warn(`[rag] bot=${botId} no embeddings API key for tenant — RAG skipped`);
       return ''; // No API key → skip RAG silently
     }
 
@@ -151,6 +152,7 @@ export class KnowledgeBaseService {
       [vecSql, botId, tenantId, RAG_MIN_SIMILARITY, RAG_TOP_K],
     );
 
+    this.logger.log(`[rag] bot=${botId} q="${query.slice(0, 50)}" chunks=${Number(count)} matched=${rows.length} top=${rows[0]?.similarity?.toFixed(3) ?? 'n/a'}`);
     if (!rows.length) return '';
 
     const context = rows
