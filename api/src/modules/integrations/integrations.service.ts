@@ -291,21 +291,52 @@ export class IntegrationsService implements OnModuleInit {
       if (connector.findPatient) {
         ext = await connector.findPatient(config, { email: c.email || undefined, phone: c.phone || undefined });
       }
-      if (!ext) {
-        if (!connector.createPatient) {
-          throw new BadRequestException('No se encontró el paciente en Dentally. Créalo en Dentally o sincroniza los pacientes.');
-        }
-        const parts = (c.full_name || '').trim().split(/\s+/);
+    } catch (e: any) {
+      throw new BadRequestException(e?.message || 'No se pudo buscar el paciente en Dentally.');
+    }
+
+    // Not found → create it from the contact's custom fields (Dentally requires
+    // title, date of birth and gender; payment plan is auto-resolved).
+    if (!ext) {
+      if (!connector.createPatient) {
+        throw new BadRequestException('Este contacto no existe como paciente en Dentally y este sistema no permite crearlo.');
+      }
+      const cfRows = await this.db.query(
+        `SELECT d.name, v.value
+           FROM custom_field_definitions d
+           LEFT JOIN custom_field_values v ON v.definition_id = d.id AND v.entity_id::text = $2
+          WHERE d.tenant_id::text = $1 AND d.entity_type = 'contact'
+            AND d.name = ANY($3)`,
+        [tenantId, contactId, ['dentally_title', 'dentally_dob', 'dentally_gender']],
+      );
+      const cf: Record<string, string> = {};
+      for (const r of cfRows) if (r.value) cf[r.name] = r.value;
+
+      const missing: string[] = [];
+      if (!cf.dentally_dob)    missing.push('fecha de nacimiento (dentally_dob)');
+      if (!cf.dentally_gender) missing.push('género (dentally_gender: male/female)');
+      if (!cf.dentally_title)  missing.push('título (dentally_title)');
+      if (missing.length) {
+        throw new BadRequestException(
+          `Este contacto no existe en Dentally y faltan datos para crearlo: ${missing.join(', ')}. ` +
+          `Añádelos como campos personalizados del contacto y reintenta.`,
+        );
+      }
+
+      const parts = (c.full_name || '').trim().split(/\s+/);
+      try {
         ext = await connector.createPatient(config, {
           firstName: parts[0] || 'Paciente',
           lastName: parts.slice(1).join(' ') || 'CRM',
           email: c.email || undefined,
           phone: c.phone || undefined,
+          title: cf.dentally_title,
+          dateOfBirth: cf.dentally_dob,
+          gender: cf.dentally_gender,
         });
+      } catch (e: any) {
+        throw new BadRequestException(e?.message || 'No se pudo crear el paciente en Dentally.');
       }
-    } catch (e: any) {
-      if (e instanceof BadRequestException) throw e;
-      throw new BadRequestException(e?.message || 'No se pudo vincular el paciente en Dentally.');
     }
 
     await this.db.query(

@@ -93,25 +93,41 @@ export class DentallyConnector implements IntegrationConnector {
     return match ? this.mapPatient(match) : null;
   }
 
-  /** Create a patient in Dentally (minimal fields; surfaces Dentally's validation errors). */
+  /** The practice's default payment plan id (Dentally requires one to create a patient). */
+  private async defaultPaymentPlanId(host: string, token: string): Promise<string | undefined> {
+    const res = await this.request(host, token, '/v1/payment_plans?per_page=100');
+    if (res.status >= 400) return undefined;
+    const plans: any[] = Array.isArray(res.json?.payment_plans) ? res.json.payment_plans : [];
+    const chosen = plans.find((p) => p.default) || plans.find((p) => p.active !== false) || plans[0];
+    return chosen ? String(chosen.id) : undefined;
+  }
+
+  /** Create a patient in Dentally. Auto-resolves the default payment plan; surfaces validation errors. */
   async createPatient(
     config: Record<string, any>,
-    p: { firstName?: string; lastName?: string; email?: string; phone?: string },
+    p: { firstName?: string; lastName?: string; email?: string; phone?: string; title?: string; dateOfBirth?: string; gender?: string },
   ): Promise<ExternalContact> {
     const token = (config?.token || '').trim();
     if (!token) throw new Error('Falta el token de API de Dentally.');
+    const host = this.host(config);
+    const paymentPlanId = await this.defaultPaymentPlanId(host, token);
+    if (!paymentPlanId) throw new Error('La clínica no tiene un plan de pago configurado en Dentally.');
     const body = {
       patient: {
+        title: p.title || undefined,
         first_name: p.firstName || 'Paciente',
         last_name: p.lastName || 'CRM',
+        date_of_birth: p.dateOfBirth || undefined,
+        gender: (p.gender || '').toLowerCase() || undefined,
+        payment_plan_id: paymentPlanId,
         email_address: p.email || undefined,
         mobile_phone: p.phone || undefined,
       },
     };
-    const res = await this.request(this.host(config), token, '/v1/patients', 'POST', body);
+    const res = await this.request(host, token, '/v1/patients', 'POST', body);
     if (res.status === 422) {
       const msg = JSON.stringify(res.json?.error || res.json?.errors || res.json).slice(0, 300);
-      throw new Error(`Dentally rechazó crear el paciente (faltan datos obligatorios): ${msg}`);
+      throw new Error(`Dentally rechazó crear el paciente: ${msg}`);
     }
     if (res.status >= 400) throw new Error(`Dentally ${res.status} al crear el paciente.`);
     const created = this.mapPatient(res.json?.patient ?? res.json);
