@@ -144,9 +144,18 @@ export class DentallyConnector implements IntegrationConnector {
     const token = (config?.token || '').trim();
     if (!token) throw new Error('Falta el token de API de Dentally.');
     const duration = opts.durationMinutes ?? 30;
+    // Dentally requires the search window to span MORE than 24 hours. A single-day
+    // request (00:00–23:59) is just under 24h and gets rejected, so we widen the
+    // window sent to Dentally and filter the results back to the requested range.
+    const startMs = Date.parse(opts.startDate);
+    const reqFinishMs = Date.parse(opts.finishDate);
+    const minFinishMs = startMs + 24 * 60 * 60 * 1000 + 60 * 1000; // start + 24h + 1min
+    const finishTime = (!isNaN(reqFinishMs) && reqFinishMs > minFinishMs)
+      ? opts.finishDate
+      : new Date(minFinishMs).toISOString();
     const qs = new URLSearchParams({
       start_time: opts.startDate,
-      finish_time: opts.finishDate,
+      finish_time: finishTime,
       duration: String(duration),
     });
     qs.append('practitioner_ids[]', String(opts.practitionerId));
@@ -157,11 +166,17 @@ export class DentallyConnector implements IntegrationConnector {
       throw new Error(`Dentally ${res.status} al consultar disponibilidad: ${detail}`);
     }
     const slots: any[] = Array.isArray(res.json?.availability) ? res.json.availability : [];
-    return slots.map((s) => ({
+    const mapped = slots.map((s) => ({
       start: s.start_time,
       finish: s.finish_time,
       practitionerId: s.practitioner_id != null ? String(s.practitioner_id) : String(opts.practitionerId),
     }));
+    // Keep only slots within the day the user actually asked for.
+    if (isNaN(reqFinishMs)) return mapped;
+    return mapped.filter((s) => {
+      const t = Date.parse(s.start);
+      return isNaN(t) || t <= reqFinishMs;
+    });
   }
 
   /** Phase 3: create an appointment in Dentally. */
