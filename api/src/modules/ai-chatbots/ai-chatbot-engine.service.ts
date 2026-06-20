@@ -1064,7 +1064,10 @@ export class AiChatbotEngineService {
         .map((m) => m.role === 'assistant'
           ? { body: m.content, direction: 'outbound', sender_type: 'bot' }
           : { body: m.content, direction: 'inbound', sender_type: 'contact' });
-      const result = await this.callAi(bot, apiKey, mapped, { text: message });
+      // Inject knowledge-base context + Dentally tools so the test mirrors production.
+      const ragContext = await this.kbSvc.searchRelevantContext(botId, tenantId, message).catch(() => '');
+      const dentallyConnected = await this.integrations.isConnected(tenantId, 'dentally').catch(() => false);
+      const result = await this.callAi(bot, apiKey, mapped, { text: message }, {}, [], {}, [], [], {}, ragContext, false, dentallyConnected);
       return { reply: result?.reply ?? null };
     } catch (err: any) {
       return { reply: null, error: err?.message ?? 'Error al llamar a la IA' };
