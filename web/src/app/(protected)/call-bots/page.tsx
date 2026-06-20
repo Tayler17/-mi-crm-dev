@@ -483,7 +483,14 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
   };
 
   const hasVisualConfig = !!(bot?.visualConfig && Object.keys(bot.visualConfig).length > 0);
-  const initPromptMode: BotForm['promptMode'] = hasVisualConfig ? 'visual' : 'advanced';
+  // If the saved prompt was hand-written (differs from what the visual builder
+  // would generate), open in Advanced so it shows and isn't overwritten by the
+  // visual regeneration; otherwise use the visual builder.
+  const savedPrompt = (bot?.systemPrompt ?? '').trim();
+  const generatedPrompt = generateCallPromptFromVisual(initVC, bot?.name ?? '').trim();
+  const initPromptMode: BotForm['promptMode'] =
+    savedPrompt && savedPrompt !== generatedPrompt ? 'advanced'
+    : hasVisualConfig ? 'visual' : 'advanced';
 
   const [form, setForm] = useState<BotForm>({
     name: bot?.name ?? '',
