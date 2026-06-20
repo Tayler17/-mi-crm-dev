@@ -231,7 +231,12 @@ function BookingPanel({ provider }: { provider: string }) {
   // Debounced contact search
   useEffect(() => {
     const t = setTimeout(() => {
-      getContacts(1, 30, contactSearch).then((r) => setContacts(r.data)).catch(() => {});
+      getContacts(1, 30, contactSearch).then((r) => {
+        setContacts(r.data);
+        // Auto-select the first contact so the "Confirmar" button enables without
+        // needing an explicit click (a sized <select> doesn't set state on its own).
+        setContactId((cur) => (r.data.some((c) => c.id === cur) ? cur : (r.data[0]?.id ?? '')));
+      }).catch(() => {});
     }, 300);
     return () => clearTimeout(t);
   }, [contactSearch]);
