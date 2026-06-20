@@ -152,7 +152,10 @@ export class DentallyConnector implements IntegrationConnector {
     qs.append('practitioner_ids[]', String(opts.practitionerId));
     const res = await this.request(this.host(config), token, `/v1/appointments/availability?${qs.toString()}`);
     if (res.status === 401 || res.status === 403) throw new Error('Token inválido o sin permisos para ver disponibilidad.');
-    if (res.status >= 400) throw new Error(`Dentally respondió ${res.status} al consultar disponibilidad.`);
+    if (res.status >= 400) {
+      const detail = res.json ? JSON.stringify(res.json).slice(0, 400) : '';
+      throw new Error(`Dentally ${res.status} al consultar disponibilidad: ${detail}`);
+    }
     const slots: any[] = Array.isArray(res.json?.availability) ? res.json.availability : [];
     return slots.map((s) => ({
       start: s.start_time,

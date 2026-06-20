@@ -224,7 +224,11 @@ export class IntegrationsService implements OnModuleInit {
     if (!opts.practitionerId || !opts.startDate || !opts.finishDate) {
       throw new BadRequestException('Faltan datos: profesional y rango de fechas.');
     }
-    return connector.listAvailability(config, opts);
+    try {
+      return await connector.listAvailability(config, opts);
+    } catch (e: any) {
+      throw new BadRequestException(e?.message || 'Error al consultar disponibilidad.');
+    }
   }
 
   /**
