@@ -68,6 +68,57 @@ export class DentallyConnector implements IntegrationConnector {
    * patient: {...} } or { event: 'appointment_insertion', appointment: {...} }.
    * Confirm exact names/shape against real deliveries and adjust here.
    */
+  /** Find one existing patient by email or phone (tolerant — returns null if none/unsupported). */
+  async findPatient(config: Record<string, any>, q: { email?: string; phone?: string }): Promise<ExternalContact | null> {
+    const token = (config?.token || '').trim();
+    if (!token) throw new Error('Falta el token de API de Dentally.');
+    const host = this.host(config);
+    const norm = (s?: string) => (s || '').toLowerCase().trim();
+
+    const tryQuery = async (qs: string): Promise<any[]> => {
+      const res = await this.request(host, token, `/v1/patients?per_page=50&${qs}`);
+      if (res.status >= 400) return [];
+      return Array.isArray(res.json?.patients) ? res.json.patients : [];
+    };
+
+    let patients: any[] = [];
+    if (q.email) patients = await tryQuery(`filters[email_address]=${encodeURIComponent(q.email)}`);
+    if (!patients.length && q.phone) patients = await tryQuery(`filters[mobile_phone]=${encodeURIComponent(q.phone)}`);
+
+    const match = patients.find((p) =>
+      (q.email && norm(p.email_address) === norm(q.email)) ||
+      (q.phone && (p.mobile_phone === q.phone || p.home_phone === q.phone || p.work_phone === q.phone)),
+    ) || (patients.length === 1 ? patients[0] : null);
+
+    return match ? this.mapPatient(match) : null;
+  }
+
+  /** Create a patient in Dentally (minimal fields; surfaces Dentally's validation errors). */
+  async createPatient(
+    config: Record<string, any>,
+    p: { firstName?: string; lastName?: string; email?: string; phone?: string },
+  ): Promise<ExternalContact> {
+    const token = (config?.token || '').trim();
+    if (!token) throw new Error('Falta el token de API de Dentally.');
+    const body = {
+      patient: {
+        first_name: p.firstName || 'Paciente',
+        last_name: p.lastName || 'CRM',
+        email_address: p.email || undefined,
+        mobile_phone: p.phone || undefined,
+      },
+    };
+    const res = await this.request(this.host(config), token, '/v1/patients', 'POST', body);
+    if (res.status === 422) {
+      const msg = JSON.stringify(res.json?.error || res.json?.errors || res.json).slice(0, 300);
+      throw new Error(`Dentally rechazó crear el paciente (faltan datos obligatorios): ${msg}`);
+    }
+    if (res.status >= 400) throw new Error(`Dentally ${res.status} al crear el paciente.`);
+    const created = this.mapPatient(res.json?.patient ?? res.json);
+    if (!created) throw new Error('Dentally no devolvió el paciente creado.');
+    return created;
+  }
+
   normalizeWebhook(payload: any): WebhookEvent | null {
     if (!payload) return null;
     const event = String(payload.event || payload.type || '').toLowerCase();

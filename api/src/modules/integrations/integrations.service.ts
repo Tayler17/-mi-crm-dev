@@ -245,24 +245,74 @@ export class IntegrationsService implements OnModuleInit {
       throw new BadRequestException('Faltan datos: contacto, profesional y horario.');
     }
 
+    // Auto-link the contact to a Dentally patient on demand (find by email/phone,
+    // else create) — no need to import the whole patient base first.
+    const externalId = await this.linkOrCreatePatient(tenantId, provider, input.contactId);
+
+    let booked;
+    try {
+      booked = await connector.createAppointment(config, {
+        patientExternalId: externalId,
+        practitionerId: input.practitionerId,
+        start: input.start,
+        finish: input.finish,
+        reason: input.reason,
+      });
+    } catch (e: any) {
+      throw new BadRequestException(e?.message || 'No se pudo crear la cita.');
+    }
+    this.logger.log(`[integrations] ${provider} booked appt ${booked.id} for contact ${input.contactId} (tenant ${tenantId})`);
+    return { ok: true, appointment: booked };
+  }
+
+  /**
+   * Link a CRM contact to an external patient on demand: return the existing
+   * mapping, else find the patient by email/phone, else create it — then record
+   * the mapping. Avoids having to bulk-import every patient just to book.
+   */
+  async linkOrCreatePatient(tenantId: string, provider: string, contactId: string): Promise<string> {
+    const { connector, config } = await this.getConnected(tenantId, provider);
+
     const [map] = await this.db.query(
       `SELECT external_id FROM integration_contact_map
        WHERE tenant_id::text=$1 AND provider=$2 AND contact_id::text=$3`,
-      [tenantId, provider, input.contactId],
+      [tenantId, provider, contactId],
     );
-    if (!map?.external_id) {
-      throw new BadRequestException('Este contacto no está vinculado a un paciente de Dentally. Sincroniza primero los pacientes.');
+    if (map?.external_id) return map.external_id;
+
+    const [c] = await this.db.query(
+      `SELECT full_name, email, phone FROM contacts WHERE id::text=$1 AND tenant_id::text=$2`,
+      [contactId, tenantId],
+    );
+    if (!c) throw new BadRequestException('Contacto no encontrado.');
+
+    let ext: { externalId: string } | null = null;
+    try {
+      if (connector.findPatient) {
+        ext = await connector.findPatient(config, { email: c.email || undefined, phone: c.phone || undefined });
+      }
+      if (!ext) {
+        if (!connector.createPatient) {
+          throw new BadRequestException('No se encontró el paciente en Dentally. Créalo en Dentally o sincroniza los pacientes.');
+        }
+        const parts = (c.full_name || '').trim().split(/\s+/);
+        ext = await connector.createPatient(config, {
+          firstName: parts[0] || 'Paciente',
+          lastName: parts.slice(1).join(' ') || 'CRM',
+          email: c.email || undefined,
+          phone: c.phone || undefined,
+        });
+      }
+    } catch (e: any) {
+      if (e instanceof BadRequestException) throw e;
+      throw new BadRequestException(e?.message || 'No se pudo vincular el paciente en Dentally.');
     }
 
-    const booked = await connector.createAppointment(config, {
-      patientExternalId: map.external_id,
-      practitionerId: input.practitionerId,
-      start: input.start,
-      finish: input.finish,
-      reason: input.reason,
-    });
-    this.logger.log(`[integrations] ${provider} booked appt ${booked.id} for contact ${input.contactId} (tenant ${tenantId})`);
-    return { ok: true, appointment: booked };
+    await this.db.query(
+      `INSERT INTO integration_contact_map (tenant_id, provider, external_id, contact_id) VALUES ($1,$2,$3,$4)`,
+      [tenantId, provider, ext.externalId, contactId],
+    ).catch(() => {});
+    return ext.externalId;
   }
 
   /**

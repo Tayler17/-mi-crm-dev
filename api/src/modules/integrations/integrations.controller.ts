@@ -70,6 +70,12 @@ export class IntegrationsController {
     return this.svc.bookAppointment(tenantId, provider, body ?? {});
   }
 
+  /** Link a single CRM contact to an external patient (find by email/phone, else create). */
+  @Post(':provider/link-contact')
+  linkContact(@Param('provider') provider: string, @Body() body: { contactId: string }, @TenantId() tenantId: string) {
+    return this.svc.linkOrCreatePatient(tenantId, provider, body?.contactId);
+  }
+
   /** Toggle the automatic background sync (token-only model) */
   @Post(':provider/auto-sync')
   autoSync(@Param('provider') provider: string, @Body() body: any, @TenantId() tenantId: string, @Request() req: any) {

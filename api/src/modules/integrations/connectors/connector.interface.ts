@@ -50,6 +50,10 @@ export interface IntegrationConnector {
   // ── Later phases (optional until implemented) ──────────────────────────────
   /** Phase 2: pull patients/customers to sync as CRM contacts. */
   listPatients?(config: Record<string, any>, opts?: { perPage?: number; maxPages?: number }): Promise<ExternalContact[]>;
+  /** Find a single existing patient by email/phone (for on-demand linking). Null if none. */
+  findPatient?(config: Record<string, any>, q: { email?: string; phone?: string }): Promise<ExternalContact | null>;
+  /** Create a patient in the external system (for on-demand linking when not found). */
+  createPatient?(config: Record<string, any>, p: { firstName?: string; lastName?: string; email?: string; phone?: string }): Promise<ExternalContact>;
   /** Phase 3: bookable professionals. */
   listPractitioners?(config: Record<string, any>): Promise<Practitioner[]>;
   /** Phase 3: open slots for a date range / practitioner. */
