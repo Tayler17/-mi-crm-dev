@@ -66,7 +66,7 @@ export class KnowledgeBaseService {
     const [source] = await this.db.query(
       `INSERT INTO bot_knowledge_sources (tenant_id, bot_id, type, url, status)
        VALUES ($1, $2, 'url', $3, 'pending') RETURNING id`,
-      [tenantId, botId, url],
+      [tenantId, botId, parsed.href],
     );
 
     await this.enqueueIndexing(source.id, botId, tenantId);
@@ -178,6 +178,9 @@ export class KnowledgeBaseService {
   }
 
   private async enqueueIndexing(sourceId: string, botId: string, tenantId: string) {
+    // Remove any prior job with this id (BullMQ keeps completed/failed jobs, so a
+    // reindex with the same jobId would otherwise be ignored and stay 'pending').
+    await this.queue.remove(`kb-${sourceId}`).catch(() => {});
     await this.queue.add(
       'index-source',
       { sourceId, botId, tenantId },
@@ -192,9 +195,12 @@ export class KnowledgeBaseService {
   }
 
   private parseUrl(raw: string): URL | null {
+    let s = (raw || '').trim();
+    // Tolerate a pasted markdown link like "[text](https://site.com)".
+    const md = s.match(/\((https?:\/\/[^)\s]+)\)/);
+    if (md) s = md[1];
     try {
-      const u = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
-      return u;
+      return new URL(s.startsWith('http') ? s : `https://${s}`);
     } catch {
       return null;
     }
