@@ -11,6 +11,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { KnowledgeBaseService } from '../knowledge-base/knowledge-base.service';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
 import { BillingService } from '../billing/billing.service';
+import { IntegrationsService } from '../integrations/integrations.service';
 
 interface MediaResult {
   /** Text to pass to the LLM (transcription for audio, empty for images) */
@@ -34,6 +35,9 @@ interface AiResult {
   removeTag?: { tagName: string };
   createTask?: { title: string; description?: string; dueDate?: string; priority?: string };
   createPaymentLink?: { amount: number; currency: string; description: string };
+  dentallyListPractitioners?: boolean;
+  dentallyCheckAvailability?: { date: string; practitionerName?: string; durationMinutes?: number };
+  dentallyBook?: { date: string; time: string; practitionerName?: string; durationMinutes?: number; reason?: string; dateOfBirth?: string; gender?: string; title?: string };
 }
 
 type ChatMessage = {
@@ -52,6 +56,7 @@ export class AiChatbotEngineService {
     private readonly kbSvc: KnowledgeBaseService,
     private readonly platformSettings: PlatformSettingsService,
     private readonly billing: BillingService,
+    private readonly integrations: IntegrationsService,
   ) {}
 
   // ── Core processing (called by BotQueueProcessor) ────────────────────────────
@@ -375,7 +380,8 @@ export class AiChatbotEngineService {
     const ragContext = await this.kbSvc.searchRelevantContext(bot.id, tenantId, userText).catch(() => '');
 
     // 9c. Call AI — pass queueMap + stages + deals + tags + stripeConnect so each provider can use function/tool calling
-    const result = await this.callAi(bot, apiKey, history, media, queueMap, stageNames, stageMap, existingDeals, tagNames, tagMap, ragContext, stripeConnectEnabled);
+    const dentallyConnected = await this.integrations.isConnected(tenantId, 'dentally').catch(() => false);
+    const result = await this.callAi(bot, apiKey, history, media, queueMap, stageNames, stageMap, existingDeals, tagNames, tagMap, ragContext, stripeConnectEnabled, dentallyConnected);
     if (!result) {
       this.logger.warn(`[engine] AI returned null for conv ${conversationId} (bot "${bot.name}", provider "${bot.provider}") — sending fallback`);
       await this.saveBotMessage(tenantId, conversationId,
@@ -385,6 +391,29 @@ export class AiChatbotEngineService {
 
     let { reply, transferTo, resolveConversation, setWaiting, createDeal, updateDeal, addTag, removeTag, createTask, createPaymentLink } = result;
     this.logger.log(`[engine] AI reply (first 120): "${reply?.slice(0, 120)}" transferTo="${transferTo ?? 'none'}" resolve=${!!resolveConversation} wait=${!!setWaiting} createDeal=${!!createDeal} updateDeal=${!!updateDeal} addTag=${addTag?.tagName ?? 'none'} removeTag=${removeTag?.tagName ?? 'none'} createTask=${createTask?.title ?? 'none'}`);
+
+    // Dentally actions: execute and send the authoritative reply our code composes
+    // (real slots / booking result / error), then stop. Scoped to this tenant.
+    const { dentallyListPractitioners, dentallyCheckAvailability, dentallyBook } = result;
+    if (dentallyListPractitioners || dentallyCheckAvailability || dentallyBook) {
+      await this.db.query(`UPDATE ai_chatbot_sessions SET message_count=message_count+1 WHERE id=$1`, [session.id]).catch(() => {});
+      let outMsg = '';
+      try {
+        if (dentallyListPractitioners) {
+          outMsg = await this.integrations.botListPractitioners(tenantId, 'dentally');
+        } else if (dentallyCheckAvailability) {
+          outMsg = await this.integrations.botCheckAvailability(tenantId, 'dentally', dentallyCheckAvailability);
+        } else if (dentallyBook) {
+          outMsg = await this.integrations.botBook(tenantId, 'dentally', { contactId: conv.contact_id, ...dentallyBook });
+        }
+      } catch (e: any) {
+        outMsg = `No pude completar la acción ahora mismo: ${e?.message || 'error'}.`;
+      }
+      if (reply && reply.trim()) await this.saveBotMessage(tenantId, conversationId, reply);
+      if (outMsg) await this.saveBotMessage(tenantId, conversationId, outMsg);
+      await this.saveActivityMessage(tenantId, conversationId, '🤖 Bot usó Dentally').catch(() => {});
+      return;
+    }
 
     // If a CRM action was requested but the AI returned no message, use a generic confirmation
     // so the bot doesn't go silent after silently running a tool.
@@ -743,6 +772,7 @@ export class AiChatbotEngineService {
     tagMap: Record<string, string> = {},
     ragContext: string = '',
     stripeConnectEnabled = false,
+    dentallyConnected = false,
   ): Promise<AiResult | null> {
     try {
       const maxTokens   = parseInt(bot.max_tokens,  10) || 300;
@@ -763,6 +793,11 @@ export class AiChatbotEngineService {
       if (stripeConnectEnabled) crmLines.push('- create_payment_link: SOLO cuando el cliente confirme EXPLÍCITAMENTE que quiere pagar y hayas acordado el monto exacto. Siempre pregunta primero "¿Confirmas el pago de $X [moneda]?" antes de llamar esta herramienta. Monto mínimo $1, máximo $10,000.');
       if (transferTargets.length > 0) crmLines.push(`- transfer_conversation: solo cuando el usuario pida explícitamente hablar con otro departamento o cuando claramente necesitas un servicio que no puedes ofrecer. Destinos: ${transferTargets.join(', ')}.`);
       crmLines.push('- resolve_conversation: cuando el caso del usuario haya quedado completamente resuelto.');
+      if (dentallyConnected) {
+        crmLines.push('- dentally_list_practitioners: para listar los profesionales/doctores disponibles para citas.');
+        crmLines.push('- dentally_check_availability: para ver los horarios libres de un día (parámetro date en formato YYYY-MM-DD; opcionalmente practitioner_name). Úsala cuando el cliente quiera saber disponibilidad u horarios.');
+        crmLines.push('- dentally_book_appointment: para AGENDAR una cita cuando el cliente ya eligió día y hora (date YYYY-MM-DD, time HH:MM). Si el cliente NO está registrado como paciente, pídele su fecha de nacimiento (date_of_birth, YYYY-MM-DD) y género (gender: male/female) ANTES de agendar.');
+      }
       crmLines.push('Siempre incluye un mensaje de confirmación breve y amigable para el usuario al usar cualquier herramienta.');
       const crmInstructions = crmLines.join('\n');
 
@@ -774,7 +809,7 @@ export class AiChatbotEngineService {
       ].filter(Boolean).join('\n\n').trim();
 
       switch (bot.provider) {
-        case 'openai':    return await this.callOpenAi(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled);
+        case 'openai':    return await this.callOpenAi(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected);
         case 'anthropic': return await this.callAnthropic(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled);
         case 'gemini':    return await this.callGemini(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled);
         default:
@@ -808,7 +843,7 @@ export class AiChatbotEngineService {
   private async callOpenAi(
     apiKey: string, model: string, systemPrompt: string | null,
     history: any[], media: MediaResult, maxTokens: number, temperature: number,
-    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false,
+    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false, dentallyConnected = false,
   ): Promise<AiResult> {
     const messages: any[] = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
@@ -842,6 +877,11 @@ export class AiChatbotEngineService {
     if (stripeConnectEnabled) {
       tools.push({ type: 'function', function: { name: 'create_payment_link', description: 'Generate a Stripe payment link to send to the customer. RULES: 1) ONLY call after the customer explicitly confirms they want to pay AND you have confirmed the exact amount. 2) Always ask "¿Confirmas el pago de $X [currency]?" BEFORE calling this. 3) Amount: min $1, max $10,000. 4) The link will be sent automatically after generation.', parameters: { type: 'object', properties: { amount: { type: 'number', description: 'Amount to charge (e.g. 150.00). Must be between 1 and 10000.' }, currency: { type: 'string', description: 'Currency code: USD, EUR, GBP, MXN, etc.', default: 'USD' }, description: { type: 'string', description: 'Description visible to the customer on the payment page (e.g. "Consulta médica - 1 hora")' }, message: { type: 'string', description: 'Message to send to the customer confirming the payment link is being sent' } }, required: ['amount', 'currency', 'description', 'message'] } } });
     }
+    if (dentallyConnected) {
+      tools.push({ type: 'function', function: { name: 'dentally_list_practitioners', description: 'List the clinic professionals/doctors available for appointments.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'Optional short message to the customer' } } } } });
+      tools.push({ type: 'function', function: { name: 'dentally_check_availability', description: 'Check open appointment slots for a given day. Use when the customer asks about availability or times.', parameters: { type: 'object', properties: { date: { type: 'string', description: 'Day to check, format YYYY-MM-DD' }, practitioner_name: { type: 'string', description: 'Optional professional name' }, duration: { type: 'number', description: 'Minutes (default 30)' } }, required: ['date'] } } });
+      tools.push({ type: 'function', function: { name: 'dentally_book_appointment', description: 'Book an appointment once the customer has chosen a day and time. If the customer is NOT a registered patient, first ask for date_of_birth (YYYY-MM-DD) and gender (male/female), then call this.', parameters: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD' }, time: { type: 'string', description: 'HH:MM (24h), must be one of the available slots' }, practitioner_name: { type: 'string' }, duration: { type: 'number' }, reason: { type: 'string' }, date_of_birth: { type: 'string', description: 'Patient DOB YYYY-MM-DD (only if a new patient)' }, gender: { type: 'string', enum: ['male', 'female'] }, title: { type: 'string', description: 'Mr/Mrs/Ms/Dr (only if a new patient)' } }, required: ['date', 'time'] } } });
+    }
     body.tools = tools;
     body.tool_choice = 'auto';
 
@@ -861,6 +901,9 @@ export class AiChatbotEngineService {
           case 'remove_tag':            return { reply: args.message ?? '', removeTag: { tagName: args.tag_name } };
           case 'create_task':           return { reply: args.message ?? '', createTask: { title: args.title, description: args.description, dueDate: args.due_date, priority: args.priority } };
           case 'create_payment_link':   return { reply: args.message ?? '', createPaymentLink: { amount: args.amount, currency: args.currency ?? 'USD', description: args.description } };
+          case 'dentally_list_practitioners': return { reply: args.message ?? '', dentallyListPractitioners: true };
+          case 'dentally_check_availability': return { reply: args.message ?? '', dentallyCheckAvailability: { date: args.date, practitionerName: args.practitioner_name, durationMinutes: args.duration } };
+          case 'dentally_book_appointment':   return { reply: args.message ?? '', dentallyBook: { date: args.date, time: args.time, practitionerName: args.practitioner_name, durationMinutes: args.duration, reason: args.reason, dateOfBirth: args.date_of_birth, gender: args.gender, title: args.title } };
         }
       } catch { /* fall through */ }
     }

@@ -237,7 +237,7 @@ export class IntegrationsService implements OnModuleInit {
    */
   async bookAppointment(
     tenantId: string, provider: string,
-    input: { contactId: string; practitionerId: string; start: string; finish?: string; reason?: string },
+    input: { contactId: string; practitionerId: string; start: string; finish?: string; reason?: string; patientData?: { dateOfBirth?: string; gender?: string; title?: string } },
   ) {
     const { connector, config } = await this.getConnected(tenantId, provider);
     if (!connector.createAppointment) throw new BadRequestException(`${provider} no soporta agendar citas.`);
@@ -247,7 +247,7 @@ export class IntegrationsService implements OnModuleInit {
 
     // Auto-link the contact to a Dentally patient on demand (find by email/phone,
     // else create) — no need to import the whole patient base first.
-    const externalId = await this.linkOrCreatePatient(tenantId, provider, input.contactId);
+    const externalId = await this.linkOrCreatePatient(tenantId, provider, input.contactId, input.patientData);
 
     let booked;
     try {
@@ -265,12 +265,111 @@ export class IntegrationsService implements OnModuleInit {
     return { ok: true, appointment: booked };
   }
 
+  // ── Bot helpers (used by the AI chatbot engine, scoped by tenantId) ──────────
+
+  /** Whether the tenant has this provider connected (for gating bot tools). */
+  async isConnected(tenantId: string, provider: string): Promise<boolean> {
+    try { await this.getConnected(tenantId, provider); return true; }
+    catch { return false; }
+  }
+
+  private slotTime(iso: string): string {
+    const m = /T(\d{2}:\d{2})/.exec(iso || '');
+    return m ? m[1] : iso;
+  }
+
+  private async resolvePractitioner(connector: any, config: any, name?: string): Promise<{ id: string; name: string } | null> {
+    if (!connector.listPractitioners) return null;
+    const list: Array<{ id: string; name: string }> = await connector.listPractitioners(config).catch(() => []);
+    if (!list.length) return null;
+    if (name) {
+      const n = name.toLowerCase().trim();
+      const found = list.find((p) => p.name.toLowerCase().includes(n) || n.includes(p.name.toLowerCase()));
+      if (found) return found;
+    }
+    return list[0];
+  }
+
+  /** Bot: list bookable professionals as a friendly message. */
+  async botListPractitioners(tenantId: string, provider: string): Promise<string> {
+    const { connector, config } = await this.getConnected(tenantId, provider);
+    const list = connector.listPractitioners ? await connector.listPractitioners(config) : [];
+    if (!list.length) return 'No hay profesionales disponibles ahora mismo.';
+    return 'Profesionales disponibles: ' + list.map((p: any) => p.name).join(', ') + '.';
+  }
+
+  /** Bot: open slots for a day, formatted for the customer. */
+  async botCheckAvailability(
+    tenantId: string, provider: string,
+    opts: { date: string; practitionerName?: string; durationMinutes?: number },
+  ): Promise<string> {
+    const { connector, config } = await this.getConnected(tenantId, provider);
+    if (!connector.listAvailability) return 'Las citas no están disponibles en este momento.';
+    const prac = await this.resolvePractitioner(connector, config, opts.practitionerName);
+    if (!prac) return 'No encontré profesionales para consultar disponibilidad.';
+    let slots: any[];
+    try {
+      slots = await connector.listAvailability(config, {
+        practitionerId: prac.id,
+        startDate: `${opts.date}T00:00:00Z`,
+        finishDate: `${opts.date}T23:59:59Z`,
+        durationMinutes: opts.durationMinutes ?? 30,
+      });
+    } catch (e: any) {
+      return `No pude consultar la disponibilidad: ${e?.message || 'error'}.`;
+    }
+    if (!slots.length) return `No hay horarios disponibles con ${prac.name} el ${opts.date}.`;
+    const times = slots.slice(0, 12).map((s: any) => this.slotTime(s.start)).join(', ');
+    return `Horarios disponibles con ${prac.name} el ${opts.date}: ${times}. ¿Cuál prefieres?`;
+  }
+
+  /** Bot: book a chosen time for the conversation's contact (matches a real slot). */
+  async botBook(
+    tenantId: string, provider: string,
+    opts: { contactId: string; date: string; time: string; practitionerName?: string; durationMinutes?: number; reason?: string; dateOfBirth?: string; gender?: string; title?: string },
+  ): Promise<string> {
+    const { connector, config } = await this.getConnected(tenantId, provider);
+    if (!connector.listAvailability || !connector.createAppointment) return 'Las citas no están disponibles en este momento.';
+    const prac = await this.resolvePractitioner(connector, config, opts.practitionerName);
+    if (!prac) return 'No encontré el profesional para agendar.';
+    let slots: any[] = [];
+    try {
+      slots = await connector.listAvailability(config, {
+        practitionerId: prac.id,
+        startDate: `${opts.date}T00:00:00Z`,
+        finishDate: `${opts.date}T23:59:59Z`,
+        durationMinutes: opts.durationMinutes ?? 30,
+      });
+    } catch { /* fall through to "not available" */ }
+    const want = (opts.time || '').trim();
+    const slot = slots.find((s: any) => this.slotTime(s.start) === want);
+    if (!slot) return `El horario ${want} ya no está disponible con ${prac.name}. ¿Quieres que te muestre otros horarios?`;
+    try {
+      await this.bookAppointment(tenantId, provider, {
+        contactId: opts.contactId,
+        practitionerId: prac.id,
+        start: slot.start,
+        finish: slot.finish,
+        reason: opts.reason,
+        patientData: { dateOfBirth: opts.dateOfBirth, gender: opts.gender, title: opts.title },
+      });
+      return `¡Listo! Tu cita con ${prac.name} quedó agendada para el ${opts.date} a las ${want}.`;
+    } catch (e: any) {
+      return `No pude agendar la cita: ${e?.message || 'error desconocido'}.`;
+    }
+  }
+
   /**
    * Link a CRM contact to an external patient on demand: return the existing
    * mapping, else find the patient by email/phone, else create it — then record
    * the mapping. Avoids having to bulk-import every patient just to book.
    */
-  async linkOrCreatePatient(tenantId: string, provider: string, contactId: string): Promise<string> {
+  async linkOrCreatePatient(
+    tenantId: string,
+    provider: string,
+    contactId: string,
+    patientData?: { dateOfBirth?: string; gender?: string; title?: string },
+  ): Promise<string> {
     const { connector, config } = await this.getConnected(tenantId, provider);
 
     const [map] = await this.db.query(
@@ -321,10 +420,16 @@ export class IntegrationsService implements OnModuleInit {
         else if (k === 'dentallygender') cfGender = r.value;
       }
 
+      // Prefer data provided at call time (e.g. collected by a bot in chat),
+      // fall back to the contact's custom fields.
+      const fTitle  = patientData?.title       || cfTitle;
+      const fDob    = patientData?.dateOfBirth || cfDob;
+      const fGender = patientData?.gender      || cfGender;
+
       const missing: string[] = [];
-      if (!cfDob)    missing.push('fecha de nacimiento (dentally_dob)');
-      if (!cfGender) missing.push('género (dentally_gender: male/female)');
-      if (!cfTitle)  missing.push('título (dentally_title)');
+      if (!fDob)    missing.push('fecha de nacimiento (dentally_dob)');
+      if (!fGender) missing.push('género (dentally_gender: male/female)');
+      if (!fTitle)  missing.push('título (dentally_title)');
       if (missing.length) {
         throw new BadRequestException(
           `Este contacto no existe en Dentally y faltan datos para crearlo: ${missing.join(', ')}. ` +
@@ -339,9 +444,9 @@ export class IntegrationsService implements OnModuleInit {
           lastName: parts.slice(1).join(' ') || 'CRM',
           email: c.email || undefined,
           phone: c.phone || undefined,
-          title: cfTitle,
-          dateOfBirth: cfDob,
-          gender: cfGender,
+          title: fTitle,
+          dateOfBirth: fDob,
+          gender: fGender,
         });
       } catch (e: any) {
         throw new BadRequestException(e?.message || 'No se pudo crear el paciente en Dentally.');

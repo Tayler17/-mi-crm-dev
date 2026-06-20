@@ -12,9 +12,10 @@ import { BotQueueModule } from './bot-queue.module';
 import { KnowledgeBaseModule } from '../knowledge-base/knowledge-base.module';
 import { SettingsModule } from '../settings/settings.module';
 import { BillingModule } from '../billing/billing.module';
+import { IntegrationsModule } from '../integrations/integrations.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([AiChatbot]), ConnectionsModule, NotificationsModule, BotQueueModule, KnowledgeBaseModule, SettingsModule, BillingModule],
+  imports: [TypeOrmModule.forFeature([AiChatbot]), ConnectionsModule, NotificationsModule, BotQueueModule, KnowledgeBaseModule, SettingsModule, BillingModule, IntegrationsModule],
   controllers: [AiChatbotsController],
   providers: [AiChatbotsService, AiChatbotEngineService, BotQueueListener, BotQueueProcessor],
   exports: [AiChatbotsService, AiChatbotEngineService],
