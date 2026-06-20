@@ -843,7 +843,9 @@ ${addTagInstruction}
       const hangupRule = isEs
         ? '\n\nIMPORTANTE: Cuando el cliente se despida o dé por terminada la conversación (ej. "gracias, adiós", "eso es todo", "hasta luego"), responde una despedida breve y termina tu mensaje con [HANGUP].'
         : '\n\nIMPORTANT: When the caller says goodbye or ends the conversation, reply with a short farewell and end your message with [HANGUP].';
-      this.callHistories.set(sessionId, [{ role: 'system', content: (bot.system_prompt ?? '') + hangupRule }]);
+      const nowDt = new Date();
+      const dateRule = `\n\nFECHA Y HORA ACTUAL: ${nowDt.toISOString().slice(0, 16).replace('T', ' ')} UTC (${nowDt.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}). Usa SIEMPRE esta fecha para interpretar "hoy", "mañana", "el lunes". Nunca uses fechas de años anteriores; las citas son siempre a futuro.`;
+      this.callHistories.set(sessionId, [{ role: 'system', content: (bot.system_prompt ?? '') + dateRule + hangupRule }]);
       // Keep the contact resolved by handleIncomingCall; only default if missing.
       if (!this.callMeta.has(sessionId)) {
         this.callMeta.set(sessionId, { contactId: null, tenantId: bot.tenant_id, botId: bot.id });

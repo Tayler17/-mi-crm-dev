@@ -795,7 +795,7 @@ export class AiChatbotEngineService {
       crmLines.push('- resolve_conversation: cuando el caso del usuario haya quedado completamente resuelto.');
       if (dentallyConnected) {
         crmLines.push('- dentally_list_practitioners: para listar los profesionales/doctores disponibles para citas.');
-        crmLines.push('- dentally_check_availability: para ver los horarios libres de un día (parámetro date en formato YYYY-MM-DD; opcionalmente practitioner_name). Úsala cuando el cliente quiera saber disponibilidad u horarios.');
+        crmLines.push('- dentally_check_availability: para ver los horarios libres de un día (parámetro date en formato YYYY-MM-DD; opcionalmente practitioner_name). Úsala cuando el cliente quiera saber disponibilidad u horarios. Si el cliente no indica con qué profesional, pregúntaselo primero (puedes listarlos con dentally_list_practitioners); NO asumas un profesional por tu cuenta.');
         crmLines.push('- dentally_book_appointment: para AGENDAR una cita cuando el cliente ya eligió día y hora (date YYYY-MM-DD, time HH:MM). Si el cliente NO está registrado como paciente, pídele su fecha de nacimiento (date_of_birth, YYYY-MM-DD) y género (gender: male/female) ANTES de agendar.');
         crmLines.push('REGLA CRÍTICA DENTALLY: cuando el cliente pida los doctores, la disponibilidad/horarios, o agendar, DEBES llamar la herramienta correspondiente (dentally_list_practitioners / dentally_check_availability / dentally_book_appointment) y usar su resultado real. NUNCA digas "aquí están los doctores", "estos son los horarios" ni inventes nombres/horarios sin llamar la herramienta. No prometas datos que no obtuviste de la herramienta.');
       }
@@ -809,8 +809,12 @@ export class AiChatbotEngineService {
         ? 'CONVERSACIÓN EN CURSO: NO vuelvas a saludar ni a presentarte. No empieces con "Hola"/"Hello" ni repitas tu introducción; responde directamente al mensaje del usuario.'
         : '';
 
+      const nowDt = new Date();
+      const currentDate = `FECHA Y HORA ACTUAL: ${nowDt.toISOString().slice(0, 16).replace('T', ' ')} UTC (${nowDt.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}). Usa SIEMPRE esta fecha para interpretar "hoy", "mañana", "el lunes", etc. Nunca uses fechas de años anteriores; las citas son siempre a futuro.`;
+
       const systemPrompt = [
         `IDENTIDAD: Tu nombre es "${bot.name}". Cuando alguien pregunte de qué equipo eres o quién eres, responde siempre que eres "${bot.name}".`,
+        currentDate,
         noGreet,
         bot.system_prompt ?? '',
         crmInstructions,
