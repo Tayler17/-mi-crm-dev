@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -11,8 +11,39 @@ const ALLOWED_FIELD_TYPES   = ['text', 'number', 'date', 'select', 'checkbox', '
 
 @Controller('custom-fields')
 @UseGuards(JwtAuthGuard)
-export class CustomFieldsController {
+export class CustomFieldsController implements OnModuleInit {
   constructor(@InjectDataSource() private readonly db: DataSource) {}
+
+  /** Ensure the custom-field tables exist (no migrations in this project). */
+  async onModuleInit() {
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS custom_field_definitions (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id uuid NOT NULL,
+        entity_type varchar NOT NULL,
+        name varchar NOT NULL,
+        label varchar NOT NULL,
+        field_type varchar NOT NULL DEFAULT 'text',
+        options jsonb,
+        is_required boolean NOT NULL DEFAULT false,
+        position int NOT NULL DEFAULT 0,
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `).catch((e: any) => console.error(`[custom-fields] definitions table init: ${e.message}`));
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS custom_field_values (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id uuid NOT NULL,
+        definition_id uuid NOT NULL,
+        entity_id uuid NOT NULL,
+        entity_type varchar NOT NULL,
+        value text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (definition_id, entity_id)
+      )
+    `).catch((e: any) => console.error(`[custom-fields] values table init: ${e.message}`));
+  }
 
   // ── Definition CRUD (admin only) ─────────────────────────────────────────
 
