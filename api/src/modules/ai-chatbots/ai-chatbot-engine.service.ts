@@ -1038,7 +1038,7 @@ export class AiChatbotEngineService {
 
   // ── Test endpoint ─────────────────────────────────────────────────────────────
 
-  async testBotMessage(botId: string, tenantId: string, message: string): Promise<{ reply: string | null; error?: string }> {
+  async testBotMessage(botId: string, tenantId: string, message: string, history: { role: string; content: string }[] = []): Promise<{ reply: string | null; error?: string }> {
     const [rawBot] = await this.db.query(`SELECT * FROM ai_chatbots WHERE id=$1 AND tenant_id=$2`, [botId, tenantId]);
     if (!rawBot) return { reply: null, error: 'Bot no encontrado' };
     let bot = rawBot;
@@ -1058,7 +1058,13 @@ export class AiChatbotEngineService {
       return { reply: null, error: `No hay API key configurada para "${effectiveProvider}". Configúrala en Configuración → Integraciones de IA o pide al administrador que configure la key de plataforma.` };
     }
     try {
-      const result = await this.callAi(bot, apiKey, [], { text: message });
+      const mapped = (history ?? [])
+        .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+        .slice(-20)
+        .map((m) => m.role === 'assistant'
+          ? { body: m.content, direction: 'outbound', sender_type: 'bot' }
+          : { body: m.content, direction: 'inbound', sender_type: 'contact' });
+      const result = await this.callAi(bot, apiKey, mapped, { text: message });
       return { reply: result?.reply ?? null };
     } catch (err: any) {
       return { reply: null, error: err?.message ?? 'Error al llamar a la IA' };

@@ -73,13 +73,14 @@ export class AiChatbotsController {
     return { improved };
   }
 
-  /** Test the bot with a single message (no real conversation needed). */
+  /** Test the bot with a message + prior turns so it keeps context (no greeting loop). */
   @Post(':id/test-message')
   testMessage(
     @Param('id') id: string,
     @Body('message') message: string,
     @TenantId() tenantId: string,
+    @Body('history') history?: { role: string; content: string }[],
   ) {
-    return this.engine.testBotMessage(id, tenantId, message);
+    return this.engine.testBotMessage(id, tenantId, message, history ?? []);
   }
 }

@@ -1630,8 +1630,8 @@ export const deleteAiChatbot = (id: string) => apiDelete(`/ai-chatbots/${id}`);
 export const toggleAiChatbot = (id: string) => apiPost<AiChatbot>(`/ai-chatbots/${id}/toggle`, {});
 export const duplicateAiChatbot = (id: string) => apiPost<AiChatbot>(`/ai-chatbots/${id}/duplicate`, {});
 export const getAiChatbotSessions = (id: string) => apiGet<any[]>(`/ai-chatbots/${id}/sessions`);
-export const testAiChatbotMessage = (id: string, message: string) =>
-  apiPost<{ reply: string | null; error?: string }>(`/ai-chatbots/${id}/test-message`, { message });
+export const testAiChatbotMessage = (id: string, message: string, history: { role: string; content: string }[] = []) =>
+  apiPost<{ reply: string | null; error?: string }>(`/ai-chatbots/${id}/test-message`, { message, history });
 
 export const improveAiChatbotPrompt = (system_prompt: string) =>
   apiPost<{ improved: string }>('/ai-chatbots/improve-prompt', { system_prompt });

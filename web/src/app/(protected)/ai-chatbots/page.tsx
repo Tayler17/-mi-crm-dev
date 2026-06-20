@@ -247,10 +247,12 @@ function TestChatPanel({ bot }: { bot: AiChatbot }) {
     const text = input.trim();
     if (!text || loading) return;
     setInput('');
+    // Prior turns become the history so the bot keeps context (and doesn't re-greet).
+    const history = msgs.map((m) => ({ role: m.role === 'bot' ? 'assistant' : 'user', content: m.text }));
     setMsgs((p) => [...p, { role: 'user', text }]);
     setLoading(true);
     try {
-      const res = await testAiChatbotMessage(bot.id, text);
+      const res = await testAiChatbotMessage(bot.id, text, history);
       setMsgs((p) => [...p, { role: 'bot', text: res.error ? `⚠️ ${res.error}` : (res.reply ?? '(sin respuesta)') }]);
     } catch (e: any) {
       setMsgs((p) => [...p, { role: 'bot', text: `⚠️ Error: ${e.message}` }]);
