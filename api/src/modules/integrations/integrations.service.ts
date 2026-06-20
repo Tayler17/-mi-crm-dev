@@ -301,21 +301,30 @@ export class IntegrationsService implements OnModuleInit {
       if (!connector.createPatient) {
         throw new BadRequestException('Este contacto no existe como paciente en Dentally y este sistema no permite crearlo.');
       }
+      // Read ALL contact custom fields and match tolerantly (ignore case,
+      // spaces, underscores, punctuation) so dentally_DOB / "dentally DOB" /
+      // dentally_dob all resolve to the same value.
       const cfRows = await this.db.query(
         `SELECT d.name, v.value
            FROM custom_field_definitions d
            LEFT JOIN custom_field_values v ON v.definition_id = d.id AND v.entity_id::text = $2
-          WHERE d.tenant_id::text = $1 AND d.entity_type = 'contact'
-            AND d.name = ANY($3)`,
-        [tenantId, contactId, ['dentally_title', 'dentally_dob', 'dentally_gender']],
+          WHERE d.tenant_id::text = $1 AND d.entity_type = 'contact'`,
+        [tenantId, contactId],
       );
-      const cf: Record<string, string> = {};
-      for (const r of cfRows) if (r.value) cf[r.name] = r.value;
+      const norm = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      let cfTitle: string | undefined, cfDob: string | undefined, cfGender: string | undefined;
+      for (const r of cfRows) {
+        if (!r.value) continue;
+        const k = norm(r.name);
+        if (k === 'dentallytitle') cfTitle = r.value;
+        else if (k === 'dentallydob' || k === 'dentallydateofbirth') cfDob = r.value;
+        else if (k === 'dentallygender') cfGender = r.value;
+      }
 
       const missing: string[] = [];
-      if (!cf.dentally_dob)    missing.push('fecha de nacimiento (dentally_dob)');
-      if (!cf.dentally_gender) missing.push('género (dentally_gender: male/female)');
-      if (!cf.dentally_title)  missing.push('título (dentally_title)');
+      if (!cfDob)    missing.push('fecha de nacimiento (dentally_dob)');
+      if (!cfGender) missing.push('género (dentally_gender: male/female)');
+      if (!cfTitle)  missing.push('título (dentally_title)');
       if (missing.length) {
         throw new BadRequestException(
           `Este contacto no existe en Dentally y faltan datos para crearlo: ${missing.join(', ')}. ` +
@@ -330,9 +339,9 @@ export class IntegrationsService implements OnModuleInit {
           lastName: parts.slice(1).join(' ') || 'CRM',
           email: c.email || undefined,
           phone: c.phone || undefined,
-          title: cf.dentally_title,
-          dateOfBirth: cf.dentally_dob,
-          gender: cf.dentally_gender,
+          title: cfTitle,
+          dateOfBirth: cfDob,
+          gender: cfGender,
         });
       } catch (e: any) {
         throw new BadRequestException(e?.message || 'No se pudo crear el paciente en Dentally.');
