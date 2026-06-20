@@ -55,7 +55,9 @@ export class CustomFieldsController implements OnModuleInit {
     const params: any[] = [tenantId];
     if (where) params.push(entityType);
     return this.db.query(
-      `SELECT * FROM custom_field_definitions WHERE tenant_id=$1 ${where} ORDER BY entity_type, position, created_at`,
+      `SELECT id, tenant_id AS "tenantId", entity_type AS "entityType", name, label,
+              field_type AS "fieldType", options, is_required AS "isRequired", position, created_at AS "createdAt"
+       FROM custom_field_definitions WHERE tenant_id=$1 ${where} ORDER BY entity_type, position, created_at`,
       params,
     );
   }
@@ -71,7 +73,9 @@ export class CustomFieldsController implements OnModuleInit {
     const fieldType = ALLOWED_FIELD_TYPES.includes(body.fieldType ?? '') ? body.fieldType : 'text';
     const [row] = await this.db.query(
       `INSERT INTO custom_field_definitions (tenant_id, entity_type, name, label, field_type, options, is_required, position)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       RETURNING id, tenant_id AS "tenantId", entity_type AS "entityType", name, label,
+                 field_type AS "fieldType", options, is_required AS "isRequired", position, created_at AS "createdAt"`,
       [tenantId, body.entityType, body.name, body.label, fieldType,
        body.options ? JSON.stringify(body.options) : null,
        body.isRequired ?? false, body.position ?? 0],
@@ -96,7 +100,9 @@ export class CustomFieldsController implements OnModuleInit {
     if (body.position  !== undefined) { sets.push(`position=$${++i}`);    vals.push(body.position); }
     if (!sets.length) return { ok: true };
     const [row] = await this.db.query(
-      `UPDATE custom_field_definitions SET ${sets.join(',')} WHERE id=$1 AND tenant_id=$2 RETURNING *`,
+      `UPDATE custom_field_definitions SET ${sets.join(',')} WHERE id=$1 AND tenant_id=$2
+       RETURNING id, tenant_id AS "tenantId", entity_type AS "entityType", name, label,
+                 field_type AS "fieldType", options, is_required AS "isRequired", position, created_at AS "createdAt"`,
       vals,
     );
     return row ?? null;
@@ -119,8 +125,8 @@ export class CustomFieldsController implements OnModuleInit {
     @TenantId() tenantId: string,
   ) {
     return this.db.query(
-      `SELECT cf.id AS definition_id, cf.name, cf.label, cf.field_type, cf.options, cf.is_required, cf.position,
-              cv.id AS value_id, cv.value
+      `SELECT cf.id AS "definitionId", cf.name, cf.label, cf.field_type AS "fieldType", cf.options,
+              cf.is_required AS "isRequired", cf.position, cv.id AS "valueId", cv.value
        FROM custom_field_definitions cf
        LEFT JOIN custom_field_values cv ON cv.definition_id=cf.id AND cv.entity_id=$3
        WHERE cf.tenant_id=$1 AND cf.entity_type=$2
