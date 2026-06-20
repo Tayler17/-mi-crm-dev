@@ -266,10 +266,13 @@ export class DentallyConnector implements IntegrationConnector {
       },
     };
     const res = await this.request(this.host(config), token, '/v1/appointments', 'POST', body);
-    if (res.status === 401 || res.status === 403) throw new Error('Token inválido o sin permisos para crear citas.');
+    if (res.status === 401 || res.status === 403) {
+      const detail = res.json ? JSON.stringify(res.json).slice(0, 300) : '';
+      throw new Error(`El token de Dentally no tiene permiso para crear citas (${res.status}). Revisa los scopes del token en Dentally. ${detail}`);
+    }
     if (res.status === 422) {
       const msg = res.json?.error || JSON.stringify(res.json?.errors || res.json);
-      throw new Error(`Dentally rechazó la cita: ${msg}`);
+      throw new Error(`Dentally rechazó la cita: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`);
     }
     if (res.status >= 400) throw new Error(`Dentally respondió ${res.status} al crear la cita.`);
     const a = res.json?.appointment ?? res.json;
