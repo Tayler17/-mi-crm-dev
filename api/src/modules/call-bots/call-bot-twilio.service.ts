@@ -5,6 +5,7 @@ import { PlatformSettingsService } from '../settings/platform-settings.service';
 import { BotActionsService } from './bot-actions.service';
 import { ElevenLabsTtsService } from './elevenlabs-tts.service';
 import { KnowledgeBaseService } from '../knowledge-base/knowledge-base.service';
+import { IntegrationsService } from '../integrations/integrations.service';
 import * as https from 'https';
 import * as http from 'http';
 
@@ -60,12 +61,12 @@ type CallMeta = { contactId: string | null; tenantId: string; contactName?: stri
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
-function buildTools(stageNames: string[], tagNames: string[] = []): Array<{ name: string; description: string; parameters: any }> {
+function buildTools(stageNames: string[], tagNames: string[] = [], dentallyConnected = false): Array<{ name: string; description: string; parameters: any }> {
   const stagesDesc = stageNames.length ? `Available stages: ${stageNames.join(', ')}.` : '';
   const tagsDesc = tagNames.length
     ? `MANDATORY — as soon as you identify the caller's main intent, call add_tag with the most appropriate tag from this list: ${tagNames.join(', ')}. Call it in the same turn you identify the intent, do not wait until the end of the call. If the topic changes, use add_tag for the new one.`
     : 'Add a categorization tag to the contact based on the conversation topic.';
-  return [
+  const tools: Array<{ name: string; description: string; parameters: any }> = [
     {
       name: 'create_deal',
       description: 'Create a deal or opportunity in the CRM for the caller. Use when the caller expresses interest, books a service, or a sale is identified.',
@@ -121,6 +122,14 @@ function buildTools(stageNames: string[], tagNames: string[] = []): Array<{ name
       },
     },
   ];
+  if (dentallyConnected) {
+    tools.push(
+      { name: 'dentally_list_practitioners', description: 'List the clinic professionals/doctors available for appointments.', parameters: { type: 'object', properties: {} } },
+      { name: 'dentally_check_availability', description: 'Check open appointment slots for a given day. Use when the caller asks about availability or times. The result you receive is the real list of times — read it to the caller.', parameters: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD' }, practitioner_name: { type: 'string' }, duration: { type: 'number' } }, required: ['date'] } },
+      { name: 'dentally_book_appointment', description: 'Book an appointment once the caller has chosen a day and time. If the caller is NOT a registered patient, first ask for date_of_birth (YYYY-MM-DD) and gender (male/female), then call this.', parameters: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD' }, time: { type: 'string', description: 'HH:MM 24h' }, practitioner_name: { type: 'string' }, duration: { type: 'number' }, reason: { type: 'string' }, date_of_birth: { type: 'string' }, gender: { type: 'string', enum: ['male', 'female'] }, title: { type: 'string' } }, required: ['date', 'time'] } },
+    );
+  }
+  return tools;
 }
 
 function toOpenAITools(tools: ReturnType<typeof buildTools>) {
@@ -202,6 +211,7 @@ export class CallBotTwilioService {
     private readonly botActions: BotActionsService,
     private readonly elevenLabs: ElevenLabsTtsService,
     private readonly kbSvc: KnowledgeBaseService,
+    private readonly integrations: IntegrationsService,
   ) {
     // Evict stale call state every 10 min (handles calls where status callback never fires)
     setInterval(() => this.evictStaleCalls(), 10 * 60 * 1_000);
@@ -803,6 +813,25 @@ ${addTagInstruction}
    * Public entry for the Media Streams pipeline: text in → bot reply out.
    * Reuses the same LLM + tools + per-call history as the Gather flow.
    */
+  /** Execute a Dentally tool synchronously and return what the bot should say. */
+  private async runDentallyTool(tenantId: string, contactId: string | null, name: string, args: any): Promise<string> {
+    try {
+      if (name === 'dentally_list_practitioners') {
+        return await this.integrations.botListPractitioners(tenantId, 'dentally');
+      }
+      if (name === 'dentally_check_availability') {
+        return await this.integrations.botCheckAvailability(tenantId, 'dentally', { date: args?.date, practitionerName: args?.practitioner_name, durationMinutes: args?.duration });
+      }
+      if (name === 'dentally_book_appointment') {
+        if (!contactId) return 'No pude identificar tu ficha para agendar la cita.';
+        return await this.integrations.botBook(tenantId, 'dentally', { contactId, date: args?.date, time: args?.time, practitionerName: args?.practitioner_name, durationMinutes: args?.duration, reason: args?.reason, dateOfBirth: args?.date_of_birth, gender: args?.gender, title: args?.title });
+      }
+    } catch (e: any) {
+      return `No pude completar la acción ahora mismo: ${e?.message || 'error'}.`;
+    }
+    return '';
+  }
+
   async generateVoiceReply(
     bot: any,
     sessionId: string,
@@ -863,9 +892,11 @@ ${addTagInstruction}
     const meta    = this.callMeta.get(callSid);
     const tenantId = meta?.tenantId ?? bot.tenant_id;
     const crmCtx  = await this.getCrmCtx(tenantId);
+    const dentallyConnected = await this.integrations.isConnected(tenantId, 'dentally').catch(() => false);
     const tools   = buildTools(
       crmCtx.stages.map((s: any) => s.pipeline_name ? `${s.name} (${s.pipeline_name})` : s.name),
       crmCtx.tags.map((t: any) => t.name),
+      dentallyConnected,
     );
 
     const isEs = bot.language?.startsWith('es') ?? true;
@@ -901,14 +932,16 @@ ${addTagInstruction}
         const msg1 = JSON.parse(raw1).choices?.[0]?.message;
 
         if (msg1?.tool_calls?.length) {
-          // Fire tools in background — do NOT await
-          fireTools(msg1.tool_calls.map((tc: any) => ({
-            name: tc.function.name,
-            args: JSON.parse(tc.function?.arguments ?? '{}'),
-          })));
-
-          // Use AI text content if provided alongside tool call, else use template
-          reply = msg1.content?.trim() || toolAck(msg1.tool_calls[0]?.function?.name ?? 'default');
+          const calls = msg1.tool_calls.map((tc: any) => ({ name: tc.function.name, args: JSON.parse(tc.function?.arguments ?? '{}') }));
+          const dentallyCall = calls.find((c: any) => c.name.startsWith('dentally_'));
+          // CRM tools fire in background; Dentally tools run synchronously so the
+          // bot speaks the real result (slots / booking confirmation).
+          fireTools(calls.filter((c: any) => !c.name.startsWith('dentally_')));
+          if (dentallyCall) {
+            reply = await this.runDentallyTool(tenantId, meta?.contactId ?? null, dentallyCall.name, dentallyCall.args);
+          } else {
+            reply = msg1.content?.trim() || toolAck(calls[0]?.name ?? 'default');
+          }
         } else {
           reply = msg1?.content?.trim() ?? null;
         }
@@ -931,11 +964,14 @@ ${addTagInstruction}
         const toolBlocks = (json1.content ?? []).filter((b: any) => b.type === 'tool_use');
 
         if (toolBlocks.length) {
-          // Fire tools in background — do NOT await
-          fireTools(toolBlocks.map((b: any) => ({ name: b.name, args: b.input ?? {} })));
-
-          // Use AI text if present alongside tool call, else use template
-          reply = textBlock?.text?.trim() || toolAck(toolBlocks[0]?.name ?? 'default');
+          const calls = toolBlocks.map((b: any) => ({ name: b.name, args: b.input ?? {} }));
+          const dentallyCall = calls.find((c: any) => c.name.startsWith('dentally_'));
+          fireTools(calls.filter((c: any) => !c.name.startsWith('dentally_')));
+          if (dentallyCall) {
+            reply = await this.runDentallyTool(tenantId, meta?.contactId ?? null, dentallyCall.name, dentallyCall.args);
+          } else {
+            reply = textBlock?.text?.trim() || toolAck(calls[0]?.name ?? 'default');
+          }
         } else {
           reply = textBlock?.text?.trim() ?? null;
         }
@@ -961,11 +997,14 @@ ${addTagInstruction}
         const textPart = parts1.find((p: any) => p.text);
 
         if (fnCall) {
-          // Fire tool in background — do NOT await
-          fireTools([{ name: fnCall.functionCall.name, args: fnCall.functionCall.args ?? {} }]);
-
-          // Use AI text part if present alongside function call, else use template
-          reply = textPart?.text?.trim() || toolAck(fnCall.functionCall.name ?? 'default');
+          const name = fnCall.functionCall.name;
+          const args = fnCall.functionCall.args ?? {};
+          if (name.startsWith('dentally_')) {
+            reply = await this.runDentallyTool(tenantId, meta?.contactId ?? null, name, args);
+          } else {
+            fireTools([{ name, args }]);
+            reply = textPart?.text?.trim() || toolAck(name ?? 'default');
+          }
         } else {
           reply = textPart?.text?.trim() ?? null;
         }
