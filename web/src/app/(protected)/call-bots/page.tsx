@@ -1358,8 +1358,10 @@ export default function CallBotsPage() {
   }
 
   async function handleSave(form: BotForm) {
-    const { visualConfig, promptMode, ...rest } = form as any;
-    const payload = { ...rest, visual_config: visualConfig };
+    const { promptMode, ...rest } = form as any;
+    // Send camelCase `visualConfig` — it maps to the entity column; snake_case
+    // `visual_config` is ignored by Object.assign on the backend (avatar wouldn't save).
+    const payload = { ...rest };
     if (editing) await updateCallBot(editing.id, payload as any);
     else await createCallBot(payload as any);
     await load();
