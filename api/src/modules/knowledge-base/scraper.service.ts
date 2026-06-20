@@ -19,13 +19,12 @@ export class ScraperService {
     const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
     const title = titleMatch ? titleMatch[1].trim() : url;
 
-    // Remove scripts, styles, nav, footer, header noise
+    // Remove scripts/styles/nav noise — but KEEP header & footer, which usually
+    // hold the address, opening hours and phone (exactly what users ask for).
     const cleaned = html
       .replace(/<script[\s\S]*?<\/script>/gi, '')
       .replace(/<style[\s\S]*?<\/style>/gi, '')
       .replace(/<nav[\s\S]*?<\/nav>/gi, '')
-      .replace(/<footer[\s\S]*?<\/footer>/gi, '')
-      .replace(/<header[\s\S]*?<\/header>/gi, '')
       .replace(/<!--[\s\S]*?-->/g, '')
       .replace(/<[^>]+>/g, ' ')          // strip remaining tags
       .replace(/&nbsp;/g, ' ')
