@@ -801,8 +801,16 @@ export class AiChatbotEngineService {
       crmLines.push('Siempre incluye un mensaje de confirmación breve y amigable para el usuario al usar cualquier herramienta.');
       const crmInstructions = crmLines.join('\n');
 
+      // If the conversation already has turns, forbid re-greeting (weaker models
+      // like gpt-4o-mini otherwise re-introduce themselves every reply).
+      const ongoing = (history?.length ?? 0) > 0;
+      const noGreet = ongoing
+        ? 'CONVERSACIÓN EN CURSO: NO vuelvas a saludar ni a presentarte. No empieces con "Hola"/"Hello" ni repitas tu introducción; responde directamente al mensaje del usuario.'
+        : '';
+
       const systemPrompt = [
         `IDENTIDAD: Tu nombre es "${bot.name}". Cuando alguien pregunte de qué equipo eres o quién eres, responde siempre que eres "${bot.name}".`,
+        noGreet,
         bot.system_prompt ?? '',
         crmInstructions,
         ragContext,
