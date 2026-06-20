@@ -538,11 +538,7 @@ export class MessagesController {
               await this.db.query(`UPDATE conversations SET connection_id=$1 WHERE id=$2 AND connection_id IS NULL`, [ec.id, conversationId]).catch(() => {});
             }
           }
-          if (!toEmail || !creds.host) {
-            console.error(`[email-send] cannot send: to=${toEmail ?? 'null'} host=${creds.host ?? 'null'} connId=${conv.connection_id ?? 'null'} conv=${conversationId}`);
-            return;
-          }
-          console.log(`[email-send] sending to=${toEmail} host=${creds.host} port=${creds.port}`);
+          if (!toEmail || !creds.host) return;
 
           const nodemailer = await import('nodemailer');
           const secure = String(creds.encryption ?? '').toUpperCase() === 'SSL' || Number(creds.port) === 465;
@@ -594,8 +590,6 @@ export class MessagesController {
           } finally {
             transport.close(); // release the SMTP connection (Hostinger limits concurrent connections)
           }
-
-          console.log(`[email-send] sent ok id=${info?.messageId} accepted=${JSON.stringify(info?.accepted)} rejected=${JSON.stringify(info?.rejected)}`);
 
           // Store the sent Message-ID so the next reply threads correctly.
           if (messageId && info?.messageId) {

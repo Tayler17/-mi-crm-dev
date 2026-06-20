@@ -395,7 +395,6 @@ export class AiChatbotEngineService {
     // Dentally actions: execute and send the authoritative reply our code composes
     // (real slots / booking result / error), then stop. Scoped to this tenant.
     const { dentallyListPractitioners, dentallyCheckAvailability, dentallyBook } = result;
-    this.logger.log(`[dentally] tool flags — list=${!!dentallyListPractitioners} avail=${!!dentallyCheckAvailability} book=${!!dentallyBook}`);
     if (dentallyListPractitioners || dentallyCheckAvailability || dentallyBook) {
       await this.db.query(`UPDATE ai_chatbot_sessions SET message_count=message_count+1 WHERE id=$1`, [session.id]).catch(() => {});
       let outMsg = '';

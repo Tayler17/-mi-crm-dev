@@ -152,7 +152,6 @@ export class KnowledgeBaseService {
       [vecSql, botId, tenantId, RAG_MIN_SIMILARITY, RAG_TOP_K],
     );
 
-    this.logger.log(`[rag] bot=${botId} q="${query.slice(0, 50)}" chunks=${Number(count)} matched=${rows.length} top=${rows[0]?.similarity?.toFixed(3) ?? 'n/a'}`);
     if (!rows.length) return '';
 
     const context = rows
