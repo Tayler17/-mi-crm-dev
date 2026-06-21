@@ -571,7 +571,7 @@ ${addTagInstruction}
     const welcomeEl = await this.ttsElement(welcomeText, bot, callSid, baseUrl);
 
     return twiml(`
-      <Gather input="speech" action="${gather}" timeout="6" speechTimeout="auto" language="${voice.language}">
+      <Gather input="speech" enhanced="true" speechModel="phone_call" action="${gather}" timeout="6" speechTimeout="auto" language="${voice.language}">
         ${welcomeEl}
       </Gather>
       <Redirect method="POST">${gather}</Redirect>
@@ -605,7 +605,7 @@ ${addTagInstruction}
         bot, callSid, baseUrl,
       );
       return twiml(`
-        <Gather input="speech" action="${gather}" timeout="6" speechTimeout="auto" language="${voice.language}">
+        <Gather input="speech" enhanced="true" speechModel="phone_call" action="${gather}" timeout="6" speechTimeout="auto" language="${voice.language}">
           ${stillThereEl}
         </Gather>
         <Hangup/>
@@ -707,7 +707,7 @@ ${addTagInstruction}
 
         const replyEl = await this.ttsElement(cleanReply, bot, callSid, baseUrl);
         return twiml(`
-          <Gather input="speech" action="${gather}" timeout="8" speechTimeout="auto" language="${voice.language}">
+          <Gather input="speech" enhanced="true" speechModel="phone_call" action="${gather}" timeout="8" speechTimeout="auto" language="${voice.language}">
             ${replyEl}
           </Gather>
           <Redirect method="POST">${gather}</Redirect>
@@ -719,7 +719,7 @@ ${addTagInstruction}
     const fallbackText = bot.fallback_message || (bot.language.startsWith('es') ? 'Lo siento, no entendí. ¿Puedes repetirlo?' : 'I did not understand. Could you repeat that?');
     const fallbackEl = await this.ttsElement(fallbackText, bot, callSid, baseUrl);
     return twiml(`
-      <Gather input="speech" action="${gather}" timeout="6" speechTimeout="auto" language="${voice.language}">
+      <Gather input="speech" enhanced="true" speechModel="phone_call" action="${gather}" timeout="6" speechTimeout="auto" language="${voice.language}">
         ${fallbackEl}
       </Gather>
       <Hangup/>
