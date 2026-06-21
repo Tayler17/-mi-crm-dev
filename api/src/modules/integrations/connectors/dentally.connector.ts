@@ -217,11 +217,26 @@ export class DentallyConnector implements IntegrationConnector {
     if (res.status === 401 || res.status === 403) throw new Error('Token inválido o sin permisos para leer profesionales.');
     if (res.status >= 400) throw new Error(`Dentally respondió ${res.status} al listar profesionales.`);
     const list: any[] = Array.isArray(res.json?.practitioners) ? res.json.practitioners : [];
-    return list.map((p) => ({
-      id: String(p.id),
-      name: [p.user?.title, p.user?.first_name, p.user?.last_name].filter(Boolean).join(' ').trim()
-        || p.name || `Profesional ${p.id}`,
-    }));
+    return list
+      .map((p) => ({
+        id: String(p.id),
+        name: [p.user?.title, p.user?.first_name, p.user?.last_name].filter(Boolean).join(' ').trim()
+          || p.name || `Profesional ${p.id}`,
+      }))
+      .filter((p) => !this.isJunkPractitioner(p.name));
+  }
+
+  /** Dentally accounts often contain non-clinical placeholder "practitioners"
+   *  (DEPOSIT, Prueba Borrar, Surgery Surgery…). Exclude them so the bot never
+   *  lists or books with a fake one. */
+  private isJunkPractitioner(name: string): boolean {
+    const n = (name || '').toLowerCase();
+    if (/\b(deposit|prueba|borrar|test|delete|no usar|do not use|n\/a)\b/.test(n)) return true;
+    // Repeated core word like "Surgery Surgery" / "DEPOSIT DEPOSIT".
+    const titles = new Set(['mr', 'mrs', 'ms', 'miss', 'dr', 'dentist', 'hygienist', 'prof', 'mx']);
+    const core = n.replace(/[^a-z\s]/g, ' ').split(/\s+/).filter((w) => w && !titles.has(w));
+    if (core.length >= 2 && core.every((w) => w === core[0])) return true;
+    return false;
   }
 
   /** Phase 3: open appointment slots for a practitioner over a date range. */
