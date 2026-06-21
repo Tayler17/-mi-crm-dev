@@ -397,14 +397,15 @@ export class AiChatbotEngineService {
     const { dentallyListPractitioners, dentallyCheckAvailability, dentallyBook } = result;
     if (dentallyListPractitioners || dentallyCheckAvailability || dentallyBook) {
       await this.db.query(`UPDATE ai_chatbot_sessions SET message_count=message_count+1 WHERE id=$1`, [session.id]).catch(() => {});
+      const dlang: 'es' | 'en' = String(bot.visual_config?.language || bot.language || 'es').startsWith('en') ? 'en' : 'es';
       let outMsg = '';
       try {
         if (dentallyListPractitioners) {
-          outMsg = await this.integrations.botListPractitioners(tenantId, 'dentally');
+          outMsg = await this.integrations.botListPractitioners(tenantId, 'dentally', dlang);
         } else if (dentallyCheckAvailability) {
-          outMsg = await this.integrations.botCheckAvailability(tenantId, 'dentally', dentallyCheckAvailability);
+          outMsg = await this.integrations.botCheckAvailability(tenantId, 'dentally', dentallyCheckAvailability, dlang);
         } else if (dentallyBook) {
-          outMsg = await this.integrations.botBook(tenantId, 'dentally', { contactId: conv.contact_id, ...dentallyBook });
+          outMsg = await this.integrations.botBook(tenantId, 'dentally', { contactId: conv.contact_id, ...dentallyBook }, dlang);
         }
       } catch (e: any) {
         outMsg = `No pude completar la acción ahora mismo: ${e?.message || 'error'}.`;
@@ -1086,15 +1087,16 @@ export class AiChatbotEngineService {
       // Execute Dentally tools in the test panel too (production does this in
       // processMessage) so the tester sees the real result instead of a blank.
       if (result?.dentallyListPractitioners || result?.dentallyCheckAvailability || result?.dentallyBook) {
+        const dlang: 'es' | 'en' = String(bot.visual_config?.language || bot.language || 'es').startsWith('en') ? 'en' : 'es';
         let outMsg = '';
         try {
-          if (result.dentallyListPractitioners) outMsg = await this.integrations.botListPractitioners(tenantId, 'dentally');
-          else if (result.dentallyCheckAvailability) outMsg = await this.integrations.botCheckAvailability(tenantId, 'dentally', result.dentallyCheckAvailability);
+          if (result.dentallyListPractitioners) outMsg = await this.integrations.botListPractitioners(tenantId, 'dentally', dlang);
+          else if (result.dentallyCheckAvailability) outMsg = await this.integrations.botCheckAvailability(tenantId, 'dentally', result.dentallyCheckAvailability, dlang);
           else if (result.dentallyBook) {
             // The test panel has no real contact, so we can't (and shouldn't) create a
             // real Dentally appointment. Simulate the confirmation instead of failing.
             const b: any = result.dentallyBook;
-            const isEs = bot.language?.startsWith('es') !== false;
+            const isEs = dlang === 'es';
             outMsg = isEs
               ? `✅ (Modo prueba) La cita quedaría agendada para el ${b.date} a las ${b.time}. En una conversación real con un contacto se confirma en Dentally.`
               : `✅ (Test mode) The appointment would be booked for ${b.date} at ${b.time}. In a real conversation with a contact it is confirmed in Dentally.`;

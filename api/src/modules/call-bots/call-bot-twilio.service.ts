@@ -525,8 +525,8 @@ ${addTagInstruction}
         ? 'IDIOMA: Responde SIEMPRE en español. No mezcles inglés ni otros idiomas en la misma respuesta.'
         : 'LANGUAGE: Always reply in English. Do not mix Spanish or other languages in the same reply.';
       const apptRule2 = !dentallyOn ? '' : (isEs2
-        ? 'PROTOCOLO DE CITAS: Para consultar disponibilidad lo ÚNICO obligatorio es la FECHA. Si el paciente quiere cita pero no dijo qué día, pregúntale qué día desea; NUNCA asumas la fecha de hoy. El profesional es OPCIONAL: solo úsalo si el paciente lo menciona; si no, deja practitioner_name vacío y consulta con todos. En cuanto el paciente elija un horario de la lista, agenda con dentally_book_appointment sin volver a consultar. Lee solo los horarios reales que devuelva la herramienta.'
-        : 'APPOINTMENT PROTOCOL: To check availability the ONLY required field is the DATE. If the patient wants an appointment but gave no day, ask which day; NEVER assume today. The practitioner is OPTIONAL: only use it if the patient mentions one, otherwise leave practitioner_name empty and check all. As soon as the patient picks a time, book with dentally_book_appointment without re-checking. Read only the real times the tool returns.');
+        ? 'PROTOCOLO DE CITAS: Para consultar disponibilidad lo ÚNICO obligatorio es la FECHA. Si el paciente quiere cita pero no dijo qué día, pregúntale qué día desea; NUNCA asumas la fecha de hoy. El profesional es OPCIONAL: solo úsalo si el paciente lo menciona; si no, deja practitioner_name vacío y consulta con todos. En cuanto el paciente elija un horario, agenda con dentally_book_appointment sin volver a consultar. NUNCA pidas la fecha de nacimiento, el género ni datos personales por teléfono: el paciente se identifica por su número de teléfono. Intenta agendar directamente; SOLO si dentally_book_appointment devuelve un error pidiendo esos datos, entonces pídelos.'
+        : 'APPOINTMENT PROTOCOL: To check availability the ONLY required field is the DATE. If the patient wants an appointment but gave no day, ask which day; NEVER assume today. The practitioner is OPTIONAL: only use it if the patient mentions one, otherwise leave practitioner_name empty and check all. As soon as the patient picks a time, book with dentally_book_appointment without re-checking. NEVER ask for date of birth, gender or personal details over the phone: the patient is identified by their phone number. Try to book directly; ONLY if dentally_book_appointment returns an error asking for those details, then ask for them.');
 
       const instructions = [
         bot.system_prompt,
@@ -830,20 +830,21 @@ ${addTagInstruction}
    * Reuses the same LLM + tools + per-call history as the Gather flow.
    */
   /** Execute a Dentally tool synchronously and return what the bot should say. */
-  private async runDentallyTool(tenantId: string, contactId: string | null, name: string, args: any): Promise<string> {
+  private async runDentallyTool(tenantId: string, contactId: string | null, name: string, args: any, lang: 'es' | 'en' = 'es'): Promise<string> {
+    const en = lang === 'en';
     try {
       if (name === 'dentally_list_practitioners') {
-        return await this.integrations.botListPractitioners(tenantId, 'dentally');
+        return await this.integrations.botListPractitioners(tenantId, 'dentally', lang);
       }
       if (name === 'dentally_check_availability') {
-        return await this.integrations.botCheckAvailability(tenantId, 'dentally', { date: args?.date, practitionerName: args?.practitioner_name, durationMinutes: args?.duration });
+        return await this.integrations.botCheckAvailability(tenantId, 'dentally', { date: args?.date, practitionerName: args?.practitioner_name, durationMinutes: args?.duration }, lang);
       }
       if (name === 'dentally_book_appointment') {
-        if (!contactId) return 'No pude identificar tu ficha para agendar la cita.';
-        return await this.integrations.botBook(tenantId, 'dentally', { contactId, date: args?.date, time: args?.time, practitionerName: args?.practitioner_name, durationMinutes: args?.duration, reason: args?.reason, dateOfBirth: args?.date_of_birth, gender: args?.gender, title: args?.title });
+        if (!contactId) return en ? "I couldn't identify your record to book the appointment." : 'No pude identificar tu ficha para agendar la cita.';
+        return await this.integrations.botBook(tenantId, 'dentally', { contactId, date: args?.date, time: args?.time, practitionerName: args?.practitioner_name, durationMinutes: args?.duration, reason: args?.reason, dateOfBirth: args?.date_of_birth, gender: args?.gender, title: args?.title }, lang);
       }
     } catch (e: any) {
-      return `No pude completar la acción ahora mismo: ${e?.message || 'error'}.`;
+      return en ? `I couldn't complete the action right now: ${e?.message || 'error'}.` : `No pude completar la acción ahora mismo: ${e?.message || 'error'}.`;
     }
     return '';
   }
@@ -962,7 +963,7 @@ ${addTagInstruction}
           // bot speaks the real result (slots / booking confirmation).
           fireTools(calls.filter((c: any) => !c.name.startsWith('dentally_')));
           if (dentallyCall) {
-            reply = await this.runDentallyTool(tenantId, meta?.contactId ?? null, dentallyCall.name, dentallyCall.args);
+            reply = await this.runDentallyTool(tenantId, meta?.contactId ?? null, dentallyCall.name, dentallyCall.args, langKey);
           } else {
             reply = msg1.content?.trim() || toolAck(calls[0]?.name ?? 'default');
           }
@@ -992,7 +993,7 @@ ${addTagInstruction}
           const dentallyCall = calls.find((c: any) => c.name.startsWith('dentally_'));
           fireTools(calls.filter((c: any) => !c.name.startsWith('dentally_')));
           if (dentallyCall) {
-            reply = await this.runDentallyTool(tenantId, meta?.contactId ?? null, dentallyCall.name, dentallyCall.args);
+            reply = await this.runDentallyTool(tenantId, meta?.contactId ?? null, dentallyCall.name, dentallyCall.args, langKey);
           } else {
             reply = textBlock?.text?.trim() || toolAck(calls[0]?.name ?? 'default');
           }
@@ -1024,7 +1025,7 @@ ${addTagInstruction}
           const name = fnCall.functionCall.name;
           const args = fnCall.functionCall.args ?? {};
           if (name.startsWith('dentally_')) {
-            reply = await this.runDentallyTool(tenantId, meta?.contactId ?? null, name, args);
+            reply = await this.runDentallyTool(tenantId, meta?.contactId ?? null, name, args, langKey);
           } else {
             fireTools([{ name, args }]);
             reply = textPart?.text?.trim() || toolAck(name ?? 'default');
