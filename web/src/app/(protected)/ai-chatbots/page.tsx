@@ -253,7 +253,7 @@ function TestChatPanel({ bot }: { bot: AiChatbot }) {
     setLoading(true);
     try {
       const res = await testAiChatbotMessage(bot.id, text, history);
-      setMsgs((p) => [...p, { role: 'bot', text: res.error ? `⚠️ ${res.error}` : (res.reply ?? '(sin respuesta)') }]);
+      setMsgs((p) => [...p, { role: 'bot', text: res.error ? `⚠️ ${res.error}` : (res.reply ?? (lang === 'en' ? '(no reply)' : '(sin respuesta)')) }]);
     } catch (e: any) {
       setMsgs((p) => [...p, { role: 'bot', text: `⚠️ Error: ${e.message}` }]);
     } finally { setLoading(false); }
@@ -325,6 +325,8 @@ function BotModal({
 }) {
   const { lang } = useLangCtx();
   const i = APP[lang];
+  /** Inline translator: English when the panel is in English, else Spanish. */
+  const t = (en: string, es: string) => (lang === 'en' ? en : es);
 
   type TabId = 'identity' | 'business' | 'behavior' | 'advanced' | 'channels' | 'knowledge' | 'webchat';
   const [tab, setTab] = useState<TabId>('identity');
@@ -361,7 +363,7 @@ function BotModal({
       const src = await addKnowledgeUrl(bot.id, newUrl.trim());
       setKbSources((p) => [...p, src]);
       setNewUrl('');
-    } catch (e: any) { alert(e.message || 'Error al añadir URL'); }
+    } catch (e: any) { alert(e.message || t('Error adding URL', 'Error al añadir URL')); }
     finally { setUrlAdding(false); }
   }
 
@@ -372,7 +374,7 @@ function BotModal({
     try {
       const src = await addKnowledgePdf(bot.id, file);
       setKbSources((p) => [...p, src]);
-    } catch (e: any) { alert(e.message || 'Error al subir PDF'); }
+    } catch (e: any) { alert(e.message || t('Error uploading PDF', 'Error al subir PDF')); }
     finally { setPdfUploading(false); if (pdfInputRef.current) pdfInputRef.current.value = ''; }
   }
 
@@ -383,7 +385,7 @@ function BotModal({
   }
 
   async function handleDeleteSource(sourceId: string) {
-    if (!bot?.id || !confirm('¿Eliminar esta fuente de conocimiento?')) return;
+    if (!bot?.id || !confirm(t('Delete this knowledge source?', '¿Eliminar esta fuente de conocimiento?'))) return;
     await deleteKnowledgeSource(bot.id, sourceId).catch(() => {});
     setKbSources((p) => p.filter((s) => s.id !== sourceId));
   }
@@ -406,9 +408,9 @@ function BotModal({
     model: bot?.model ?? 'gpt-4o-mini',
     system_prompt: bot?.system_prompt ?? '',
     welcome_message: bot?.welcome_message ?? '',
-    fallback_message: bot?.fallback_message ?? 'Lo siento, no entendí tu mensaje. ¿Puedes reformularlo?',
-    handoff_keyword: bot?.handoff_keyword ?? 'agente',
-    handoff_message: bot?.handoff_message ?? 'Enseguida te conecto con un agente humano.',
+    fallback_message: bot?.fallback_message ?? t("Sorry, I didn't understand your message. Could you rephrase it?", 'Lo siento, no entendí tu mensaje. ¿Puedes reformularlo?'),
+    handoff_keyword: bot?.handoff_keyword ?? t('agent', 'agente'),
+    handoff_message: bot?.handoff_message ?? t('I\'ll connect you with a human agent right away.', 'Enseguida te conecto con un agente humano.'),
     max_tokens: bot?.max_tokens ?? 500,
     temperature: bot?.temperature ?? 0.7,
     memory_conversations: bot?.memory_conversations ?? 5,
@@ -530,10 +532,10 @@ function BotModal({
             </div>
             <div>
               <div style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.2 }}>
-                {form.name || (bot ? 'Editar bot' : 'Nuevo AI Chatbot')}
+                {form.name || (bot ? t('Edit bot', 'Editar bot') : t('New AI Chatbot', 'Nuevo AI Chatbot'))}
               </div>
               {dirty && (
-                <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 1 }}>● cambios sin guardar</div>
+                <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 1 }}>● {t('unsaved changes', 'cambios sin guardar')}</div>
               )}
             </div>
           </div>
@@ -544,7 +546,7 @@ function BotModal({
                 style={{ fontSize: 12 }}
                 onClick={() => setTestOpen((o) => !o)}
               >
-                {testOpen ? '✕ Cerrar test' : '🧪 Probar'}
+                {testOpen ? t('✕ Close test', '✕ Cerrar test') : t('🧪 Test', '🧪 Probar')}
               </button>
             )}
             <button className="btn btn-ghost" onClick={onClose}>✕</button>
@@ -558,12 +560,12 @@ function BotModal({
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             {/* Tabs */}
             <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 16px', overflowX: 'auto', flexShrink: 0 }}>
-              <button style={tabStyle('identity')} onClick={() => setTab('identity')}>🎭 Identidad</button>
-              <button style={tabStyle('business')} onClick={() => setTab('business')}>🏢 Negocio</button>
-              <button style={tabStyle('behavior')} onClick={() => setTab('behavior')}>🧠 Comportamiento</button>
-              <button style={tabStyle('advanced')} onClick={() => setTab('advanced')}>⚙️ Avanzado</button>
-              <button style={tabStyle('channels')} onClick={() => setTab('channels')}>📡 Canales</button>
-              {bot && <button style={tabStyle('knowledge')} onClick={() => setTab('knowledge')}>📚 Conocimiento</button>}
+              <button style={tabStyle('identity')} onClick={() => setTab('identity')}>🎭 {t('Identity', 'Identidad')}</button>
+              <button style={tabStyle('business')} onClick={() => setTab('business')}>🏢 {t('Business', 'Negocio')}</button>
+              <button style={tabStyle('behavior')} onClick={() => setTab('behavior')}>🧠 {t('Behavior', 'Comportamiento')}</button>
+              <button style={tabStyle('advanced')} onClick={() => setTab('advanced')}>⚙️ {t('Advanced', 'Avanzado')}</button>
+              <button style={tabStyle('channels')} onClick={() => setTab('channels')}>📡 {t('Channels', 'Canales')}</button>
+              {bot && <button style={tabStyle('knowledge')} onClick={() => setTab('knowledge')}>📚 {t('Knowledge', 'Conocimiento')}</button>}
               {bot && <button style={tabStyle('webchat')} onClick={() => setTab('webchat')}>🌐 Webchat</button>}
             </div>
 
@@ -606,7 +608,7 @@ function BotModal({
                           ))}
                         </div>
                         {/* Color swatches */}
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>Color de fondo</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>{t('Background color', 'Color de fondo')}</div>
                         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                           {AVATAR_COLORS.map((c) => (
                             <div
@@ -626,7 +628,7 @@ function BotModal({
 
                   {/* Name */}
                   <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label">Nombre del Bot *</label>
+                    <label className="form-label">{t('Bot Name *', 'Nombre del Bot *')}</label>
                     <input
                       className="form-input"
                       value={form.name}
@@ -640,20 +642,20 @@ function BotModal({
                           return { ...p, name: newName, system_prompt: newPrompt };
                         });
                       }}
-                      placeholder="Bot de Ventas WhatsApp"
+                      placeholder={t('WhatsApp Sales Bot', 'Bot de Ventas WhatsApp')}
                     />
                   </div>
 
                   {/* Description */}
                   <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label">Descripción interna</label>
-                    <input className="form-input" value={form.description} onChange={(e) => upd({ description: e.target.value })} placeholder="Atiende consultas de ventas en WhatsApp 24/7" />
+                    <label className="form-label">{t('Internal description', 'Descripción interna')}</label>
+                    <input className="form-input" value={form.description} onChange={(e) => upd({ description: e.target.value })} placeholder={t('Handles sales inquiries on WhatsApp 24/7', 'Atiende consultas de ventas en WhatsApp 24/7')} />
                   </div>
 
                   {/* Templates */}
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
-                      Plantillas de inicio rápido
+                      {t('Quick-start templates', 'Plantillas de inicio rápido')}
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                       {BOT_TEMPLATES.map((tpl) => {
@@ -683,7 +685,7 @@ function BotModal({
                       })}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-                      💡 Al aplicar una plantilla se preconfigura el prompt y los mensajes. Puedes editarlos después.
+                      💡 {t('Applying a template pre-configures the prompt and messages. You can edit them afterwards.', 'Al aplicar una plantilla se preconfigura el prompt y los mensajes. Puedes editarlos después.')}
                     </div>
                   </div>
                 </div>
@@ -694,16 +696,16 @@ function BotModal({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <div style={{ padding: '10px 14px', background: '#eff6ff', borderRadius: 8, fontSize: 13, color: '#1e40af', display: 'flex', gap: 8 }}>
                     <span>🏢</span>
-                    <span>Esta información personaliza las instrucciones del bot automáticamente. Completa al menos <strong>nombre de empresa</strong> y <strong>productos</strong>.</span>
+                    <span>{t('This information automatically personalizes the bot instructions. Fill in at least ', 'Esta información personaliza las instrucciones del bot automáticamente. Completa al menos ')}<strong>{t('company name', 'nombre de empresa')}</strong>{t(' and ', ' y ')}<strong>{t('products', 'productos')}</strong>.</span>
                   </div>
 
                   <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label">Nombre de la empresa / negocio</label>
-                    <input className="form-input" value={form.visual_config.businessName} onChange={(e) => updateVC({ businessName: e.target.value })} placeholder="Mi Empresa S.A." />
+                    <label className="form-label">{t('Company / business name', 'Nombre de la empresa / negocio')}</label>
+                    <input className="form-input" value={form.visual_config.businessName} onChange={(e) => updateVC({ businessName: e.target.value })} placeholder={t('My Company Inc.', 'Mi Empresa S.A.')} />
                   </div>
 
                   <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label">Industria / Sector</label>
+                    <label className="form-label">{t('Industry / Sector', 'Industria / Sector')}</label>
                     <select className="form-input" value={form.visual_config.industry} onChange={(e) => updateVC({ industry: e.target.value })}>
                       {INDUSTRY_OPTIONS.map((opt) => {
                         const industryLabelMap: Record<string, string> = {
@@ -722,20 +724,20 @@ function BotModal({
                   </div>
 
                   <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label">Productos / Servicios principales</label>
+                    <label className="form-label">{t('Main products / services', 'Productos / Servicios principales')}</label>
                     <textarea
                       className="form-input"
                       rows={4}
                       value={form.visual_config.products}
                       onChange={(e) => updateVC({ products: e.target.value })}
-                      placeholder="Describe qué ofreces: planes, precios, características, condiciones..."
+                      placeholder={t('Describe what you offer: plans, prices, features, conditions...', 'Describe qué ofreces: planes, precios, características, condiciones...')}
                       style={{ resize: 'vertical' }}
                     />
                   </div>
 
                   {/* Tone selector */}
                   <div>
-                    <label className="form-label">Tono de comunicación</label>
+                    <label className="form-label">{t('Communication tone', 'Tono de comunicación')}</label>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                       {TONE_OPTIONS.map((t) => {
                         const toneLabelMap: Record<string, string> = {
@@ -762,7 +764,7 @@ function BotModal({
                   </div>
 
                   <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label">Idioma de respuesta</label>
+                    <label className="form-label">{t('Response language', 'Idioma de respuesta')}</label>
                     <select className="form-input" value={form.visual_config.language} onChange={(e) => updateVC({ language: e.target.value })}>
                       {LANG_OPTIONS.map((l) => {
                         const langLabelMap: Record<string, string> = {
@@ -782,7 +784,7 @@ function BotModal({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   {/* Mode toggle */}
                   <div style={{ display: 'flex', background: 'var(--bg-secondary)', borderRadius: 8, padding: 4, gap: 4 }}>
-                    {([['visual', '✨ Visual'], ['advanced', '🛠 Avanzado']] as const).map(([mode, label]) => (
+                    {([['visual', `✨ ${t('Visual', 'Visual')}`], ['advanced', `🛠 ${t('Advanced', 'Avanzado')}`]] as const).map(([mode, label]) => (
                       <button
                         key={mode}
                         onClick={() => {
@@ -810,27 +812,27 @@ function BotModal({
                   {promptMode === 'visual' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                       <div style={{ padding: '10px 14px', background: '#f0fdf4', borderRadius: 8, fontSize: 13, color: '#166534' }}>
-                        ✨ El prompt se genera automáticamente con los datos de la pestaña <strong>Negocio</strong>. Añade restricciones e instrucciones adicionales aquí.
+                        ✨ {t('The prompt is generated automatically from the ', 'El prompt se genera automáticamente con los datos de la pestaña ')}<strong>{t('Business', 'Negocio')}</strong>{t(' tab. Add restrictions and extra instructions here.', '. Añade restricciones e instrucciones adicionales aquí.')}
                       </div>
                       <div className="form-group" style={{ margin: 0 }}>
-                        <label className="form-label">¿Qué NO debe hacer el bot?</label>
+                        <label className="form-label">{t('What should the bot NOT do?', '¿Qué NO debe hacer el bot?')}</label>
                         <textarea
                           className="form-input"
                           rows={2}
                           value={form.visual_config.restrictions}
                           onChange={(e) => updateVC({ restrictions: e.target.value })}
-                          placeholder="No reveles precios sin autorización. No hagas promesas de tiempos de entrega."
+                          placeholder={t("Don't reveal prices without authorization. Don't make delivery-time promises.", 'No reveles precios sin autorización. No hagas promesas de tiempos de entrega.')}
                           style={{ resize: 'none' }}
                         />
                       </div>
                       <div className="form-group" style={{ margin: 0 }}>
-                        <label className="form-label">Instrucciones adicionales</label>
+                        <label className="form-label">{t('Additional instructions', 'Instrucciones adicionales')}</label>
                         <textarea
                           className="form-input"
                           rows={3}
                           value={form.visual_config.specialInstructions}
                           onChange={(e) => updateVC({ specialInstructions: e.target.value })}
-                          placeholder="Solicita siempre el nombre del cliente. Registra el número de pedido antes de continuar."
+                          placeholder={t('Always ask for the customer name. Record the order number before continuing.', 'Solicita siempre el nombre del cliente. Registra el número de pedido antes de continuar.')}
                           style={{ resize: 'none' }}
                         />
                       </div>
@@ -839,9 +841,9 @@ function BotModal({
                       {form.system_prompt && (
                         <div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Vista previa del prompt generado</span>
+                            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('Generated prompt preview', 'Vista previa del prompt generado')}</span>
                             <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => setPromptMode('advanced')}>
-                              Editar manualmente →
+                              {t('Edit manually →', 'Editar manualmente →')}
                             </button>
                           </div>
                           <pre style={{
@@ -871,7 +873,7 @@ function BotModal({
                             disabled={improving || !form.system_prompt.trim()}
                             onClick={handleImprove}
                           >
-                            {improving ? '⏳ Mejorando…' : '✨ Mejorar con IA'}
+                            {improving ? t('⏳ Improving…', '⏳ Mejorando…') : t('✨ Improve with AI', '✨ Mejorar con IA')}
                           </button>
                         </div>
                       </div>
@@ -880,11 +882,11 @@ function BotModal({
                         rows={10}
                         value={form.system_prompt}
                         onChange={(e) => upd({ system_prompt: e.target.value })}
-                        placeholder={`Eres un asistente de ventas amable de [Empresa]. Tu objetivo es:\n1. Responder preguntas sobre productos y servicios\n2. Calificar prospectos\n3. Agendar citas con el equipo\n\nSiempre sé cordial y profesional.`}
+                        placeholder={t(`You are a friendly sales assistant for [Company]. Your goal is to:\n1. Answer questions about products and services\n2. Qualify leads\n3. Schedule appointments with the team\n\nAlways be courteous and professional.`, `Eres un asistente de ventas amable de [Empresa]. Tu objetivo es:\n1. Responder preguntas sobre productos y servicios\n2. Calificar prospectos\n3. Agendar citas con el equipo\n\nSiempre sé cordial y profesional.`)}
                         style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }}
                       />
                       <div style={{ padding: '8px 12px', background: '#ede9fe', borderRadius: 6, fontSize: 12, color: '#4c1d95' }}>
-                        💡 Usa <code style={{ background: '#ddd6fe', padding: '0 3px', borderRadius: 2 }}>{'{contact_name}'}</code> para personalizar con el nombre del contacto.
+                        💡 {t('Use ', 'Usa ')}<code style={{ background: '#ddd6fe', padding: '0 3px', borderRadius: 2 }}>{'{contact_name}'}</code>{t(' to personalize with the contact name.', ' para personalizar con el nombre del contacto.')}
                       </div>
                     </div>
                   )}
@@ -892,16 +894,16 @@ function BotModal({
                   {/* Divider: messages */}
                   <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
-                      Mensajes predeterminados
+                      {t('Default messages', 'Mensajes predeterminados')}
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                       <div className="form-group" style={{ margin: 0 }}>
-                        <label className="form-label">Mensaje de bienvenida</label>
-                        <textarea className="form-input" rows={3} value={form.welcome_message} onChange={(e) => upd({ welcome_message: e.target.value })} placeholder="¡Hola! 👋 ¿En qué puedo ayudarte hoy?" style={{ resize: 'none' }} />
+                        <label className="form-label">{t('Welcome message', 'Mensaje de bienvenida')}</label>
+                        <textarea className="form-input" rows={3} value={form.welcome_message} onChange={(e) => upd({ welcome_message: e.target.value })} placeholder={t('Hi! 👋 How can I help you today?', '¡Hola! 👋 ¿En qué puedo ayudarte hoy?')} style={{ resize: 'none' }} />
                       </div>
                       <div className="form-group" style={{ margin: 0 }}>
-                        <label className="form-label">Fallback (no entiende)</label>
-                        <textarea className="form-input" rows={3} value={form.fallback_message} onChange={(e) => upd({ fallback_message: e.target.value })} placeholder="Lo siento, no entendí. ¿Puedes reformularlo?" style={{ resize: 'none' }} />
+                        <label className="form-label">{t("Fallback (doesn't understand)", 'Fallback (no entiende)')}</label>
+                        <textarea className="form-input" rows={3} value={form.fallback_message} onChange={(e) => upd({ fallback_message: e.target.value })} placeholder={t("Sorry, I didn't understand. Could you rephrase?", 'Lo siento, no entendí. ¿Puedes reformularlo?')} style={{ resize: 'none' }} />
                       </div>
                     </div>
                   </div>
@@ -909,12 +911,12 @@ function BotModal({
                   {/* Handoff */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">Palabra clave → agente humano</label>
-                      <input className="form-input" value={form.handoff_keyword} onChange={(e) => upd({ handoff_keyword: e.target.value })} placeholder="agente" />
+                      <label className="form-label">{t('Keyword → human agent', 'Palabra clave → agente humano')}</label>
+                      <input className="form-input" value={form.handoff_keyword} onChange={(e) => upd({ handoff_keyword: e.target.value })} placeholder={t('agent', 'agente')} />
                     </div>
                     <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">Mensaje al transferir</label>
-                      <input className="form-input" value={form.handoff_message} onChange={(e) => upd({ handoff_message: e.target.value })} placeholder="Enseguida te conecto con un agente." />
+                      <label className="form-label">{t('Transfer message', 'Mensaje al transferir')}</label>
+                      <input className="form-input" value={form.handoff_message} onChange={(e) => upd({ handoff_message: e.target.value })} placeholder={t("I'll connect you with an agent right away.", 'Enseguida te conecto con un agente.')} />
                     </div>
                   </div>
                 </div>
@@ -926,7 +928,7 @@ function BotModal({
                   {allowOwnApiKeys ? (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                       <div className="form-group" style={{ margin: 0 }}>
-                        <label className="form-label">Proveedor de IA</label>
+                        <label className="form-label">{t('AI provider', 'Proveedor de IA')}</label>
                         <select className="form-input" value={form.provider} onChange={(e) => {
                           const prov = e.target.value;
                           const firstModel = PROVIDERS.find((p) => p.value === prov)?.models[0] ?? '';
@@ -936,7 +938,7 @@ function BotModal({
                         </select>
                       </div>
                       <div className="form-group" style={{ margin: 0 }}>
-                        <label className="form-label">Modelo</label>
+                        <label className="form-label">{t('Model', 'Modelo')}</label>
                         <select className="form-input" value={form.model} onChange={(e) => upd({ model: e.target.value })}>
                           {(PROVIDERS.find((p) => p.value === form.provider)?.models ?? []).map((m) => <option key={m} value={m}>{m}</option>)}
                         </select>
@@ -946,34 +948,34 @@ function BotModal({
                     <div style={{ padding: '12px 16px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, fontSize: 13, color: '#166534', display: 'flex', gap: 10, alignItems: 'center' }}>
                       <span style={{ fontSize: 20 }}>🤖</span>
                       <div>
-                        <div style={{ fontWeight: 600, marginBottom: 2 }}>Modelo de IA gestionado por la plataforma</div>
-                        <div style={{ opacity: 0.8 }}>El owner configura el proveedor y modelo. Actualiza tu plan para usar tu propia API key.</div>
+                        <div style={{ fontWeight: 600, marginBottom: 2 }}>{t('AI model managed by the platform', 'Modelo de IA gestionado por la plataforma')}</div>
+                        <div style={{ opacity: 0.8 }}>{t('The owner configures the provider and model. Upgrade your plan to use your own API key.', 'El owner configura el proveedor y modelo. Actualiza tu plan para usar tu propia API key.')}</div>
                       </div>
                     </div>
                   )}
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">Máx. tokens por respuesta</label>
+                      <label className="form-label">{t('Max tokens per reply', 'Máx. tokens por respuesta')}</label>
                       <input type="number" className="form-input" value={form.max_tokens} onChange={(e) => upd({ max_tokens: +e.target.value })} min={100} max={4000} />
                     </div>
                     <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">Temperatura ({form.temperature})</label>
+                      <label className="form-label">{t('Temperature', 'Temperatura')} ({form.temperature})</label>
                       <input type="range" min={0} max={1} step={0.05} value={form.temperature}
                         onChange={(e) => upd({ temperature: +e.target.value })}
                         style={{ width: '100%', marginTop: 8 }}
                       />
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)' }}>
-                        <span>Preciso</span><span>Creativo</span>
+                        <span>{t('Precise', 'Preciso')}</span><span>{t('Creative', 'Creativo')}</span>
                       </div>
                     </div>
                   </div>
 
                   <div className="form-group" style={{ margin: 0 }}>
                     <label className="form-label">
-                      Conversaciones a recordar: <strong>{form.memory_conversations}</strong>
+                      {t('Conversations to remember:', 'Conversaciones a recordar:')} <strong>{form.memory_conversations}</strong>
                       <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>
-                        (0 = sin memoria, máx. 50)
+                        {t('(0 = no memory, max. 50)', '(0 = sin memoria, máx. 50)')}
                       </span>
                     </label>
                     <input
@@ -982,13 +984,13 @@ function BotModal({
                       style={{ width: '100%', marginTop: 6 }}
                     />
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)' }}>
-                      <span>Sin memoria</span><span>50 conversaciones</span>
+                      <span>{t('No memory', 'Sin memoria')}</span><span>{t('50 conversations', '50 conversaciones')}</span>
                     </div>
                   </div>
 
                   {allowOwnApiKeys && (
                     <div style={{ padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-                      <strong>Nota:</strong> La API key del proveedor seleccionado se configura en <strong>Configuración → Integraciones de IA</strong>.
+                      <strong>{t('Note:', 'Nota:')}</strong> {t('The selected provider API key is configured in ', 'La API key del proveedor seleccionado se configura en ')}<strong>{t('Settings → AI Integrations', 'Configuración → Integraciones de IA')}</strong>.
                     </div>
                   )}
                 </div>
@@ -999,17 +1001,17 @@ function BotModal({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                   <div style={{ padding: '10px 14px', background: '#e0f2fe', borderRadius: 8, fontSize: 13, color: '#0369a1', display: 'flex', gap: 8 }}>
                     <span>📡</span>
-                    <span>Selecciona los inboxes y colas donde este bot estará activo.</span>
+                    <span>{t('Select the inboxes and queues where this bot will be active.', 'Selecciona los inboxes y colas donde este bot estará activo.')}</span>
                   </div>
 
                   {/* Inboxes */}
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
-                      📥 Inboxes / Canales
+                      📥 {t('Inboxes / Channels', 'Inboxes / Canales')}
                     </div>
                     {inboxes.length === 0 ? (
                       <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 16 }}>
-                        No hay inboxes configurados. Crea uno en <strong>Conexiones</strong>.
+                        {t('No inboxes configured. Create one in ', 'No hay inboxes configurados. Crea uno en ')}<strong>{t('Connections', 'Conexiones')}</strong>.
                       </div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1046,10 +1048,10 @@ function BotModal({
                   {/* Queues */}
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
-                      📬 Colas de atención
+                      📬 {t('Service queues', 'Colas de atención')}
                     </div>
                     {queues.length === 0 ? (
-                      <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 16 }}>No hay colas configuradas.</div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 16 }}>{t('No queues configured.', 'No hay colas configuradas.')}</div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {queues.map((queue) => {
@@ -1087,10 +1089,10 @@ function BotModal({
                   {teams.length > 0 && (
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
-                        👥 Equipos
+                        👥 {t('Teams', 'Equipos')}
                       </div>
                       <div style={{ padding: '8px 12px', background: '#fef9c3', borderRadius: 6, fontSize: 12, color: '#92400e', marginBottom: 8 }}>
-                        El bot responderá en conversaciones asignadas a estos equipos.
+                        {t('The bot will reply in conversations assigned to these teams.', 'El bot responderá en conversaciones asignadas a estos equipos.')}
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {teams.map((team) => {
@@ -1129,9 +1131,9 @@ function BotModal({
                     borderColor: form.respond_in_groups ? '#eab308' : 'var(--border)',
                   }}>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>💬 Responder en grupos de WhatsApp</div>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>💬 {t('Reply in WhatsApp groups', 'Responder en grupos de WhatsApp')}</div>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                        Por defecto el bot solo responde en chats individuales. Activa para responder en grupos también.
+                        {t('By default the bot only replies in individual chats. Enable to reply in groups too.', 'Por defecto el bot solo responde en chats individuales. Activa para responder en grupos también.')}
                       </div>
                     </div>
                     <div
@@ -1158,37 +1160,37 @@ function BotModal({
                   <div style={{ padding: '12px 16px', background: '#f0fdf4', borderRadius: 8, fontSize: 13, color: '#166534', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                     <span style={{ fontSize: 18 }}>📚</span>
                     <div>
-                      <div style={{ fontWeight: 600, marginBottom: 2 }}>Base de conocimiento</div>
-                      <div style={{ lineHeight: 1.5 }}>Añade URLs o PDFs para que el bot responda con información específica. Los dominios se configuran en <strong>Configuración → General → Dominios</strong>.</div>
+                      <div style={{ fontWeight: 600, marginBottom: 2 }}>{t('Knowledge base', 'Base de conocimiento')}</div>
+                      <div style={{ lineHeight: 1.5 }}>{t('Add URLs or PDFs so the bot answers with specific information. Domains are configured in ', 'Añade URLs o PDFs para que el bot responda con información específica. Los dominios se configuran en ')}<strong>{t('Settings → General → Domains', 'Configuración → General → Dominios')}</strong>.</div>
                     </div>
                   </div>
 
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Añadir URL</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>{t('Add URL', 'Añadir URL')}</div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <input className="form-input" style={{ flex: 1 }} placeholder="https://tuempresa.com/productos" value={newUrl} onChange={(e) => setNewUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddUrl()} disabled={urlAdding} />
+                      <input className="form-input" style={{ flex: 1 }} placeholder={t('https://yourcompany.com/products', 'https://tuempresa.com/productos')} value={newUrl} onChange={(e) => setNewUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddUrl()} disabled={urlAdding} />
                       <button className="btn btn-primary" disabled={urlAdding || !newUrl.trim()} onClick={handleAddUrl} style={{ whiteSpace: 'nowrap' }}>
-                        {urlAdding ? 'Añadiendo…' : '+ URL'}
+                        {urlAdding ? t('Adding…', 'Añadiendo…') : '+ URL'}
                       </button>
                     </div>
                   </div>
 
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Subir PDF</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>{t('Upload PDF', 'Subir PDF')}</div>
                     <input ref={pdfInputRef} type="file" accept=".pdf" style={{ display: 'none' }} onChange={handlePdfUpload} />
                     <button className="btn btn-secondary" disabled={pdfUploading} onClick={() => pdfInputRef.current?.click()}>
-                      {pdfUploading ? 'Subiendo…' : '📄 Seleccionar PDF'}
+                      {pdfUploading ? t('Uploading…', 'Subiendo…') : t('📄 Select PDF', '📄 Seleccionar PDF')}
                     </button>
                   </div>
 
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-                      Fuentes ({kbSources.length})
+                      {t('Sources', 'Fuentes')} ({kbSources.length})
                     </div>
                     {kbLoading ? (
-                      <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 24 }}>Cargando…</div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 24 }}>{t('Loading…', 'Cargando…')}</div>
                     ) : kbSources.length === 0 ? (
-                      <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 24 }}>No hay fuentes aún. Añade una URL o sube un PDF.</div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 24 }}>{t('No sources yet. Add a URL or upload a PDF.', 'No hay fuentes aún. Añade una URL o sube un PDF.')}</div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {kbSources.map((src) => {
@@ -1209,8 +1211,8 @@ function BotModal({
                                 </div>
                                 <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexShrink: 0 }}>
                                   <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 8, background: sc.bg, color: sc.color }}>{sc.label}</span>
-                                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => handleReindex(src.id)} title="Reindexar">↻</button>
-                                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--danger)' }} onClick={() => handleDeleteSource(src.id)} title="Eliminar">✕</button>
+                                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => handleReindex(src.id)} title={t('Reindex', 'Reindexar')}>↻</button>
+                                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--danger)' }} onClick={() => handleDeleteSource(src.id)} title={t('Delete', 'Eliminar')}>✕</button>
                                 </div>
                               </div>
                               <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-muted)' }}>
@@ -1239,9 +1241,9 @@ function BotModal({
                     borderColor: form.webchat_enabled ? '#10b981' : 'var(--border)',
                   }}>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>🌐 Activar widget de Webchat</div>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>🌐 {t('Enable Webchat widget', 'Activar widget de Webchat')}</div>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                        Incrusta este bot como widget de chat en cualquier sitio web.
+                        {t('Embed this bot as a chat widget on any website.', 'Incrusta este bot como widget de chat en cualquier sitio web.')}
                       </div>
                     </div>
                     <div
@@ -1263,32 +1265,32 @@ function BotModal({
                   {form.webchat_enabled && (
                     <>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Apariencia</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Appearance', 'Apariencia')}</div>
                         <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: 12, alignItems: 'start' }}>
                           <div className="form-group" style={{ margin: 0 }}>
                             <label className="form-label">Color</label>
                             <input type="color" value={form.webchat_color} onChange={(e) => upd({ webchat_color: e.target.value })} style={{ width: '100%', height: 38, borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer', padding: 2 }} />
                           </div>
                           <div className="form-group" style={{ margin: 0 }}>
-                            <label className="form-label">Título del widget</label>
-                            <input className="form-input" value={form.webchat_title} onChange={(e) => upd({ webchat_title: e.target.value })} placeholder={form.name || 'Asistente Virtual'} />
+                            <label className="form-label">{t('Widget title', 'Título del widget')}</label>
+                            <input className="form-input" value={form.webchat_title} onChange={(e) => upd({ webchat_title: e.target.value })} placeholder={form.name || t('Virtual Assistant', 'Asistente Virtual')} />
                           </div>
                         </div>
                         <div className="form-group" style={{ margin: 0 }}>
-                          <label className="form-label">Subtítulo</label>
-                          <input className="form-input" value={form.webchat_subtitle} onChange={(e) => upd({ webchat_subtitle: e.target.value })} placeholder="¿En qué puedo ayudarte?" />
+                          <label className="form-label">{t('Subtitle', 'Subtítulo')}</label>
+                          <input className="form-input" value={form.webchat_subtitle} onChange={(e) => upd({ webchat_subtitle: e.target.value })} placeholder={t('How can I help you?', '¿En qué puedo ayudarte?')} />
                         </div>
                         <div className="form-group" style={{ margin: 0 }}>
-                          <label className="form-label">Placeholder del input</label>
-                          <input className="form-input" value={form.webchat_placeholder} onChange={(e) => upd({ webchat_placeholder: e.target.value })} placeholder="Escribe un mensaje..." />
+                          <label className="form-label">{t('Input placeholder', 'Placeholder del input')}</label>
+                          <input className="form-input" value={form.webchat_placeholder} onChange={(e) => upd({ webchat_placeholder: e.target.value })} placeholder={t('Type a message...', 'Escribe un mensaje...')} />
                         </div>
                       </div>
 
                       <div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Código de inserción</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>{t('Embed code', 'Código de inserción')}</div>
                         <div style={{ padding: '10px 14px', background: '#f8fafc', border: '1px solid var(--border)', borderRadius: 8 }}>
                           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-                            Pega este script antes del cierre del <code>&lt;/body&gt;</code>:
+                            {t('Paste this script before the closing ', 'Pega este script antes del cierre del ')}<code>&lt;/body&gt;</code>:
                           </div>
                           <pre style={{ margin: 0, padding: '10px 12px', background: '#1e293b', color: '#e2e8f0', borderRadius: 6, fontSize: 12, overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
 {`<script
@@ -1301,10 +1303,10 @@ function BotModal({
                             style={{ marginTop: 8, fontSize: 12 }}
                             onClick={() => {
                               const code = `<script\n  src="${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/webchat/widget.js"\n  data-bot-id="${bot.id}"\n></script>`;
-                              navigator.clipboard.writeText(code).then(() => alert('¡Copiado al portapapeles!'));
+                              navigator.clipboard.writeText(code).then(() => alert(t('Copied to clipboard!', '¡Copiado al portapapeles!')));
                             }}
                           >
-                            📋 Copiar
+                            📋 {t('Copy', 'Copiar')}
                           </button>
                         </div>
                       </div>
@@ -1401,12 +1403,13 @@ function SessionsDrawer({ bot, onClose }: { bot: AiChatbot; onClose: () => void 
 // ── Test Chat Modal (standalone, opened from bot card) ────────────────────────
 
 function TestChatModal({ bot, onClose }: { bot: AiChatbot; onClose: () => void }) {
+  const { lang } = useLangCtx();
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 520, height: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div>
-            <div style={{ fontWeight: 700 }}>🧪 Probar: {bot.name}</div>
+            <div style={{ fontWeight: 700 }}>🧪 {lang === 'en' ? 'Test' : 'Probar'}: {bot.name}</div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{bot.provider} / {bot.model}</div>
           </div>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
@@ -1424,6 +1427,7 @@ function TestChatModal({ bot, onClose }: { bot: AiChatbot; onClose: () => void }
 export default function AiChatbotsPage() {
   const { lang } = useLangCtx();
   const i = APP[lang];
+  const t = (en: string, es: string) => (lang === 'en' ? en : es);
 
   const STATUS_CFG: Record<string, { label: string; dot: string; text: string; bg: string }> = {
     active:   { label: i.active,    dot: '#10b981', text: '#065f46', bg: '#d1fae5' },
@@ -1481,7 +1485,7 @@ export default function AiChatbotsPage() {
       // Merge only the status so we don't lose the enriched list fields (sessions, etc.)
       setBots((prev) => prev.map((b) => b.id === bot.id ? { ...b, status: updated.status } : b));
     } catch (e: any) {
-      alert(e?.message || 'No se pudo cambiar el estado del bot');
+      alert(e?.message || t("Couldn't change the bot status", 'No se pudo cambiar el estado del bot'));
     }
   }
 
@@ -1516,10 +1520,10 @@ export default function AiChatbotsPage() {
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '12px 16px', background: '#fefce8', border: '1px solid #fde047', borderRadius: 10, marginBottom: 20, fontSize: 13 }}>
           <span style={{ fontSize: 20 }}>⚠️</span>
           <div>
-            <strong style={{ color: '#854d0e' }}>No hay API key de IA configurada.</strong>
-            {' '}Configura tu clave de proveedor en{' '}
+            <strong style={{ color: '#854d0e' }}>{t('No AI API key configured.', 'No hay API key de IA configurada.')}</strong>
+            {' '}{t('Configure your provider key in', 'Configura tu clave de proveedor en')}{' '}
             <a href="/settings" style={{ color: '#6366f1', fontWeight: 600, textDecoration: 'none' }}>
-              Ajustes → Integraciones de IA →
+              {t('Settings → AI Integrations →', 'Ajustes → Integraciones de IA →')}
             </a>
           </div>
         </div>
