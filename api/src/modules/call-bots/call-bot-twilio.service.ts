@@ -916,8 +916,10 @@ ${addTagInstruction}
 
     const meta    = this.callMeta.get(callSid);
     const tenantId = meta?.tenantId ?? bot.tenant_id;
-    const crmCtx  = await this.getCrmCtx(tenantId);
-    const dentallyConnected = await this.integrations.isConnected(tenantId, 'dentally').catch(() => false);
+    const [crmCtx, dentallyConnected] = await Promise.all([
+      this.getCrmCtx(tenantId),
+      this.integrations.isConnected(tenantId, 'dentally').catch(() => false),
+    ]);
     const tools   = buildTools(
       crmCtx.stages.map((s: any) => s.pipeline_name ? `${s.name} (${s.pipeline_name})` : s.name),
       crmCtx.tags.map((t: any) => t.name),

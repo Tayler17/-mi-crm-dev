@@ -10,6 +10,21 @@ import { DentallyConnector } from './connectors/dentally.connector';
 export class IntegrationsService implements OnModuleInit {
   private readonly logger = new Logger(IntegrationsService.name);
   private readonly connectors = new Map<string, IntegrationConnector>();
+  // Short-lived cache of the practitioner list per tenant+provider. The list barely
+  // changes but is fetched on every availability/booking call, so caching it removes
+  // one external API round-trip per appointment turn (big latency win on voice).
+  private readonly practitionerCache = new Map<string, { list: Array<{ id: string; name: string }>; exp: number }>();
+
+  /** Practitioners with a 5-minute TTL cache to avoid repeated external calls. */
+  private async getPractitionersCached(tenantId: string, provider: string, connector: any, config: any): Promise<Array<{ id: string; name: string }>> {
+    if (!connector.listPractitioners) return [];
+    const key = `${tenantId}:${provider}`;
+    const hit = this.practitionerCache.get(key);
+    if (hit && hit.exp > Date.now()) return hit.list;
+    const list = await connector.listPractitioners(config).catch(() => [] as Array<{ id: string; name: string }>);
+    if (list.length) this.practitionerCache.set(key, { list, exp: Date.now() + 5 * 60 * 1000 });
+    return list;
+  }
 
   constructor(
     @InjectDataSource() private readonly db: DataSource,
@@ -89,6 +104,7 @@ export class IntegrationsService implements OnModuleInit {
          config=$3, status='connected', last_error=NULL, updated_at=NOW()`,
       [tenantId, provider, JSON.stringify(config)],
     );
+    this.practitionerCache.delete(`${tenantId}:${provider}`);
     this.logger.log(`[integrations] ${provider} connected for tenant ${tenantId}`);
     return { ok: true, info: result.info };
   }
@@ -116,6 +132,7 @@ export class IntegrationsService implements OnModuleInit {
       `DELETE FROM tenant_integrations WHERE tenant_id::text=$1 AND provider=$2`,
       [tenantId, provider],
     );
+    this.practitionerCache.delete(`${tenantId}:${provider}`);
     return { ok: true };
   }
 
@@ -290,7 +307,7 @@ export class IntegrationsService implements OnModuleInit {
   /** Bot: list bookable professionals as a friendly message. */
   async botListPractitioners(tenantId: string, provider: string, lang: 'es' | 'en' = 'es'): Promise<string> {
     const { connector, config } = await this.getConnected(tenantId, provider);
-    const list = connector.listPractitioners ? await connector.listPractitioners(config) : [];
+    const list = await this.getPractitionersCached(tenantId, provider, connector, config);
     if (!list.length) return lang === 'en' ? 'There are no professionals available right now.' : 'No hay profesionales disponibles ahora mismo.';
     const names = list.map((p: any) => p.name).join(', ');
     return lang === 'en' ? `Available professionals: ${names}.` : `Profesionales disponibles: ${names}.`;
@@ -306,7 +323,7 @@ export class IntegrationsService implements OnModuleInit {
     const { connector, config } = await this.getConnected(tenantId, provider);
     if (!connector.listAvailability || !connector.listPractitioners) return en ? 'Appointments are not available at the moment.' : 'Las citas no están disponibles en este momento.';
 
-    const all = await connector.listPractitioners(config).catch(() => [] as Array<{ id: string; name: string }>);
+    const all = await this.getPractitionersCached(tenantId, provider, connector, config);
     if (!all.length) return en ? "I couldn't find professionals to check availability." : 'No encontré profesionales para consultar disponibilidad.';
 
     // The practitioner is OPTIONAL: if the caller named one, narrow to it; otherwise
@@ -364,7 +381,7 @@ export class IntegrationsService implements OnModuleInit {
     const { connector, config } = await this.getConnected(tenantId, provider);
     if (!connector.listAvailability || !connector.createAppointment || !connector.listPractitioners) return en ? 'Appointments are not available at the moment.' : 'Las citas no están disponibles en este momento.';
 
-    const all = await connector.listPractitioners(config).catch(() => [] as Array<{ id: string; name: string }>);
+    const all = await this.getPractitionersCached(tenantId, provider, connector, config);
     if (!all.length) return en ? "I couldn't find the professional to book." : 'No encontré el profesional para agendar.';
 
     // Practitioner is optional: narrow to the named one if given, else consider all.
