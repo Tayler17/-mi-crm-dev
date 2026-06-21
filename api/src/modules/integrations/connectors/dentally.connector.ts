@@ -74,6 +74,9 @@ export class DentallyConnector implements IntegrationConnector {
     if (!token) throw new Error('Falta el token de API de Dentally.');
     const host = this.host(config);
     const norm = (s?: string) => (s || '').toLowerCase().trim();
+    // Compare phones by their last 9 digits so "+447453599665", "447453599665"
+    // and "07453599665" all match regardless of how each side stored it.
+    const tail = (s?: string) => (s || '').replace(/\D/g, '').slice(-9);
 
     const tryQuery = async (qs: string): Promise<any[]> => {
       const res = await this.request(host, token, `/v1/patients?per_page=50&${qs}`);
@@ -81,13 +84,31 @@ export class DentallyConnector implements IntegrationConnector {
       return Array.isArray(res.json?.patients) ? res.json.patients : [];
     };
 
+    // Build phone variants so the exact-match Dentally filter hits whatever format
+    // the clinic stored (national "0…" vs international "+44…").
+    const phoneVariants = (phone?: string): string[] => {
+      if (!phone) return [];
+      const digits = phone.replace(/\D/g, '');
+      const v = new Set<string>();
+      if (phone.trim()) v.add(phone.trim());
+      if (digits) { v.add(digits); v.add('+' + digits); }
+      if (digits.startsWith('0')) { v.add('44' + digits.slice(1)); v.add('+44' + digits.slice(1)); }
+      if (digits.startsWith('44') && digits.length > 10) { v.add('0' + digits.slice(2)); v.add('+44' + digits.slice(2)); }
+      return [...v];
+    };
+
     let patients: any[] = [];
     if (q.email) patients = await tryQuery(`filters[email_address]=${encodeURIComponent(q.email)}`);
-    if (!patients.length && q.phone) patients = await tryQuery(`filters[mobile_phone]=${encodeURIComponent(q.phone)}`);
+    if (!patients.length && q.phone) {
+      for (const variant of phoneVariants(q.phone)) {
+        patients = await tryQuery(`filters[mobile_phone]=${encodeURIComponent(variant)}`);
+        if (patients.length) break;
+      }
+    }
 
     const match = patients.find((p) =>
       (q.email && norm(p.email_address) === norm(q.email)) ||
-      (q.phone && (p.mobile_phone === q.phone || p.home_phone === q.phone || p.work_phone === q.phone)),
+      (q.phone && tail(q.phone) && [p.mobile_phone, p.home_phone, p.work_phone].some((ph) => tail(ph) === tail(q.phone))),
     ) || (patients.length === 1 ? patients[0] : null);
 
     return match ? this.mapPatient(match) : null;

@@ -255,6 +255,7 @@ export class IntegrationsService implements OnModuleInit {
   async bookAppointment(
     tenantId: string, provider: string,
     input: { contactId: string; practitionerId: string; start: string; finish?: string; reason?: string; patientData?: { dateOfBirth?: string; gender?: string; title?: string } },
+    lang: 'es' | 'en' = 'es',
   ) {
     const { connector, config } = await this.getConnected(tenantId, provider);
     if (!connector.createAppointment) throw new BadRequestException(`${provider} no soporta agendar citas.`);
@@ -264,7 +265,7 @@ export class IntegrationsService implements OnModuleInit {
 
     // Auto-link the contact to a Dentally patient on demand (find by email/phone,
     // else create) — no need to import the whole patient base first.
-    const externalId = await this.linkOrCreatePatient(tenantId, provider, input.contactId, input.patientData);
+    const externalId = await this.linkOrCreatePatient(tenantId, provider, input.contactId, input.patientData, lang);
 
     let booked;
     try {
@@ -462,7 +463,7 @@ export class IntegrationsService implements OnModuleInit {
         finish: slot.finish,
         reason: opts.reason,
         patientData: { dateOfBirth: opts.dateOfBirth, gender: opts.gender, title: opts.title },
-      });
+      }, lang);
       return en
         ? `Done! Your appointment with ${bookPracName} is booked for ${when} at ${spokenWant}.`
         : `¡Listo! Tu cita con ${bookPracName} quedó agendada para el ${when} a las ${spokenWant}.`;
@@ -481,6 +482,7 @@ export class IntegrationsService implements OnModuleInit {
     provider: string,
     contactId: string,
     patientData?: { dateOfBirth?: string; gender?: string; title?: string },
+    lang: 'es' | 'en' = 'es',
   ): Promise<string> {
     const { connector, config } = await this.getConnected(tenantId, provider);
 
@@ -538,14 +540,17 @@ export class IntegrationsService implements OnModuleInit {
       const fDob    = patientData?.dateOfBirth || cfDob;
       const fGender = patientData?.gender      || cfGender;
 
+      const en = lang === 'en';
       const missing: string[] = [];
-      if (!fDob)    missing.push('fecha de nacimiento (dentally_dob)');
-      if (!fGender) missing.push('género (dentally_gender: male/female)');
-      if (!fTitle)  missing.push('título (dentally_title)');
+      if (!fDob)    missing.push(en ? 'date of birth' : 'fecha de nacimiento');
+      if (!fGender) missing.push(en ? 'gender (male/female)' : 'género (masculino/femenino)');
+      if (!fTitle)  missing.push(en ? 'title (Mr/Mrs/Ms/Dr)' : 'título (Sr./Sra./Srta./Dr.)');
       if (missing.length) {
+        // Customer-facing: ask for the details naturally; never expose internal field codes.
         throw new BadRequestException(
-          `Este contacto no existe en Dentally y faltan datos para crearlo: ${missing.join(', ')}. ` +
-          `Añádelos como campos personalizados del contacto y reintenta.`,
+          en
+            ? `To register you as a new patient I need a few details: ${missing.join(', ')}. Could you provide them?`
+            : `Para registrarte como paciente nuevo necesito unos datos: ${missing.join(', ')}. ¿Me los puedes facilitar?`,
         );
       }
 
