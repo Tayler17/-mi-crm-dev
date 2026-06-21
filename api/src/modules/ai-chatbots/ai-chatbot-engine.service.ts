@@ -796,7 +796,7 @@ export class AiChatbotEngineService {
       if (dentallyConnected) {
         crmLines.push('- dentally_list_practitioners: para listar los profesionales/doctores disponibles para citas.');
         crmLines.push('- dentally_check_availability: para ver los horarios libres de un día (parámetro date en formato YYYY-MM-DD; practitioner_name es OPCIONAL). Lo único obligatorio es la fecha. Úsala SOLO cuando el cliente ya te haya dado una fecha concreta; NUNCA asumas la fecha de hoy: si el cliente quiere cita pero no dijo qué día, PREGÚNTALE primero qué día desea. El profesional es opcional: si el cliente menciona uno, pásalo en practitioner_name; si no menciona ninguno, NO le preguntes por el profesional y consulta con todos (deja practitioner_name vacío).');
-        crmLines.push('- dentally_book_appointment: para AGENDAR una cita cuando el cliente ya eligió día y hora (date YYYY-MM-DD, time HH:MM). Si el cliente NO está registrado como paciente, pídele su fecha de nacimiento (date_of_birth, YYYY-MM-DD) y género (gender: male/female) ANTES de agendar.');
+        crmLines.push('- dentally_book_appointment: para AGENDAR una cita cuando el cliente ya eligió día y hora (date YYYY-MM-DD, time HH:MM). En cuanto el cliente elija un horario de la lista, llama a ESTA herramienta para agendar; NO vuelvas a consultar disponibilidad con la misma fecha. Si el cliente dice que YA es paciente, intenta agendar directamente (el sistema lo busca por su ficha); solo si NO es paciente pídele fecha de nacimiento (date_of_birth, YYYY-MM-DD) y género (gender: male/female).');
         crmLines.push('REGLA CRÍTICA DENTALLY: cuando el cliente pida los doctores, la disponibilidad/horarios, o agendar, DEBES llamar la herramienta correspondiente (dentally_list_practitioners / dentally_check_availability / dentally_book_appointment) y usar su resultado real. NUNCA digas "aquí están los doctores", "estos son los horarios" ni inventes nombres/horarios sin llamar la herramienta. No prometas datos que no obtuviste de la herramienta. PERO no llames dentally_check_availability hasta tener una fecha concreta dada por el cliente: si falta la fecha, pregúntala primero en lugar de adivinar.');
       }
       crmLines.push('Siempre incluye un mensaje de confirmación breve y amigable para el usuario al usar cualquier herramienta.');
@@ -1090,7 +1090,15 @@ export class AiChatbotEngineService {
         try {
           if (result.dentallyListPractitioners) outMsg = await this.integrations.botListPractitioners(tenantId, 'dentally');
           else if (result.dentallyCheckAvailability) outMsg = await this.integrations.botCheckAvailability(tenantId, 'dentally', result.dentallyCheckAvailability);
-          else if (result.dentallyBook) outMsg = await this.integrations.botBook(tenantId, 'dentally', { contactId: '', ...result.dentallyBook });
+          else if (result.dentallyBook) {
+            // The test panel has no real contact, so we can't (and shouldn't) create a
+            // real Dentally appointment. Simulate the confirmation instead of failing.
+            const b: any = result.dentallyBook;
+            const isEs = bot.language?.startsWith('es') !== false;
+            outMsg = isEs
+              ? `✅ (Modo prueba) La cita quedaría agendada para el ${b.date} a las ${b.time}. En una conversación real con un contacto se confirma en Dentally.`
+              : `✅ (Test mode) The appointment would be booked for ${b.date} at ${b.time}. In a real conversation with a contact it is confirmed in Dentally.`;
+          }
         } catch (e: any) {
           outMsg = `No pude completar la acción: ${e?.message || 'error'}.`;
         }
