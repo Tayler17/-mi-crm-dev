@@ -664,13 +664,21 @@ ${addTagInstruction}
     }
 
     if (aiApiKey && bot.system_prompt) {
+      // Skip the knowledge-base lookup (an embeddings API call ~0.5-1s) for short
+      // flow answers ("yes", "8 AM", a name, "Monday") — they never need KB context.
+      const wordCount = speech.split(/\s+/).filter(Boolean).length;
+      const useRag = wordCount >= 4;
+      const tRag0 = Date.now();
       // Parallel: load queues (cached) + RAG search — don't block on either
       const [transferableQueues, ragContext] = await Promise.all([
         this.getQueues(botId, bot.tenant_id),
-        this.kbSvc.searchRelevantContext(botId, bot.tenant_id, speech).catch(() => ''),
+        useRag ? this.kbSvc.searchRelevantContext(botId, bot.tenant_id, speech).catch(() => '') : Promise.resolve(''),
       ]);
+      const tRag = Date.now() - tRag0;
 
+      const tAi0 = Date.now();
       const rawReply = await this.callAi(bot, callSid, speech, aiProvider, aiApiKey, aiPlatformModel, ragContext);
+      this.logger.log(`[callbot perf] callSid=${callSid} rag=${tRag}ms(used=${useRag}) ai=${Date.now() - tAi0}ms`);
       if (rawReply) {
         const wantsTransfer  = rawReply.includes('[TRANSFER]');
         const wantsHangup    = rawReply.includes('[HANGUP]');
@@ -733,7 +741,9 @@ ${addTagInstruction}
           return twiml(`${hangupEl}<Hangup/>`);
         }
 
+        const tTts0 = Date.now();
         const replyEl = await this.ttsElement(cleanReply, bot, callSid, baseUrl);
+        this.logger.log(`[callbot perf] callSid=${callSid} tts=${Date.now() - tTts0}ms provider=${bot.tts_provider ?? 'twilio'}`);
         return twiml(`
           <Gather input="speech" enhanced="true" speechModel="phone_call" action="${gather}" timeout="8" speechTimeout="auto" language="${voice.language}">
             ${replyEl}
