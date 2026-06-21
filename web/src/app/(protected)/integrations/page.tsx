@@ -114,9 +114,9 @@ export default function IntegrationsPage() {
             const isOpen = openProvider === item.provider;
             return (
               <div key={item.provider} className="card" style={{ padding: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
                   <div style={{ fontSize: 28 }}>{meta.emoji}</div>
-                  <div style={{ flex: 1 }}>
+                  <div style={{ flex: '1 1 220px', minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontWeight: 600, fontSize: 15 }}>{item.label}</span>
                       {conn && (
@@ -142,7 +142,7 @@ export default function IntegrationsPage() {
                     )}
                   </div>
                   {canManage && (
-                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                       {conn ? (
                         <>
                           <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 10px' }} disabled={syncing === item.provider} onClick={() => handleSync(item.provider)}>
