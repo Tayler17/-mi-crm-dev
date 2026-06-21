@@ -313,12 +313,40 @@ export class CallBotTwilioService {
   // ── TTS element builder ───────────────────────────────────────────────────────
 
   /** Build a <Say> or <Play> element depending on the bot's TTS provider. */
+  /** Expand symbols/abbreviations the TTS engines mispronounce (£, $, kg, km…)
+   *  into spoken words, so "£50" is read "50 pounds" not "pound fifty". */
+  private speakable(text: string, lang: string): string {
+    const en = !(lang ?? '').startsWith('es');
+    let t = text || '';
+    const cur = (sym: string, e: string, s: string) => {
+      // "£50" / "£ 50" → "50 pounds"; "50£" → "50 pounds"
+      const word = en ? e : s;
+      t = t.replace(new RegExp(`\\${sym}\\s?(\\d[\\d.,]*)`, 'g'), `$1 ${word}`);
+      t = t.replace(new RegExp(`(\\d[\\d.,]*)\\s?\\${sym}`, 'g'), `$1 ${word}`);
+    };
+    cur('£', 'pounds', 'libras');
+    cur('$', 'dollars', 'dólares');
+    cur('€', 'euros', 'euros');
+    // Units after a number: "5kg" / "5 kg" / "5KG" → "5 kilograms/kilogramos"
+    const unit = (abbr: string, e: string, s: string) =>
+      (t = t.replace(new RegExp(`(\\d[\\d.,]*)\\s?${abbr}\\b`, 'gi'), `$1 ${en ? e : s}`));
+    unit('kg', 'kilograms', 'kilogramos');
+    unit('km', 'kilometers', 'kilómetros');
+    unit('cm', 'centimeters', 'centímetros');
+    unit('mg', 'milligrams', 'miligramos');
+    unit('ml', 'milliliters', 'mililitros');
+    t = t.replace(/(\d[\d.,]*)\s?%/g, en ? '$1 percent' : '$1 por ciento');
+    t = t.replace(/&/g, en ? ' and ' : ' y ');
+    return t.replace(/\s{2,}/g, ' ').trim();
+  }
+
   private async ttsElement(
-    text: string,
+    rawText: string,
     bot: any,
     callSid: string,
     baseUrl: string,
   ): Promise<string> {
+    const text = this.speakable(rawText, bot.language);
     if (bot.tts_provider === 'elevenlabs') {
       const apiKey = (await this.platformSettings.get('elevenlabs.api_key').catch(() => '')) as string;
       if (apiKey) {
