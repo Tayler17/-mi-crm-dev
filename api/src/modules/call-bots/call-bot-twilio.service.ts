@@ -475,7 +475,7 @@ export class CallBotTwilioService {
       const hasTransfer = !!(pc.transferToNumber ?? pc.transfer_to_number);
 
       // Load all context in parallel
-      const [crmCtx, transferableQueues, prevLogs] = await Promise.all([
+      const [crmCtx, transferableQueues, prevLogs, dentallyOn] = await Promise.all([
         this.getCrmCtx(bot.tenant_id),
         this.getQueues(botId, bot.tenant_id),
         (!isTransferredCall && from)
@@ -486,6 +486,7 @@ export class CallBotTwilioService {
               [from],
             ).catch(() => [])
           : Promise.resolve([]),
+        this.integrations.isConnected(bot.tenant_id, 'dentally').catch(() => false),
       ]);
 
       const contactLine = contact ? `CONTACTO IDENTIFICADO: ${contact.name}${contact.email ? ` (${contact.email})` : ''}.` : '';
@@ -515,8 +516,23 @@ export class CallBotTwilioService {
 ${addTagInstruction}
 - update_deal: para actualizar un trato existente.${crmCtx.stages.length ? `\nEtapas de pipeline: ${crmCtx.stages.map((s: any) => s.pipeline_name ? `${s.name} (${s.pipeline_name})` : s.name).join(', ')}.` : ''}`;
 
+      // Current date + language + Dentally appointment protocol — without these the
+      // model invents past dates (2023) and mishandles bookings on the voice path.
+      const nowDt2 = new Date();
+      const isEs2 = bot.language?.startsWith('es') ?? true;
+      const dateRule2 = `FECHA Y HORA ACTUAL: ${nowDt2.toISOString().slice(0, 16).replace('T', ' ')} UTC (${nowDt2.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}). Usa SIEMPRE esta fecha para interpretar "hoy", "mañana", "el lunes". Nunca uses fechas de años anteriores; las citas son SIEMPRE a futuro respecto a esta fecha.`;
+      const langRule2 = isEs2
+        ? 'IDIOMA: Responde SIEMPRE en español. No mezcles inglés ni otros idiomas en la misma respuesta.'
+        : 'LANGUAGE: Always reply in English. Do not mix Spanish or other languages in the same reply.';
+      const apptRule2 = !dentallyOn ? '' : (isEs2
+        ? 'PROTOCOLO DE CITAS: Para consultar disponibilidad lo ÚNICO obligatorio es la FECHA. Si el paciente quiere cita pero no dijo qué día, pregúntale qué día desea; NUNCA asumas la fecha de hoy. El profesional es OPCIONAL: solo úsalo si el paciente lo menciona; si no, deja practitioner_name vacío y consulta con todos. En cuanto el paciente elija un horario de la lista, agenda con dentally_book_appointment sin volver a consultar. Lee solo los horarios reales que devuelva la herramienta.'
+        : 'APPOINTMENT PROTOCOL: To check availability the ONLY required field is the DATE. If the patient wants an appointment but gave no day, ask which day; NEVER assume today. The practitioner is OPTIONAL: only use it if the patient mentions one, otherwise leave practitioner_name empty and check all. As soon as the patient picks a time, book with dentally_book_appointment without re-checking. Read only the real times the tool returns.');
+
       const instructions = [
         bot.system_prompt,
+        dateRule2,
+        langRule2,
+        apptRule2,
         contactLine,
         memoryNote,
         crmInstructions,
