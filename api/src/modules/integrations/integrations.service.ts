@@ -278,18 +278,6 @@ export class IntegrationsService implements OnModuleInit {
     return m ? m[1] : iso;
   }
 
-  private async resolvePractitioner(connector: any, config: any, name?: string): Promise<{ id: string; name: string } | null> {
-    if (!connector.listPractitioners) return null;
-    const list: Array<{ id: string; name: string }> = await connector.listPractitioners(config).catch(() => []);
-    if (!list.length) return null;
-    if (name) {
-      const n = name.toLowerCase().trim();
-      const found = list.find((p) => p.name.toLowerCase().includes(n) || n.includes(p.name.toLowerCase()));
-      if (found) return found;
-    }
-    return list[0];
-  }
-
   /** Bot: list bookable professionals as a friendly message. */
   async botListPractitioners(tenantId: string, provider: string): Promise<string> {
     const { connector, config } = await this.getConnected(tenantId, provider);
@@ -304,13 +292,25 @@ export class IntegrationsService implements OnModuleInit {
     opts: { date: string; practitionerName?: string; durationMinutes?: number },
   ): Promise<string> {
     const { connector, config } = await this.getConnected(tenantId, provider);
-    if (!connector.listAvailability) return 'Las citas no están disponibles en este momento.';
-    const prac = await this.resolvePractitioner(connector, config, opts.practitionerName);
-    if (!prac) return 'No encontré profesionales para consultar disponibilidad.';
+    if (!connector.listAvailability || !connector.listPractitioners) return 'Las citas no están disponibles en este momento.';
+
+    const all = await connector.listPractitioners(config).catch(() => [] as Array<{ id: string; name: string }>);
+    if (!all.length) return 'No encontré profesionales para consultar disponibilidad.';
+
+    // The practitioner is OPTIONAL: if the caller named one, narrow to it; otherwise
+    // check ALL practitioners in a single request so we don't always default to the first.
+    const wanted = opts.practitionerName
+      ? all.find((p) => {
+          const n = opts.practitionerName!.toLowerCase().trim();
+          return p.name.toLowerCase().includes(n) || n.includes(p.name.toLowerCase());
+        })
+      : null;
+    const targets = wanted ? [wanted] : all;
+
     let slots: any[];
     try {
       slots = await connector.listAvailability(config, {
-        practitionerId: prac.id,
+        practitionerIds: targets.map((p) => p.id),
         startDate: `${opts.date}T00:00:00Z`,
         finishDate: `${opts.date}T23:59:59Z`,
         durationMinutes: opts.durationMinutes ?? 30,
@@ -318,9 +318,21 @@ export class IntegrationsService implements OnModuleInit {
     } catch (e: any) {
       return `No pude consultar la disponibilidad: ${e?.message || 'error'}.`;
     }
-    if (!slots.length) return `No hay horarios disponibles con ${prac.name} el ${opts.date}.`;
-    const times = slots.slice(0, 12).map((s: any) => this.slotTime(s.start)).join(', ');
-    return `Horarios disponibles con ${prac.name} el ${opts.date}: ${times}. ¿Cuál prefieres?`;
+
+    if (!slots.length) {
+      return wanted
+        ? `No hay horarios disponibles con ${wanted.name} el ${opts.date}. ¿Quieres probar con otra fecha u otro profesional?`
+        : `No hay horarios disponibles el ${opts.date}. ¿Quieres probar con otra fecha?`;
+    }
+
+    // Unique times across whichever practitioner(s) we queried, earliest first.
+    const times = [...new Set(slots.map((s: any) => this.slotTime(s.start)))]
+      .sort()
+      .slice(0, 12)
+      .join(', ');
+    return wanted
+      ? `Horarios disponibles con ${wanted.name} el ${opts.date}: ${times}. ¿Cuál prefieres?`
+      : `Horarios disponibles el ${opts.date}: ${times}. ¿Cuál prefieres?`;
   }
 
   /** Bot: book a chosen time for the conversation's contact (matches a real slot). */
@@ -329,31 +341,51 @@ export class IntegrationsService implements OnModuleInit {
     opts: { contactId: string; date: string; time: string; practitionerName?: string; durationMinutes?: number; reason?: string; dateOfBirth?: string; gender?: string; title?: string },
   ): Promise<string> {
     const { connector, config } = await this.getConnected(tenantId, provider);
-    if (!connector.listAvailability || !connector.createAppointment) return 'Las citas no están disponibles en este momento.';
-    const prac = await this.resolvePractitioner(connector, config, opts.practitionerName);
-    if (!prac) return 'No encontré el profesional para agendar.';
+    if (!connector.listAvailability || !connector.createAppointment || !connector.listPractitioners) return 'Las citas no están disponibles en este momento.';
+
+    const all = await connector.listPractitioners(config).catch(() => [] as Array<{ id: string; name: string }>);
+    if (!all.length) return 'No encontré el profesional para agendar.';
+
+    // Practitioner is optional: narrow to the named one if given, else consider all.
+    const wanted = opts.practitionerName
+      ? all.find((p) => {
+          const n = opts.practitionerName!.toLowerCase().trim();
+          return p.name.toLowerCase().includes(n) || n.includes(p.name.toLowerCase());
+        })
+      : null;
+    const targets = wanted ? [wanted] : all;
+
     let slots: any[] = [];
     try {
       slots = await connector.listAvailability(config, {
-        practitionerId: prac.id,
+        practitionerIds: targets.map((p) => p.id),
         startDate: `${opts.date}T00:00:00Z`,
         finishDate: `${opts.date}T23:59:59Z`,
         durationMinutes: opts.durationMinutes ?? 30,
       });
     } catch { /* fall through to "not available" */ }
+
     const want = (opts.time || '').trim();
     const slot = slots.find((s: any) => this.slotTime(s.start) === want);
-    if (!slot) return `El horario ${want} ya no está disponible con ${prac.name}. ¿Quieres que te muestre otros horarios?`;
+    if (!slot) {
+      return wanted
+        ? `El horario ${want} ya no está disponible con ${wanted.name}. ¿Quieres que te muestre otros horarios?`
+        : `El horario ${want} ya no está disponible el ${opts.date}. ¿Quieres que te muestre otros horarios?`;
+    }
+
+    // The slot tells us which practitioner has that time; book with that one.
+    const bookPracId = slot.practitionerId || targets[0].id;
+    const bookPracName = all.find((p) => p.id === bookPracId)?.name ?? wanted?.name ?? 'el profesional';
     try {
       await this.bookAppointment(tenantId, provider, {
         contactId: opts.contactId,
-        practitionerId: prac.id,
+        practitionerId: bookPracId,
         start: slot.start,
         finish: slot.finish,
         reason: opts.reason,
         patientData: { dateOfBirth: opts.dateOfBirth, gender: opts.gender, title: opts.title },
       });
-      return `¡Listo! Tu cita con ${prac.name} quedó agendada para el ${opts.date} a las ${want}.`;
+      return `¡Listo! Tu cita con ${bookPracName} quedó agendada para el ${opts.date} a las ${want}.`;
     } catch (e: any) {
       return `No pude agendar la cita: ${e?.message || 'error desconocido'}.`;
     }

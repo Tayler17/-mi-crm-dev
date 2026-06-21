@@ -206,7 +206,7 @@ export class DentallyConnector implements IntegrationConnector {
   /** Phase 3: open appointment slots for a practitioner over a date range. */
   async listAvailability(
     config: Record<string, any>,
-    opts: { practitionerId: string; startDate: string; finishDate: string; durationMinutes?: number },
+    opts: { practitionerId?: string; practitionerIds?: string[]; startDate: string; finishDate: string; durationMinutes?: number },
   ): Promise<AvailabilitySlot[]> {
     const token = (config?.token || '').trim();
     if (!token) throw new Error('Falta el token de API de Dentally.');
@@ -230,7 +230,10 @@ export class DentallyConnector implements IntegrationConnector {
       finish_time: finishTime,
       duration: String(duration),
     });
-    qs.append('practitioner_ids[]', String(opts.practitionerId));
+    // Dentally accepts multiple practitioner_ids[] in one request, so we can check
+    // every doctor at once when the caller has no preference (one API call, no extra latency).
+    const ids = (opts.practitionerIds?.length ? opts.practitionerIds : [opts.practitionerId]).filter(Boolean) as string[];
+    for (const id of ids) qs.append('practitioner_ids[]', String(id));
     const res = await this.request(this.host(config), token, `/v1/appointments/availability?${qs.toString()}`);
     if (res.status === 401 || res.status === 403) throw new Error('Token inválido o sin permisos para ver disponibilidad.');
     if (res.status >= 400) {
@@ -242,7 +245,7 @@ export class DentallyConnector implements IntegrationConnector {
     const mapped = slots.map((s) => ({
       start: s.start_time,
       finish: s.finish_time,
-      practitionerId: s.practitioner_id != null ? String(s.practitioner_id) : String(opts.practitionerId),
+      practitionerId: s.practitioner_id != null ? String(s.practitioner_id) : (ids[0] ?? ''),
     }));
     // Keep only slots within the day the user actually asked for.
     if (isNaN(reqFinishMs)) return mapped;

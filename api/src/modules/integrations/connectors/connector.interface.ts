@@ -62,7 +62,7 @@ export interface IntegrationConnector {
   /** Phase 3: open slots for a date range / practitioner. */
   listAvailability?(
     config: Record<string, any>,
-    opts: { practitionerId: string; startDate: string; finishDate: string; durationMinutes?: number },
+    opts: { practitionerId?: string; practitionerIds?: string[]; startDate: string; finishDate: string; durationMinutes?: number },
   ): Promise<AvailabilitySlot[]>;
   /** Phase 3: create an appointment in the external system. */
   createAppointment?(config: Record<string, any>, appt: BookAppointmentInput): Promise<BookedAppointment>;
