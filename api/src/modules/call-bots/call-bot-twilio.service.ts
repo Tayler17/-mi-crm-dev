@@ -550,8 +550,8 @@ ${addTagInstruction}
       const isEs2 = bot.language?.startsWith('es') ?? true;
       const dateRule2 = `FECHA Y HORA ACTUAL: ${nowDt2.toISOString().slice(0, 16).replace('T', ' ')} UTC (${nowDt2.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}). Usa SIEMPRE esta fecha para interpretar "hoy", "mañana", "el lunes". Nunca uses fechas de años anteriores; las citas son SIEMPRE a futuro respecto a esta fecha.`;
       const langRule2 = isEs2
-        ? 'IDIOMA: Responde SIEMPRE en español. No mezcles inglés ni otros idiomas en la misma respuesta.'
-        : 'LANGUAGE: Always reply in English. Do not mix Spanish or other languages in the same reply.';
+        ? 'IDIOMA: Responde en el MISMO idioma en que te hable el cliente en cada momento (si te habla en español, contesta en español; si te habla en inglés, contesta en inglés). Si cambia de idioma, cambia con él. NUNCA mezcles dos idiomas en una misma frase.'
+        : 'LANGUAGE: Reply in the SAME language the caller is using at each moment (if they speak Spanish, answer in Spanish; if English, answer in English). If they switch, switch with them. NEVER mix two languages in one sentence.';
       const apptRule2 = !dentallyOn ? '' : (isEs2
         ? 'PROTOCOLO DE CITAS: Para consultar disponibilidad lo ÚNICO obligatorio es la FECHA. Si el paciente quiere cita pero no dijo qué día, pregúntale qué día desea; NUNCA asumas la fecha de hoy. El profesional es OPCIONAL: solo úsalo si el paciente lo menciona; si no, deja practitioner_name vacío y consulta con todos. En cuanto el paciente elija un horario, agenda con dentally_book_appointment sin volver a consultar. NUNCA pidas la fecha de nacimiento, el género ni datos personales por teléfono: el paciente se identifica por su número de teléfono. Intenta agendar directamente; SOLO si dentally_book_appointment devuelve un error pidiendo esos datos, entonces pídelos.'
         : 'APPOINTMENT PROTOCOL: To check availability the ONLY required field is the DATE. If the patient wants an appointment but gave no day, ask which day; NEVER assume today. The practitioner is OPTIONAL: only use it if the patient mentions one, otherwise leave practitioner_name empty and check all. As soon as the patient picks a time, book with dentally_book_appointment without re-checking. NEVER ask for date of birth, gender or personal details over the phone: the patient is identified by their phone number. Try to book directly; ONLY if dentally_book_appointment returns an error asking for those details, then ask for them.');
@@ -867,6 +867,16 @@ ${addTagInstruction}
    * Public entry for the Media Streams pipeline: text in → bot reply out.
    * Reuses the same LLM + tools + per-call history as the Gather flow.
    */
+  /** Cheap heuristic to detect the caller's language from their words, so Dentally
+   *  tool messages match the language they're actually speaking this turn. */
+  private detectLang(text: string, fallback: 'es' | 'en'): 'es' | 'en' {
+    const t = (text || '').toLowerCase();
+    if (/[ñ¿¡áéíóú]/.test(t)) return 'es';
+    if (/\b(hola|gracias|cita|quiero|quisiera|necesito|por favor|s[ií]|d[ií]a|ma[ñn]ana|buenos|buenas|cu[áa]nto|cu[áa]ndo|d[óo]nde)\b/.test(t)) return 'es';
+    if (/\b(hello|hi|thanks|thank|appointment|want|need|please|yes|today|tomorrow|morning|how much|when|where)\b/.test(t)) return 'en';
+    return fallback;
+  }
+
   /** Execute a Dentally tool synchronously and return what the bot should say. */
   private async runDentallyTool(tenantId: string, contactId: string | null, name: string, args: any, lang: 'es' | 'en' = 'es'): Promise<string> {
     const en = lang === 'en';
@@ -965,7 +975,9 @@ ${addTagInstruction}
     );
 
     const isEs = bot.language?.startsWith('es') ?? true;
-    const langKey = isEs ? 'es' : 'en';
+    // Use the language the caller actually used this turn (so Dentally messages
+    // match), falling back to the bot's configured language.
+    const langKey = this.detectLang(userMessage, isEs ? 'es' : 'en');
 
     /** Fire CRM tools in background without blocking voice response */
     const fireTools = (calls: Array<{ name: string; args: any }>) => {
