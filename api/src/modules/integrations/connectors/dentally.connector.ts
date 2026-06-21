@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import * as https from 'https';
-import { IntegrationConnector, ExternalContact, Practitioner, AvailabilitySlot, BookAppointmentInput, BookedAppointment, WebhookEvent } from './connector.interface';
+import { IntegrationConnector, ExternalContact, Practitioner, AvailabilitySlot, BookAppointmentInput, BookedAppointment, ExternalAppointment, WebhookEvent } from './connector.interface';
 
 /** Region → API host. Default is the global/UK cluster. */
 const HOSTS: Record<string, string> = {
@@ -316,6 +316,29 @@ export class DentallyConnector implements IntegrationConnector {
     if (res.status >= 400) throw new Error(`Dentally respondió ${res.status} al crear la cita.`);
     const a = res.json?.appointment ?? res.json;
     return { id: String(a?.id ?? ''), start: a?.start_time ?? appt.start, finish: a?.finish_time ?? appt.finish };
+  }
+
+  /** Read a patient's appointments. */
+  async getAppointments(config: Record<string, any>, opts: { patientId: string; futureOnly?: boolean }): Promise<ExternalAppointment[]> {
+    const token = (config?.token || '').trim();
+    if (!token) throw new Error('Falta el token de API de Dentally.');
+    const qs = new URLSearchParams({ 'filters[patient_id]': String(opts.patientId), per_page: '50' });
+    if (opts.futureOnly) qs.set('filters[after]', new Date().toISOString());
+    const res = await this.request(this.host(config), token, `/v1/appointments?${qs.toString()}`);
+    if (res.status === 401 || res.status === 403) throw new Error('El token de Dentally no tiene permiso para leer citas. Revisa los scopes del token.');
+    if (res.status >= 400) throw new Error(`Dentally respondió ${res.status} al leer las citas.`);
+    const list: any[] = Array.isArray(res.json?.appointments) ? res.json.appointments : [];
+    return list
+      .map((a) => ({
+        id: String(a.id),
+        start: a.start_time,
+        finish: a.finish_time,
+        practitionerId: a.practitioner_id != null ? String(a.practitioner_id) : undefined,
+        reason: a.reason || undefined,
+        cancelled: !!a.cancelled,
+      }))
+      .filter((a) => !a.cancelled)
+      .sort((x, y) => Date.parse(x.start || '') - Date.parse(y.start || ''));
   }
 
   async testConnection(config: Record<string, any>): Promise<{ ok: boolean; info?: string; error?: string }> {

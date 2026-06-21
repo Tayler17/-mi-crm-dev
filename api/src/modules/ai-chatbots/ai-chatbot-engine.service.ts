@@ -38,6 +38,7 @@ interface AiResult {
   dentallyListPractitioners?: boolean;
   dentallyCheckAvailability?: { date: string; practitionerName?: string; durationMinutes?: number };
   dentallyBook?: { date: string; time: string; practitionerName?: string; durationMinutes?: number; reason?: string; dateOfBirth?: string; gender?: string; title?: string };
+  dentallyGetAppointments?: boolean;
 }
 
 type ChatMessage = {
@@ -394,8 +395,8 @@ export class AiChatbotEngineService {
 
     // Dentally actions: execute and send the authoritative reply our code composes
     // (real slots / booking result / error), then stop. Scoped to this tenant.
-    const { dentallyListPractitioners, dentallyCheckAvailability, dentallyBook } = result;
-    if (dentallyListPractitioners || dentallyCheckAvailability || dentallyBook) {
+    const { dentallyListPractitioners, dentallyCheckAvailability, dentallyBook, dentallyGetAppointments } = result;
+    if (dentallyListPractitioners || dentallyCheckAvailability || dentallyBook || dentallyGetAppointments) {
       await this.db.query(`UPDATE ai_chatbot_sessions SET message_count=message_count+1 WHERE id=$1`, [session.id]).catch(() => {});
       const dlang: 'es' | 'en' = String(bot.visual_config?.language || bot.language || 'es').startsWith('en') ? 'en' : 'es';
       let outMsg = '';
@@ -406,6 +407,8 @@ export class AiChatbotEngineService {
           outMsg = await this.integrations.botCheckAvailability(tenantId, 'dentally', dentallyCheckAvailability, dlang);
         } else if (dentallyBook) {
           outMsg = await this.integrations.botBook(tenantId, 'dentally', { contactId: conv.contact_id, ...dentallyBook }, dlang);
+        } else if (dentallyGetAppointments) {
+          outMsg = await this.integrations.botGetAppointments(tenantId, 'dentally', conv.contact_id, dlang);
         }
       } catch (e: any) {
         outMsg = `No pude completar la acción ahora mismo: ${e?.message || 'error'}.`;
@@ -795,6 +798,7 @@ export class AiChatbotEngineService {
       if (transferTargets.length > 0) crmLines.push(`- transfer_conversation: solo cuando el usuario pida explícitamente hablar con otro departamento o cuando claramente necesitas un servicio que no puedes ofrecer. Destinos: ${transferTargets.join(', ')}.`);
       crmLines.push('- resolve_conversation: cuando el caso del usuario haya quedado completamente resuelto.');
       if (dentallyConnected) {
+        crmLines.push('- dentally_get_appointments: para consultar las citas que YA tiene el cliente (cuándo es, con qué doctor). Úsala cuando pregunte "¿cuándo es mi cita?", "¿con qué doctor tengo la cita?", "¿tengo alguna cita?". NUNCA inventes los datos de una cita: llama esta herramienta y usa su resultado real.');
         crmLines.push('- dentally_list_practitioners: para listar los profesionales/doctores disponibles para citas.');
         crmLines.push('- dentally_check_availability: para ver los horarios libres de un día (parámetro date en formato YYYY-MM-DD; practitioner_name es OPCIONAL). Lo único obligatorio es la fecha. Úsala SOLO cuando el cliente ya te haya dado una fecha concreta; NUNCA asumas la fecha de hoy: si el cliente quiere cita pero no dijo qué día, PREGÚNTALE primero qué día desea. El profesional es opcional: si el cliente menciona uno, pásalo en practitioner_name; si no menciona ninguno, NO le preguntes por el profesional y consulta con todos (deja practitioner_name vacío).');
         crmLines.push('- dentally_book_appointment: para AGENDAR una cita cuando el cliente ya eligió día y hora (date YYYY-MM-DD, time HH:MM). En cuanto el cliente elija un horario de la lista, llama a ESTA herramienta para agendar; NO vuelvas a consultar disponibilidad con la misma fecha. Si el cliente dice que YA es paciente, intenta agendar directamente (el sistema lo busca por su ficha); solo si NO es paciente pídele fecha de nacimiento (date_of_birth, YYYY-MM-DD) y género (gender: male/female).');
@@ -895,6 +899,7 @@ export class AiChatbotEngineService {
       tools.push({ type: 'function', function: { name: 'dentally_list_practitioners', description: 'List the clinic professionals/doctors available for appointments.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'Optional short message to the customer' } } } } });
       tools.push({ type: 'function', function: { name: 'dentally_check_availability', description: 'Check open appointment slots for a given day. Use when the customer asks about availability or times.', parameters: { type: 'object', properties: { date: { type: 'string', description: 'Day to check, format YYYY-MM-DD' }, practitioner_name: { type: 'string', description: 'Optional professional name' }, duration: { type: 'number', description: 'Minutes (default 30)' } }, required: ['date'] } } });
       tools.push({ type: 'function', function: { name: 'dentally_book_appointment', description: 'Book an appointment once the customer has chosen a day and time. If the customer is NOT a registered patient, first ask for date_of_birth (YYYY-MM-DD) and gender (male/female), then call this.', parameters: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD' }, time: { type: 'string', description: 'HH:MM (24h), must be one of the available slots' }, practitioner_name: { type: 'string' }, duration: { type: 'number' }, reason: { type: 'string' }, date_of_birth: { type: 'string', description: 'Patient DOB YYYY-MM-DD (only if a new patient)' }, gender: { type: 'string', enum: ['male', 'female'] }, title: { type: 'string', description: 'Mr/Mrs/Ms/Dr (only if a new patient)' } }, required: ['date', 'time'] } } });
+      tools.push({ type: 'function', function: { name: 'dentally_get_appointments', description: "Look up the customer's own existing/upcoming appointments. Use when they ask \"what/when is my appointment\", \"which doctor do I have\", \"do I have an appointment\". Read the real result; never guess.", parameters: { type: 'object', properties: { message: { type: 'string' } } } } });
     }
     body.tools = tools;
     body.tool_choice = 'auto';
@@ -918,6 +923,7 @@ export class AiChatbotEngineService {
           case 'dentally_list_practitioners': return { reply: args.message ?? '', dentallyListPractitioners: true };
           case 'dentally_check_availability': return { reply: args.message ?? '', dentallyCheckAvailability: { date: args.date, practitionerName: args.practitioner_name, durationMinutes: args.duration } };
           case 'dentally_book_appointment':   return { reply: args.message ?? '', dentallyBook: { date: args.date, time: args.time, practitionerName: args.practitioner_name, durationMinutes: args.duration, reason: args.reason, dateOfBirth: args.date_of_birth, gender: args.gender, title: args.title } };
+          case 'dentally_get_appointments':   return { reply: args.message ?? '', dentallyGetAppointments: true };
         }
       } catch { /* fall through */ }
     }
@@ -959,6 +965,7 @@ export class AiChatbotEngineService {
       tools.push({ name: 'dentally_list_practitioners', description: 'List the clinic professionals/doctors available for appointments.', input_schema: { type: 'object', properties: { message: { type: 'string' } } } });
       tools.push({ name: 'dentally_check_availability', description: 'Check open appointment slots for a given day. Use when the customer asks about availability or times.', input_schema: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD' }, practitioner_name: { type: 'string' }, duration: { type: 'number' } }, required: ['date'] } });
       tools.push({ name: 'dentally_book_appointment', description: 'Book an appointment once the customer chose a day and time. If the customer is NOT a registered patient, first ask for date_of_birth (YYYY-MM-DD) and gender (male/female), then call this.', input_schema: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD' }, time: { type: 'string', description: 'HH:MM (24h)' }, practitioner_name: { type: 'string' }, duration: { type: 'number' }, reason: { type: 'string' }, date_of_birth: { type: 'string' }, gender: { type: 'string', enum: ['male', 'female'] }, title: { type: 'string' } }, required: ['date', 'time'] } });
+      tools.push({ name: 'dentally_get_appointments', description: "Look up the customer's own existing/upcoming appointments (when/which doctor). Read the real result; never guess.", input_schema: { type: 'object', properties: { message: { type: 'string' } } } });
     }
     }
     body.tools = tools;
@@ -980,6 +987,7 @@ export class AiChatbotEngineService {
           case 'dentally_list_practitioners': return { reply: i.message ?? '', dentallyListPractitioners: true };
           case 'dentally_check_availability': return { reply: i.message ?? '', dentallyCheckAvailability: { date: i.date, practitionerName: i.practitioner_name, durationMinutes: i.duration } };
           case 'dentally_book_appointment':   return { reply: i.message ?? '', dentallyBook: { date: i.date, time: i.time, practitionerName: i.practitioner_name, durationMinutes: i.duration, reason: i.reason, dateOfBirth: i.date_of_birth, gender: i.gender, title: i.title } };
+          case 'dentally_get_appointments':   return { reply: i.message ?? '', dentallyGetAppointments: true };
         }
       }
     }
@@ -1024,6 +1032,7 @@ export class AiChatbotEngineService {
       fnDeclarations.push({ name: 'dentally_list_practitioners', description: 'List the clinic professionals/doctors available for appointments.', parameters: { type: 'OBJECT', properties: { message: { type: 'STRING' } } } });
       fnDeclarations.push({ name: 'dentally_check_availability', description: 'Check open appointment slots for a given day. Use when the customer asks about availability or times.', parameters: { type: 'OBJECT', properties: { date: { type: 'STRING', description: 'YYYY-MM-DD' }, practitioner_name: { type: 'STRING' }, duration: { type: 'NUMBER' } }, required: ['date'] } });
       fnDeclarations.push({ name: 'dentally_book_appointment', description: 'Book an appointment once the customer chose a day and time. If the customer is NOT a registered patient, first ask for date_of_birth (YYYY-MM-DD) and gender (male/female), then call this.', parameters: { type: 'OBJECT', properties: { date: { type: 'STRING', description: 'YYYY-MM-DD' }, time: { type: 'STRING', description: 'HH:MM (24h)' }, practitioner_name: { type: 'STRING' }, duration: { type: 'NUMBER' }, reason: { type: 'STRING' }, date_of_birth: { type: 'STRING' }, gender: { type: 'STRING', enum: ['male', 'female'] }, title: { type: 'STRING' } }, required: ['date', 'time'] } });
+      fnDeclarations.push({ name: 'dentally_get_appointments', description: "Look up the customer's own existing/upcoming appointments (when/which doctor). Read the real result; never guess.", parameters: { type: 'OBJECT', properties: { message: { type: 'STRING' } } } });
     }
     }
     body.tools = [{ functionDeclarations: fnDeclarations }];
@@ -1045,6 +1054,7 @@ export class AiChatbotEngineService {
         case 'dentally_list_practitioners': return { reply: args?.message ?? '', dentallyListPractitioners: true };
         case 'dentally_check_availability': return { reply: args?.message ?? '', dentallyCheckAvailability: { date: args?.date, practitionerName: args?.practitioner_name, durationMinutes: args?.duration } };
         case 'dentally_book_appointment':   return { reply: args?.message ?? '', dentallyBook: { date: args?.date, time: args?.time, practitionerName: args?.practitioner_name, durationMinutes: args?.duration, reason: args?.reason, dateOfBirth: args?.date_of_birth, gender: args?.gender, title: args?.title } };
+        case 'dentally_get_appointments':   return { reply: args?.message ?? '', dentallyGetAppointments: true };
       }
     }
     return { reply: part?.text?.trim() ?? '' };
@@ -1086,12 +1096,15 @@ export class AiChatbotEngineService {
 
       // Execute Dentally tools in the test panel too (production does this in
       // processMessage) so the tester sees the real result instead of a blank.
-      if (result?.dentallyListPractitioners || result?.dentallyCheckAvailability || result?.dentallyBook) {
+      if (result?.dentallyListPractitioners || result?.dentallyCheckAvailability || result?.dentallyBook || result?.dentallyGetAppointments) {
         const dlang: 'es' | 'en' = String(bot.visual_config?.language || bot.language || 'es').startsWith('en') ? 'en' : 'es';
         let outMsg = '';
         try {
           if (result.dentallyListPractitioners) outMsg = await this.integrations.botListPractitioners(tenantId, 'dentally', dlang);
           else if (result.dentallyCheckAvailability) outMsg = await this.integrations.botCheckAvailability(tenantId, 'dentally', result.dentallyCheckAvailability, dlang);
+          else if (result.dentallyGetAppointments) outMsg = dlang === 'en'
+            ? 'In a real conversation I would look up your appointments here. (Test mode has no real contact.)'
+            : 'En una conversación real consultaría aquí tus citas. (El modo prueba no tiene un contacto real.)';
           else if (result.dentallyBook) {
             // The test panel has no real contact, so we can't (and shouldn't) create a
             // real Dentally appointment. Simulate the confirmation instead of failing.

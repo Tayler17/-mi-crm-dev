@@ -472,6 +472,53 @@ export class IntegrationsService implements OnModuleInit {
     }
   }
 
+  /** Bot: read the contact's upcoming appointments, formatted for the customer. */
+  async botGetAppointments(
+    tenantId: string, provider: string, contactId: string | null, lang: 'es' | 'en' = 'es',
+  ): Promise<string> {
+    const en = lang === 'en';
+    if (!contactId) return en ? "I couldn't identify your record to look up your appointments." : 'No pude identificar tu ficha para consultar tus citas.';
+    const { connector, config } = await this.getConnected(tenantId, provider);
+    if (!connector.getAppointments || !connector.findPatient) return en ? 'I cannot look up appointments right now.' : 'No puedo consultar las citas en este momento.';
+
+    // Resolve the patient WITHOUT creating one (a lookup must never create a record).
+    const [c] = await this.db.query(
+      `SELECT email, phone FROM contacts WHERE id::text=$1 AND tenant_id::text=$2`,
+      [contactId, tenantId],
+    );
+    const [map] = await this.db.query(
+      `SELECT external_id FROM integration_contact_map WHERE tenant_id::text=$1 AND provider=$2 AND contact_id::text=$3`,
+      [tenantId, provider, contactId],
+    );
+    let patientId: string | undefined = map?.external_id;
+    if (!patientId && c) {
+      const found = await connector.findPatient(config, { email: c.email || undefined, phone: c.phone || undefined }).catch(() => null);
+      patientId = found?.externalId;
+    }
+    if (!patientId) return en ? "I couldn't find you as a registered patient." : 'No te encontré como paciente registrado.';
+
+    let appts;
+    try {
+      appts = await connector.getAppointments(config, { patientId, futureOnly: true });
+    } catch (e: any) {
+      return en ? `I couldn't check your appointments: ${e?.message || 'error'}.` : `No pude consultar tus citas: ${e?.message || 'error'}.`;
+    }
+    if (!appts.length) return en ? 'You have no upcoming appointments.' : 'No tienes citas próximas.';
+
+    const pracs = await this.getPractitionersCached(tenantId, provider, connector, config).catch(() => [] as Array<{ id: string; name: string }>);
+    const nameOf = (id?: string) => pracs.find((p) => p.id === id)?.name ?? (en ? 'the professional' : 'el profesional');
+    const lines = appts.slice(0, 5).map((a) => {
+      const date = this.fmtApptDate((a.start || '').slice(0, 10), lang);
+      const time = this.speakTime(this.slotTime(a.start), lang);
+      return en
+        ? `${date} at ${time} with ${nameOf(a.practitionerId)}`
+        : `${date} a las ${time} con ${nameOf(a.practitionerId)}`;
+    });
+    return en
+      ? `Your upcoming appointment${appts.length > 1 ? 's' : ''}: ${lines.join('; ')}.`
+      : `Tu${appts.length > 1 ? 's' : ''} próxima${appts.length > 1 ? 's' : ''} cita${appts.length > 1 ? 's' : ''}: ${lines.join('; ')}.`;
+  }
+
   /**
    * Link a CRM contact to an external patient on demand: return the existing
    * mapping, else find the patient by email/phone, else create it — then record

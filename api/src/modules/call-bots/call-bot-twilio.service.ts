@@ -126,6 +126,7 @@ function buildTools(stageNames: string[], tagNames: string[] = [], dentallyConne
     tools.push(
       { name: 'dentally_list_practitioners', description: 'List the clinic professionals/doctors available for appointments.', parameters: { type: 'object', properties: {} } },
       { name: 'dentally_check_availability', description: 'Check open appointment slots for a specific day the caller has chosen. Only call this AFTER the caller has told you a concrete date — never assume today. The result you receive is the real list of times — read it to the caller.', parameters: { type: 'object', properties: { date: { type: 'string', description: 'The exact date the caller asked for, YYYY-MM-DD. Do not invent or default to today.' }, practitioner_name: { type: 'string', description: 'The practitioner the caller asked for, if any. Leave empty if the caller has no preference.' }, duration: { type: 'number' } }, required: ['date'] } },
+      { name: 'dentally_get_appointments', description: "Look up the caller's own existing/upcoming appointments. Use when they ask things like \"what is my appointment\", \"when is my appointment\", \"which doctor do I have\", \"do I have an appointment booked\". Read the real result to the caller; never guess appointment details.", parameters: { type: 'object', properties: {} } },
       { name: 'dentally_book_appointment', description: 'Book an appointment as soon as the caller picks a day and time from the list — call this, do NOT re-check availability for the same date. If the caller says they are ALREADY a patient, try to book directly (the system finds them by their record); only if they are NOT a patient, first ask for date_of_birth (YYYY-MM-DD) and gender (male/female), then call this.', parameters: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD' }, time: { type: 'string', description: 'HH:MM 24h' }, practitioner_name: { type: 'string' }, duration: { type: 'number' }, reason: { type: 'string' }, date_of_birth: { type: 'string' }, gender: { type: 'string', enum: ['male', 'female'] }, title: { type: 'string' } }, required: ['date', 'time'] } },
     );
   }
@@ -886,6 +887,9 @@ ${addTagInstruction}
       }
       if (name === 'dentally_check_availability') {
         return await this.integrations.botCheckAvailability(tenantId, 'dentally', { date: args?.date, practitionerName: args?.practitioner_name, durationMinutes: args?.duration }, lang);
+      }
+      if (name === 'dentally_get_appointments') {
+        return await this.integrations.botGetAppointments(tenantId, 'dentally', contactId, lang);
       }
       if (name === 'dentally_book_appointment') {
         if (!contactId) return en ? "I couldn't identify your record to book the appointment." : 'No pude identificar tu ficha para agendar la cita.';

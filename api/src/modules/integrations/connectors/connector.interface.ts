@@ -25,6 +25,9 @@ export interface BookAppointmentInput {
 /** Result of a successful booking (Phase 3). */
 export interface BookedAppointment { id: string; start: string; finish?: string; }
 
+/** An existing appointment in the external system. */
+export interface ExternalAppointment { id: string; start: string; finish?: string; practitionerId?: string; reason?: string; cancelled?: boolean; }
+
 /** A normalized inbound webhook event (Phase 4). */
 export interface WebhookEvent {
   /** 'contact' upserts a CRM contact; other types are logged for now. */
@@ -66,6 +69,8 @@ export interface IntegrationConnector {
   ): Promise<AvailabilitySlot[]>;
   /** Phase 3: create an appointment in the external system. */
   createAppointment?(config: Record<string, any>, appt: BookAppointmentInput): Promise<BookedAppointment>;
+  /** Read a patient's appointments (for "what's my appointment?" queries). */
+  getAppointments?(config: Record<string, any>, opts: { patientId: string; futureOnly?: boolean }): Promise<ExternalAppointment[]>;
 
   /** Phase 4: normalize an inbound webhook payload to a common event (null = ignore). */
   normalizeWebhook?(payload: any): WebhookEvent | null;
