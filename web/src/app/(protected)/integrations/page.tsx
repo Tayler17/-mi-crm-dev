@@ -155,6 +155,9 @@ export default function IntegrationsPage() {
                             {webhookProvider === item.provider ? 'Cerrar webhook' : '🔔 Webhook'}
                           </button>
                           <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => handleTest(item.provider)}>Probar</button>
+                          <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => { setOpenProvider(isOpen ? null : item.provider); setToken(''); setRegion(conn.region ?? 'global'); setError(''); setInfo(''); }}>
+                            {isOpen ? 'Cancelar' : '🔑 Cambiar API key'}
+                          </button>
                           <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px', color: 'var(--danger)' }} onClick={() => handleDisconnect(item.provider)}>Desconectar</button>
                         </>
                       ) : (
@@ -168,8 +171,13 @@ export default function IntegrationsPage() {
 
                 {isOpen && canManage && (
                   <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {conn && (
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        🔑 Reemplaza la API key actual. La key existente no se muestra por seguridad; pega la nueva para sustituirla.
+                      </div>
+                    )}
                     <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">Token de API</label>
+                      <label className="form-label">{conn ? 'Nueva API key' : 'Token de API'}</label>
                       <input className="form-input" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Pega tu token de Dentally" />
                       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{meta.help}</div>
                     </div>
@@ -181,7 +189,7 @@ export default function IntegrationsPage() {
                     </div>
                     <div>
                       <button className="btn btn-primary" disabled={busy || !token.trim()} onClick={() => handleConnect(item.provider)}>
-                        {busy ? 'Conectando…' : 'Conectar y probar'}
+                        {busy ? (conn ? 'Guardando…' : 'Conectando…') : (conn ? 'Guardar nueva key' : 'Conectar y probar')}
                       </button>
                     </div>
                   </div>
