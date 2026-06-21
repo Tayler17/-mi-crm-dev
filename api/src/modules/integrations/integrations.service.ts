@@ -295,6 +295,39 @@ export class IntegrationsService implements OnModuleInit {
     return m ? m[1] : iso;
   }
 
+  /** Format an "HH:MM" 24h time into something natural for the bot to SPEAK
+   *  ("08:00" → "8 AM" / "8 de la mañana", "14:30" → "2:30 PM"). */
+  private speakTime(hhmm: string, lang: 'es' | 'en'): string {
+    const m = /^(\d{1,2}):(\d{2})/.exec(hhmm || '');
+    if (!m) return hhmm;
+    const h = parseInt(m[1], 10);
+    const min = parseInt(m[2], 10);
+    const h12 = h % 12 || 12;
+    if (lang === 'en') {
+      const ampm = h < 12 ? 'AM' : 'PM';
+      return min === 0 ? `${h12} ${ampm}` : `${h12}:${String(min).padStart(2, '0')} ${ampm}`;
+    }
+    const period = h < 12 ? 'de la mañana' : (h < 20 ? 'de la tarde' : 'de la noche');
+    return min === 0 ? `${h12} ${period}` : `${h12} y ${min} ${period}`;
+  }
+
+  /** Normalize a spoken/written time ("8 am", "2:30 pm", "15:30", "8") to "HH:MM" 24h
+   *  so booking matches the real slot regardless of how the caller said it. */
+  private normalizeTime(s: string): string {
+    const raw = (s || '').trim().toLowerCase();
+    const ap = /(a\.?m\.?|p\.?m\.?)/.exec(raw);
+    const m = /(\d{1,2})[:h.\s]?(\d{2})?/.exec(raw);
+    if (!m) return raw;
+    let h = parseInt(m[1], 10);
+    const min = m[2] ? parseInt(m[2], 10) : 0;
+    if (ap) {
+      const pm = ap[1].startsWith('p');
+      if (pm && h < 12) h += 12;
+      if (!pm && h === 12) h = 0;
+    }
+    return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+  }
+
   /** Format a YYYY-MM-DD into natural language for the bot to speak (avoids "2026-06-23"). */
   private fmtApptDate(dateStr: string, lang: 'es' | 'en'): string {
     const d = new Date(`${dateStr}T12:00:00Z`);
@@ -358,10 +391,12 @@ export class IntegrationsService implements OnModuleInit {
         : `No hay horarios disponibles el ${when}. ¿Quieres probar con otra fecha?`;
     }
 
-    // Unique times across whichever practitioner(s) we queried, earliest first.
+    // Unique times across whichever practitioner(s) we queried, earliest first,
+    // formatted naturally for speech (no "08:00" → "cero ocho..." TTS artifacts).
     const times = [...new Set(slots.map((s: any) => this.slotTime(s.start)))]
       .sort()
       .slice(0, 12)
+      .map((t) => this.speakTime(t, lang))
       .join(', ');
     if (wanted) return en
       ? `Available times with ${wanted.name} on ${when}: ${times}. Which one do you prefer?`
@@ -403,16 +438,17 @@ export class IntegrationsService implements OnModuleInit {
       });
     } catch { /* fall through to "not available" */ }
 
-    const want = (opts.time || '').trim();
+    const want = this.normalizeTime(opts.time || '');
+    const spokenWant = this.speakTime(want, lang);
     const when = this.fmtApptDate(opts.date, lang);
     const slot = slots.find((s: any) => this.slotTime(s.start) === want);
     if (!slot) {
       if (wanted) return en
-        ? `The ${want} slot is no longer available with ${wanted.name}. Would you like me to show other times?`
-        : `El horario ${want} ya no está disponible con ${wanted.name}. ¿Quieres que te muestre otros horarios?`;
+        ? `The ${spokenWant} slot is no longer available with ${wanted.name}. Would you like me to show other times?`
+        : `El horario de las ${spokenWant} ya no está disponible con ${wanted.name}. ¿Quieres que te muestre otros horarios?`;
       return en
-        ? `The ${want} slot is no longer available on ${when}. Would you like me to show other times?`
-        : `El horario ${want} ya no está disponible el ${when}. ¿Quieres que te muestre otros horarios?`;
+        ? `The ${spokenWant} slot is no longer available on ${when}. Would you like me to show other times?`
+        : `El horario de las ${spokenWant} ya no está disponible el ${when}. ¿Quieres que te muestre otros horarios?`;
     }
 
     // The slot tells us which practitioner has that time; book with that one.
@@ -428,8 +464,8 @@ export class IntegrationsService implements OnModuleInit {
         patientData: { dateOfBirth: opts.dateOfBirth, gender: opts.gender, title: opts.title },
       });
       return en
-        ? `Done! Your appointment with ${bookPracName} is booked for ${when} at ${want}.`
-        : `¡Listo! Tu cita con ${bookPracName} quedó agendada para el ${when} a las ${want}.`;
+        ? `Done! Your appointment with ${bookPracName} is booked for ${when} at ${spokenWant}.`
+        : `¡Listo! Tu cita con ${bookPracName} quedó agendada para el ${when} a las ${spokenWant}.`;
     } catch (e: any) {
       return en ? `I couldn't book the appointment: ${e?.message || 'unknown error'}.` : `No pude agendar la cita: ${e?.message || 'error desconocido'}.`;
     }
