@@ -78,6 +78,15 @@ const CRED_FIELDS: Record<ChannelType, { key: string; label: string; placeholder
   ],
 };
 
+// Email provider presets: the user only picks the provider + enters email & password;
+// host/ports are filled automatically (no SMTP/IMAP technicalities). "other" = manual.
+const EMAIL_PRESETS: Record<string, { label: string; host: string; port: string; encryption: string; imapHost: string; imapPort: string; help: string; helpUrl?: string }> = {
+  gmail:   { label: 'Gmail', host: 'smtp.gmail.com', port: '587', encryption: 'TLS', imapHost: 'imap.gmail.com', imapPort: '993', help: 'Necesitas una "Contraseña de aplicación" de Google (requiere verificación en 2 pasos).', helpUrl: 'https://myaccount.google.com/apppasswords' },
+  outlook: { label: 'Outlook / Hotmail', host: 'smtp-mail.outlook.com', port: '587', encryption: 'TLS', imapHost: 'outlook.office365.com', imapPort: '993', help: 'Usa una contraseña de aplicación de tu cuenta Microsoft.', helpUrl: 'https://account.microsoft.com/security' },
+  yahoo:   { label: 'Yahoo', host: 'smtp.mail.yahoo.com', port: '465', encryption: 'SSL', imapHost: 'imap.mail.yahoo.com', imapPort: '993', help: 'Necesitas una contraseña de aplicación de Yahoo.', helpUrl: 'https://login.yahoo.com/account/security' },
+  icloud:  { label: 'iCloud', host: 'smtp.mail.me.com', port: '587', encryption: 'TLS', imapHost: 'imap.mail.me.com', imapPort: '993', help: 'Necesitas una contraseña específica de app de iCloud.', helpUrl: 'https://appleid.apple.com' },
+};
+
 // ── QR Panel ──────────────────────────────────────────────────────────────────
 
 function QrPanel({ conn, onStatusChange }: { conn: ChannelConnection; onStatusChange: () => void }) {
@@ -254,10 +263,28 @@ function ConnectionModal({ conn, defaultType, inboxes, onClose, onSaved }: Conne
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Email: pick a provider so we hide SMTP/IMAP ports (like connecting Meta).
+  const [emailProvider, setEmailProvider] = useState<string>(() => {
+    const h = String((conn?.credentials as any)?.host ?? '');
+    if (/gmail/i.test(h)) return 'gmail';
+    if (/outlook|office365|hotmail|live\.com/i.test(h)) return 'outlook';
+    if (/yahoo/i.test(h)) return 'yahoo';
+    if (/me\.com|icloud/i.test(h)) return 'icloud';
+    return conn ? 'other' : 'gmail'; // existing custom connections keep manual mode
+  });
+
   const fields = CRED_FIELDS[channelType] ?? [];
   const ch = CHANNEL_MAP[channelType];
 
   function setCred(k: string, v: string) { setCreds((p) => ({ ...p, [k]: v })); }
+
+  // Auto-fill host/ports from the chosen email provider (no ports for the user).
+  useEffect(() => {
+    if (channelType !== 'email' || emailProvider === 'other') return;
+    const p = EMAIL_PRESETS[emailProvider];
+    if (!p) return;
+    setCreds((c) => ({ ...c, host: p.host, port: p.port, encryption: p.encryption, imapHost: p.imapHost, imapPort: p.imapPort }));
+  }, [channelType, emailProvider]);
 
   useEffect(() => {
     if (!conn && !name) setName(ch?.label ?? '');
@@ -414,7 +441,56 @@ function ConnectionModal({ conn, defaultType, inboxes, onClose, onSaved }: Conne
                     </div>
                   </>
                 )}
-                {channelType !== 'sms' && fields.map((f) => (
+                {/* Email: simplified provider-based form (no ports) */}
+                {channelType === 'email' && (
+                  <>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Proveedor de correo</label>
+                      <select className="form-input" value={emailProvider} onChange={(e) => setEmailProvider(e.target.value)}>
+                        {Object.entries(EMAIL_PRESETS).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}
+                        <option value="other">Otro (configuración manual)</option>
+                      </select>
+                    </div>
+
+                    {emailProvider !== 'other' ? (
+                      <>
+                        <div>
+                          <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Correo electrónico</label>
+                          <input className="form-input" value={creds['user'] ?? ''} onChange={(e) => setCred('user', e.target.value)} placeholder="hola@empresa.com" />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Contraseña de aplicación</label>
+                          <input className="form-input" type="password" value={creds['password'] ?? ''} onChange={(e) => setCred('password', e.target.value)} placeholder="••••••••" />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Nombre del remitente</label>
+                          <input className="form-input" value={creds['fromName'] ?? ''} onChange={(e) => setCred('fromName', e.target.value)} placeholder="Soporte Empresa" />
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', background: '#f5f3ff', padding: '8px 10px', borderRadius: 6 }}>
+                          💡 {EMAIL_PRESETS[emailProvider]?.help}
+                          {EMAIL_PRESETS[emailProvider]?.helpUrl && (
+                            <> <a href={EMAIL_PRESETS[emailProvider].helpUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1', fontWeight: 600 }}>Crear contraseña →</a></>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      fields.map((f) => (
+                        <div key={f.key}>
+                          <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>{f.label}</label>
+                          <input
+                            className="form-input"
+                            type={f.sensitive ? 'password' : (f.type ?? 'text')}
+                            value={creds[f.key] ?? ''}
+                            onChange={(e) => setCred(f.key, e.target.value)}
+                            placeholder={f.placeholder}
+                          />
+                        </div>
+                      ))
+                    )}
+                  </>
+                )}
+
+                {channelType !== 'sms' && channelType !== 'email' && fields.map((f) => (
                   <div key={f.key}>
                     <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>{f.label}</label>
                     <input
