@@ -565,7 +565,7 @@ ${addTagInstruction}
         contactLine,
         memoryNote,
         crmInstructions,
-        'REGLA: Responde siempre en máximo 2 frases cortas (es una llamada de voz).',
+        'ESTILO DE VOZ: Habla de forma natural y conversacional. Da respuestas COMPLETAS (puedes extenderte si el cliente pide detalle), pero nunca dejes una frase a medias: termina siempre tu idea. Cuando una explicación sea larga, divídela: cuenta una parte y haz una pausa preguntando si quiere que continúes o profundices, en vez de soltar un monólogo de un minuto seguido.',
         transferableQueues.length > 0
           ? `PARA TRANSFERIR A OTRO DEPARTAMENTO, usa estos códigos exactos al FINAL de tu respuesta:\n${queueLines}\nEjemplo: "Te paso ahora. [QUEUE:bot-de-ventas]"\nIMPORTANTE: Escribe el código EXACTAMENTE como aparece arriba. NO uses [TRANSFER] para transferencias de departamento.`
           : '',
@@ -1004,7 +1004,7 @@ ${addTagInstruction}
         const model    = platformModel || 'gpt-4o-mini';
         const oaiTools = toOpenAITools(tools);
 
-        const body1 = JSON.stringify({ model, messages: history, tools: oaiTools, tool_choice: 'auto', max_tokens: 120, temperature: 0.7 });
+        const body1 = JSON.stringify({ model, messages: history, tools: oaiTools, tool_choice: 'auto', max_tokens: 300, temperature: 0.7 });
         const raw1  = await httpPost(
           'https://api.openai.com/v1/chat/completions',
           body1,
@@ -1034,7 +1034,7 @@ ${addTagInstruction}
         const msgs      = history.filter((m) => m.role !== 'system');
         const anthTools = toAnthropicTools(tools);
 
-        const body1 = JSON.stringify({ model, system: systemMsg, messages: msgs, tools: anthTools, max_tokens: 120 });
+        const body1 = JSON.stringify({ model, system: systemMsg, messages: msgs, tools: anthTools, max_tokens: 300 });
         const raw1  = await httpPost(
           'https://api.anthropic.com/v1/messages',
           body1,
@@ -1066,7 +1066,7 @@ ${addTagInstruction}
           .map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
         const geminiTools = toGeminiTools(tools);
 
-        const body1 = JSON.stringify({ systemInstruction, contents, tools: geminiTools, generationConfig: { maxOutputTokens: 120 } });
+        const body1 = JSON.stringify({ systemInstruction, contents, tools: geminiTools, generationConfig: { maxOutputTokens: 300 } });
         const raw1  = await httpPost(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
           body1,
