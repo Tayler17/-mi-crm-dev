@@ -144,6 +144,17 @@ export default function LandingPage() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  // Embed the AutoMarkIQ webchat widget on the sales page (loads once).
+  useEffect(() => {
+    const BOT_ID = '1de531b5-c03c-4688-9f95-f004fb9ee60f';
+    if (document.querySelector(`script[data-bot-id="${BOT_ID}"]`)) return;
+    const s = document.createElement('script');
+    s.src = 'https://api.automarkiq.com/webchat/widget.js';
+    s.async = true;
+    s.setAttribute('data-bot-id', BOT_ID);
+    document.body.appendChild(s);
+  }, []);
+
   const displayPlans = plans.length ? plans : FALLBACK_PLANS;
 
   return (
