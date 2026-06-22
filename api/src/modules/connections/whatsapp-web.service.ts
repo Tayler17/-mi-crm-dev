@@ -327,10 +327,28 @@ export class WhatsappWebService implements OnModuleInit {
   private async markPendingRead(connectionId: string, remoteJid: string): Promise<void> {
     const session = this.sessions.get(connectionId);
     const pending = this.pendingReadKeys.get(connectionId);
-    if (!session?.sock || !pending?.has(remoteJid)) return;
-    const key = pending.get(remoteJid)!;
-    pending.delete(remoteJid);
-    try { await session.sock.readMessages([key]); } catch {}
+    if (!session?.sock || !pending || pending.size === 0) return;
+
+    // Find the stored key. Exact JID first; else match by phone tail (last 9 digits)
+    // so a LID-stored key still resolves when we reply via the phone JID (or vice versa).
+    const tail = (s?: string) => (s || '').replace(/\D/g, '').slice(-9);
+    let matchJid: string | undefined;
+    if (pending.has(remoteJid)) {
+      matchJid = remoteJid;
+    } else {
+      const want = tail(remoteJid);
+      for (const k of pending.keys()) { if (want && tail(k) === want) { matchJid = k; break; } }
+    }
+    if (!matchJid) return;
+
+    const key = pending.get(matchJid)!;
+    pending.delete(matchJid);
+    try {
+      await session.sock.readMessages([key]);
+      this.logger.log(`[whatsapp_web] marked read for ${matchJid}`);
+    } catch (e: any) {
+      this.logger.warn(`[whatsapp_web] readMessages failed for ${matchJid}: ${e?.message}`);
+    }
   }
 
   /** Send a media file through an active WhatsApp Web session */
