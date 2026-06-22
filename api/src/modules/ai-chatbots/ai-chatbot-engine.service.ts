@@ -817,8 +817,16 @@ export class AiChatbotEngineService {
       const nowDt = new Date();
       const currentDate = `FECHA Y HORA ACTUAL: ${nowDt.toISOString().slice(0, 16).replace('T', ' ')} UTC (${nowDt.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}). Usa SIEMPRE esta fecha para interpretar "hoy", "mañana", "el lunes", etc. Nunca uses fechas de años anteriores; las citas son siempre a futuro.`;
 
+      // Language rule (prioritized) — these instructions are in Spanish, which would
+      // otherwise bias the model to answer in Spanish even for an English bot.
+      const LANG_NAMES: Record<string, string> = { es: 'español', en: 'English', pt: 'português', fr: 'français', de: 'Deutsch', it: 'italiano' };
+      const langCode = String(bot.visual_config?.language || bot.language || 'es').slice(0, 2).toLowerCase();
+      const langName = LANG_NAMES[langCode] ?? 'español';
+      const languageRule = `IDIOMA (PRIORITARIO, ignora el idioma de estas instrucciones): Responde SIEMPRE en ${langName} por defecto. Si el cliente te escribe claramente en otro idioma, responde en el idioma del cliente. Nunca mezcles dos idiomas en la misma respuesta.`;
+
       const systemPrompt = [
         `IDENTIDAD: Tu nombre es "${bot.name}". Cuando alguien pregunte de qué equipo eres o quién eres, responde siempre que eres "${bot.name}".`,
+        languageRule,
         currentDate,
         noGreet,
         bot.system_prompt ?? '',
