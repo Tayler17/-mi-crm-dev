@@ -221,7 +221,12 @@ export const WIDGET_JS = `
         flexShrink: '0',
       },
     });
-    avatar.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2z"/><path d="M2 21a10 10 0 0 1 20 0"/></svg>';
+    if (cfg.avatar) {
+      avatar.style.fontSize = '20px';
+      avatar.textContent = cfg.avatar;
+    } else {
+      avatar.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2z"/><path d="M2 21a10 10 0 0 1 20 0"/></svg>';
+    }
     var titleBlock = el('div', { style: { flex: '1', minWidth: '0' } }, [
       el('div', { style: { color: '#fff', fontWeight: '600', fontSize: '15px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, cfg.title),
       el('div', { style: { color: 'rgba(255,255,255,0.8)', fontSize: '12px' } }, cfg.subtitle),

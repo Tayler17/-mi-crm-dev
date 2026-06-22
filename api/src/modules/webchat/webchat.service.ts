@@ -24,7 +24,7 @@ export class WebchatService implements OnModuleInit {
 
   async getConfig(botId: string) {
     const [bot] = await this.db.query(
-      `SELECT id, name, welcome_message,
+      `SELECT id, name, welcome_message, visual_config,
               webchat_enabled, webchat_color, webchat_title, webchat_subtitle, webchat_placeholder
        FROM ai_chatbots WHERE id=$1 AND status='active'`,
       [botId],
@@ -38,6 +38,7 @@ export class WebchatService implements OnModuleInit {
       title:       bot.webchat_title   ?? bot.name,
       subtitle:    bot.webchat_subtitle ?? '¿En qué puedo ayudarte?',
       placeholder: bot.webchat_placeholder ?? 'Escribe un mensaje...',
+      avatar:      bot.visual_config?.emoji ?? null,
     };
   }
 
