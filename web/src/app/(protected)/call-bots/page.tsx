@@ -1686,7 +1686,7 @@ export default function CallBotsPage() {
           queues={queues}
           inboxes={inboxes}
           voices={voices}
-          isOwner={isOwner}
+          isOwner={canManage}
           onSave={handleSave}
           onClose={() => { setShowModal(false); setEditing(null); }}
         />
