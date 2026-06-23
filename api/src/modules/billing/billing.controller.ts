@@ -4,11 +4,24 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantId } from '../../common/decorators/tenant.decorator';
+import { ForbiddenException } from '@nestjs/common';
 import { BillingService } from './billing.service';
+import { OverageBillingService } from './overage-billing.service';
 
 @Controller('billing')
 export class BillingController {
-  constructor(private readonly billing: BillingService) {}
+  constructor(
+    private readonly billing: BillingService,
+    private readonly overage: OverageBillingService,
+  ) {}
+
+  /** Owner-only: run the overage sync now. ?charge=1 to actually create invoice items; default dry-run. */
+  @Post('overage/run')
+  @UseGuards(JwtAuthGuard)
+  async runOverage(@Req() req: any, @Query('charge') charge?: string) {
+    if (req.user?.role !== 'owner') throw new ForbiddenException('Solo el owner');
+    return this.overage.syncAll(charge === '1' || charge === 'true');
+  }
 
   // ── SaaS subscription ────────────────────────────────────────────────────
 

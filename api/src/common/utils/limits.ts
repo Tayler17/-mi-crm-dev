@@ -85,17 +85,21 @@ export interface OverageResult {
   extraMessageCost: number;
   extraMinutes: number;
   extraMinuteCost: number;
+  extraPhoneNumbers: number;
+  extraPhoneNumberCost: number;
   totalOverageCost: number;
   allowOverage: boolean;
 }
 
 export function calculateOverage(
-  usage: { aiMessagesMonth: number; callMinutesMonth: number },
+  usage: { aiMessagesMonth: number; callMinutesMonth: number; phoneNumbers?: number },
   plan: {
     max_messages_month: number;
     max_call_minutes: number;
+    max_phone_numbers?: number;
     extra_message_price: number;
     extra_call_minute_price: number;
+    extra_phone_number_price?: number;
     allow_overage: boolean;
   },
 ): OverageResult {
@@ -109,12 +113,22 @@ export function calculateOverage(
     ? extraMinutes * Number(plan.extra_call_minute_price)
     : 0;
 
+  // Phone numbers: charge per extra Twilio number above the plan's allowance.
+  // -1 (unlimited) or missing limit means no phone-number overage.
+  const phoneLimit = plan.max_phone_numbers ?? -1;
+  const extraPhoneNumbers = phoneLimit < 0 ? 0 : Math.max(0, (usage.phoneNumbers ?? 0) - phoneLimit);
+  const extraPhoneNumberCost = (plan.extra_phone_number_price ?? 0) > 0
+    ? extraPhoneNumbers * Number(plan.extra_phone_number_price)
+    : 0;
+
   return {
     extraMessages,
     extraMessageCost,
     extraMinutes,
     extraMinuteCost,
-    totalOverageCost: extraMessageCost + extraMinuteCost,
+    extraPhoneNumbers,
+    extraPhoneNumberCost,
+    totalOverageCost: extraMessageCost + extraMinuteCost + extraPhoneNumberCost,
     allowOverage: plan.allow_overage ?? false,
   };
 }

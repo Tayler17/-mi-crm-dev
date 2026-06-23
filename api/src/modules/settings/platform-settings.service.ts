@@ -42,6 +42,7 @@ export const PLATFORM_KEYS = [
   'stability.api_key',
   'fal.api_key',
   'deepgram.api_key',
+  'billing.overage_mode',
 ] as const;
 
 export type PlatformKey = (typeof PLATFORM_KEYS)[number];
@@ -90,6 +91,7 @@ const ENV_FALLBACKS: Record<PlatformKey, string> = {
   'stability.api_key':     'STABILITY_API_KEY',
   'fal.api_key':           'FAL_API_KEY',
   'deepgram.api_key':      'DEEPGRAM_API_KEY',
+  'billing.overage_mode':  'BILLING_OVERAGE_MODE',
 };
 
 @Injectable()

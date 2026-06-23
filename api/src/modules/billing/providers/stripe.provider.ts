@@ -45,6 +45,34 @@ export class StripeProvider implements PaymentProvider {
     return { url: session.url };
   }
 
+  /** Create a pending invoice item on the customer (added to their next subscription invoice). */
+  async createInvoiceItem(params: { customerId: string; amount: number; currency: string; description: string; period?: string }): Promise<string> {
+    const stripe = await this.sdk();
+    const item = await stripe.invoiceItems.create({
+      customer:    params.customerId,
+      amount:      Math.round(params.amount * 100), // to cents
+      currency:    params.currency.toLowerCase(),
+      description: params.description,
+      metadata:    params.period ? { overage_period: params.period } : undefined,
+    });
+    return item.id;
+  }
+
+  /** Update the amount/description of a pending (uninvoiced) invoice item. */
+  async updateInvoiceItem(itemId: string, params: { amount: number; description?: string }): Promise<void> {
+    const stripe = await this.sdk();
+    await stripe.invoiceItems.update(itemId, {
+      amount:      Math.round(params.amount * 100),
+      description: params.description,
+    });
+  }
+
+  /** Delete a pending invoice item (e.g. overage dropped back to 0). */
+  async deleteInvoiceItem(itemId: string): Promise<void> {
+    const stripe = await this.sdk();
+    await stripe.invoiceItems.del(itemId).catch(() => {});
+  }
+
   async createPortalSession(params: PortalParams): Promise<{ url: string }> {
     const stripe = await this.sdk();
     const session = await stripe.billingPortal.sessions.create({
