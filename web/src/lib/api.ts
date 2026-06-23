@@ -1197,6 +1197,8 @@ export interface TenantSettings {
   allow_own_twilio?: boolean;
   plan_color?: string;
   plan_name?: string;
+  /** Whether the platform provides an AI key (so the tenant doesn't need their own). */
+  platformAiConfigured?: boolean;
 }
 
 export interface Announcement {

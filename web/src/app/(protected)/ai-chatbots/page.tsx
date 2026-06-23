@@ -1461,7 +1461,9 @@ export default function AiChatbotsPage() {
       setBots(b); setStats(s); setInboxes(ix); setQueues(q); setTeams(tm);
       setAllowOwnApiKeys(settings?.allow_own_api_keys ?? false);
       const aiKeys = settings?.settings?.aiKeys ?? {};
-      setHasAiKey(Object.values(aiKeys).some((v) => !!v));
+      // AI is available if the tenant has its own key OR the platform provides one.
+      const tenantKey = Object.values(aiKeys).some((v) => !!v);
+      setHasAiKey(tenantKey || !!settings?.platformAiConfigured);
     } finally { setLoading(false); }
   }
 

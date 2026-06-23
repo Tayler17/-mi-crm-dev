@@ -61,8 +61,12 @@ export class SettingsController {
   // ── Tenant settings ───────────────────────────────────────────────────────────
 
   @Get()
-  getSettings(@TenantId() tenantId: string) {
-    return this.svc.getSettings(tenantId);
+  async getSettings(@TenantId() tenantId: string) {
+    const settings = await this.svc.getSettings(tenantId);
+    // Tell the UI whether the PLATFORM provides an AI key, so it doesn't warn
+    // "no AI key" when the tenant doesn't need their own (platform absorbs AI).
+    const ai = await this.platformSettings.getAI().catch(() => ({ apiKey: '' }));
+    return { ...(settings ?? {}), platformAiConfigured: !!ai.apiKey };
   }
 
   @Patch()
