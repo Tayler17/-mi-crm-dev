@@ -487,7 +487,22 @@ export class CallBotTwilioService {
     // Real-time mode (Media Streams): hand the call audio to our WebSocket.
     // Done AFTER contact resolution so callMeta carries the contact → the
     // conversation/call-log link to the right CRM contact, not "No contact".
-    if (bot.streaming_mode) {
+    // Streaming is used when the bot has it on OR the platform forces it globally —
+    // but ONLY if both required keys exist, so a misconfig falls back to Gather
+    // instead of a broken (silent) call.
+    let useStreaming = !!bot.streaming_mode;
+    if (!useStreaming) {
+      const globalOn = ((await this.platformSettings.get('call.streaming_global').catch(() => '')) as string) === 'on';
+      if (globalOn) {
+        const [dg, el] = await Promise.all([
+          this.platformSettings.get('deepgram.api_key').catch(() => ''),
+          this.platformSettings.get('elevenlabs.api_key').catch(() => ''),
+        ]);
+        useStreaming = !!dg && !!el;
+        if (globalOn && !useStreaming) this.logger.warn('[callbot] streaming_global ON but Deepgram/ElevenLabs key missing → Gather fallback');
+      }
+    }
+    if (useStreaming) {
       const wssUrl = baseUrl.replace(/^http/i, 'ws') + '/call-bots/twilio/media-stream';
       return twiml(`
         <Connect>
