@@ -822,7 +822,7 @@ export class AiChatbotEngineService {
       const LANG_NAMES: Record<string, string> = { es: 'español', en: 'English', pt: 'português', fr: 'français', de: 'Deutsch', it: 'italiano' };
       const langCode = String(bot.visual_config?.language || bot.language || 'es').slice(0, 2).toLowerCase();
       const langName = LANG_NAMES[langCode] ?? 'español';
-      const languageRule = `IDIOMA (PRIORITARIO, ignora el idioma de estas instrucciones): Responde SIEMPRE en ${langName} por defecto. Si el cliente te escribe claramente en otro idioma, responde en el idioma del cliente. Nunca mezcles dos idiomas en la misma respuesta.`;
+      const languageRule = `IDIOMA (REGLA MÁXIMA, ignora el idioma de estas instrucciones internas): Detecta el idioma del ÚLTIMO mensaje del cliente y responde SIEMPRE en ESE mismo idioma. Si el cliente escribe en inglés, responde TODO en inglés; si escribe en español, responde TODO en español. Solo si el mensaje del cliente es ambiguo o vacío, usa ${langName}. JAMÁS mezcles dos idiomas en una misma respuesta.`;
 
       const systemPrompt = [
         `IDENTIDAD: Tu nombre es "${bot.name}". Cuando alguien pregunte de qué equipo eres o quién eres, responde siempre que eres "${bot.name}".`,
