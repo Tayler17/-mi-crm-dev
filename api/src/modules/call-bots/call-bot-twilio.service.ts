@@ -933,8 +933,11 @@ ${addTagInstruction}
       crmCtx.tags.map((t: any) => t.name),
       dentallyConnected,
     );
+    // Client-side functions are defined WITHOUT an `endpoint` (Deepgram then sends
+    // us a FunctionCallRequest). A `client_side` field here is NOT valid and makes
+    // Deepgram reject the whole think config.
     const functions = tools.map((t) => ({
-      name: t.name, description: t.description, parameters: t.parameters, client_side: true,
+      name: t.name, description: t.description, parameters: t.parameters,
     }));
 
     const nowDt = new Date();
