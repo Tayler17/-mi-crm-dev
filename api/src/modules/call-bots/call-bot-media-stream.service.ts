@@ -52,6 +52,9 @@ export class CallBotMediaStreamService {
     let agentWs: WebSocket | null = null;
     let closed = false;
     let keepAlive: ReturnType<typeof setInterval> | null = null;
+    // Deepgram rejects any audio sent before the Settings message ("Received binary
+    // before Settings"). Gate audio forwarding until Settings has been sent.
+    let settingsSent = false;
 
     const sendToTwilio = (obj: any) => {
       if (twilioWs.readyState === WebSocket.OPEN) twilioWs.send(JSON.stringify(obj));
@@ -65,22 +68,24 @@ export class CallBotMediaStreamService {
       try { twilioWs.close(); } catch { /* ignore */ }
     };
 
-    /** Open the Deepgram Voice Agent socket and wire its events. */
-    const openAgent = async () => {
+    /** Open the Deepgram Voice Agent socket and wire its events.
+     *  `settings` is built BEFORE opening so we can send it synchronously on open
+     *  (no async gap during which Twilio audio could race ahead of Settings). */
+    const openAgent = async (settings: any) => {
       const dgKey = (await this.platformSettings.get('deepgram.api_key').catch(() => '')) as string;
       if (!dgKey) { this.logger.error('[voice-agent] no Deepgram key configured'); cleanup(); return; }
 
       agentWs = new WebSocket('wss://agent.deepgram.com/v1/agent/converse', ['token', dgKey]);
 
-      agentWs.on('open', async () => {
+      agentWs.on('open', () => {
         try {
-          const settings = await this.twilio.buildVoiceAgentSettings(bot, callSid);
           agentWs!.send(JSON.stringify(settings));
+          settingsSent = true; // now it's safe to forward audio
           this.logger.log(`[voice-agent] settings sent call=${callSid} lang=${settings.agent.language} fns=${settings.agent.think.functions?.length ?? 0}`);
           keepAlive = setInterval(() => {
             if (agentWs?.readyState === WebSocket.OPEN) agentWs.send(JSON.stringify({ type: 'KeepAlive' }));
           }, 8000);
-        } catch (e: any) { this.logger.error(`[voice-agent] settings failed: ${e.message}`); cleanup(); }
+        } catch (e: any) { this.logger.error(`[voice-agent] settings send failed: ${e.message}`); cleanup(); }
       });
 
       agentWs.on('message', async (data: RawData, isBinary: boolean) => {
@@ -151,12 +156,18 @@ export class CallBotMediaStreamService {
           try { bot = await this.twilio.getBot(botId); }
           catch (e: any) { this.logger.error(`[voice-agent] bot load failed: ${e.message}`); }
           if (!bot) { cleanup(); return; }
-          await openAgent();
+          // Build Settings BEFORE opening the agent socket (avoids the audio-before-
+          // Settings race that intermittently closed the connection).
+          let settings: any;
+          try { settings = await this.twilio.buildVoiceAgentSettings(bot, callSid); }
+          catch (e: any) { this.logger.error(`[voice-agent] settings build failed: ${e.message}`); cleanup(); return; }
+          await openAgent(settings);
           break;
         }
         case 'media': {
           const payload = data.media?.payload;
-          if (payload && agentWs?.readyState === WebSocket.OPEN) agentWs.send(Buffer.from(payload, 'base64'));
+          // Only after Settings is sent (dropping the first ~ms of audio is fine).
+          if (payload && settingsSent && agentWs?.readyState === WebSocket.OPEN) agentWs.send(Buffer.from(payload, 'base64'));
           break;
         }
         case 'stop':
