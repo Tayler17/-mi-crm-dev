@@ -1041,7 +1041,7 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
                     ))}
                   </select>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
-                    {t('The voice selected here takes priority over the manual configuration.', 'La voz seleccionada aquí tiene prioridad sobre la configuración manual.')}
+                    {t('In real-time mode, choose a "Deepgram Aura-2" voice — this is the voice the bot will use.', 'En modo tiempo real, elige una voz "Deepgram Aura-2" — esa es la voz que usará el bot.')}
                   </div>
                 </div>
               )}
@@ -1101,7 +1101,7 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
                     <span style={{ fontWeight: 600, fontSize: 14 }}>⚡ {t('Real-time mode (streaming)', 'Modo tiempo real (streaming)')}</span>
                   </label>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
-                    {t('Fluid conversation with no silences, filters noise and lets the customer interrupt the bot. Requires the ', 'Conversación fluida sin silencios, filtra ruido y permite interrumpir al bot. Requiere la ')}<strong>{t('Deepgram API Key', 'API Key de Deepgram')}</strong>{t(' (Settings → Platform) and an ', ' (Configuración → Plataforma) y voz ')}<strong>ElevenLabs</strong>{t(' voice. Twilio voice does not work in this mode.', '. La voz de Twilio no funciona en este modo.')}
+                    {t('Fluid conversation with no silences, filters noise and lets the customer interrupt the bot. Uses the ', 'Conversación fluida sin silencios, filtra ruido y permite interrumpir al bot. Usa la ')}<strong>{t('Deepgram Aura-2 voice selected above', 'voz Deepgram Aura-2 elegida arriba')}</strong>{t(' and requires the ', ' y requiere la ')}<strong>{t('Deepgram API Key', 'API Key de Deepgram')}</strong>{t(' (Settings → Platform).', ' (Configuración → Plataforma).')}
                   </div>
                 </div>
               )}
