@@ -940,7 +940,12 @@ ${addTagInstruction}
       const langRule = isEs
         ? '\n\nIDIOMA: Responde SIEMPRE en español, en todos tus mensajes. No te pases al inglés aunque una frase suene en otro idioma.'
         : '\n\nLANGUAGE: Always reply in English, in every message. Do not switch to Spanish even if a phrase sounds like another language.';
-      this.callHistories.set(sessionId, [{ role: 'system', content: (bot.system_prompt ?? '') + dateRule + apptRule + langRule + hangupRule }]);
+      // CRITICAL for voice turn-taking: short replies. While the bot talks, the
+      // caller's speech is ignored — long monologues feel like "it won't listen".
+      const voiceStyleRule = isEs
+        ? '\n\nESTILO DE VOZ (MUY IMPORTANTE): Es una llamada telefónica. Responde MUY breve: 1 o 2 frases cortas como máximo, y termina haciendo UNA pregunta o pausa para que el cliente hable. NUNCA des explicaciones largas de un tirón; si hay mucho que contar, di una frase y pregunta "¿quieres que te dé más detalle?". Habla como una persona, no como un folleto.'
+        : '\n\nVOICE STYLE (VERY IMPORTANT): This is a phone call. Reply VERY briefly: 1-2 short sentences max, then ask ONE question or pause so the caller can speak. NEVER give long explanations in one go; if there is a lot to say, give one sentence and ask "would you like more detail?". Talk like a person, not a brochure.';
+      this.callHistories.set(sessionId, [{ role: 'system', content: (bot.system_prompt ?? '') + dateRule + apptRule + langRule + voiceStyleRule + hangupRule }]);
       // Keep the contact resolved by handleIncomingCall; only default if missing.
       if (!this.callMeta.has(sessionId)) {
         this.callMeta.set(sessionId, { contactId: null, tenantId: bot.tenant_id, botId: bot.id });

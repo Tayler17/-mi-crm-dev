@@ -166,7 +166,9 @@ export class CallBotMediaStreamService {
         encoding: 'mulaw', sample_rate: '8000', channels: '1',
         model: 'nova-2', language: lang, smart_format: 'true',
         interim_results: 'true', vad_events: 'true',
-        endpointing: '300', utterance_end_ms: '1000',
+        // Wait a bit longer before finalizing so natural mid-sentence pauses don't
+        // chop one phrase into garbled fragments (better recognition).
+        endpointing: '600', utterance_end_ms: '1200',
       });
       dgWs = new WebSocket(`wss://api.deepgram.com/v1/listen?${qs.toString()}`, {
         headers: { Authorization: `Token ${dgKey}` },
