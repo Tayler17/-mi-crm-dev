@@ -576,20 +576,14 @@ export class MessagesController {
             textBody = cap || '';
           }
 
-          // Append the connection's signature (if set) so replies look like real
-          // business emails, not bare text.
-          const sig = String(creds.signature ?? '').trim();
-          const bodyText = sig ? (textBody ? `${textBody}\n\n${sig}` : sig) : textBody;
-          const bodyHtml = bodyText ? bodyText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') : undefined;
-
           let info: any;
           try {
             info = await transport.sendMail({
               from: fromAddr ? `${fromName} <${fromAddr}>` : fromName,
               to: toEmail,
               subject,
-              text: bodyText || ' ',
-              html: bodyHtml,
+              text: textBody || ' ',
+              html: textBody ? textBody.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') : undefined,
               attachments,
               ...threadRefs,
             });
@@ -608,8 +602,8 @@ export class MessagesController {
             from: fromAddr ? `${fromName} <${fromAddr}>` : fromName,
             to: toEmail,
             subject,
-            text: bodyText || ' ',
-            html: bodyHtml,
+            text: textBody || ' ',
+            html: textBody ? textBody.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') : undefined,
             attachments,
             messageId: info?.messageId,
             ...threadRefs,

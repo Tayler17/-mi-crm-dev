@@ -487,17 +487,6 @@ function ConnectionModal({ conn, defaultType, inboxes, onClose, onSaved }: Conne
                         </div>
                       ))
                     )}
-
-                    <div>
-                      <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Firma (opcional)</label>
-                      <textarea className="form-input" rows={4}
-                        value={creds['signature'] ?? ''}
-                        onChange={(e) => setCred('signature', e.target.value)}
-                        placeholder={'—\nTS Couriers\nwww.tscouriers.com\nTel: 020 7407 6858'} />
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                        Se añade al final de cada correo que envíe el bot o un agente.
-                      </div>
-                    </div>
                   </>
                 )}
 

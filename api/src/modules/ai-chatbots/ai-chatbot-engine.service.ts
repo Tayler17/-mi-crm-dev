@@ -1331,15 +1331,13 @@ export class AiChatbotEngineService {
           [conversationId],
         );
         const threadRefs = lastIn?.external_id ? { inReplyTo: lastIn.external_id, references: lastIn.external_id } : {};
-        const sig = String(creds.signature ?? '').trim();
-        const bodyText = sig ? `${text}\n\n${sig}` : text;
         try {
           const info = await transport.sendMail({
             from: fromAddr ? `${fromName} <${fromAddr}>` : fromName,
             to: toEmail,
             subject,
-            text: bodyText,
-            html: bodyText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>'),
+            text,
+            html: text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>'),
             ...threadRefs,
           });
           if (messageId && info?.messageId) {
