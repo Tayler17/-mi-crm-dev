@@ -1008,15 +1008,22 @@ ${addTagInstruction}
       : 'ENDING THE CALL: When the caller says goodbye or the conversation is over (e.g. "thanks, bye", "that\'s all", "nothing else"), say ONE short farewell and then ALWAYS call the end_call function to hang up. Do not stay silent waiting.';
     const deptRule = deptLabels.length
       ? (isEs
-          ? `TRANSFERIR A OTRO DEPARTAMENTO: Si el cliente necesita un área distinta, di una frase breve ("Te paso ahora con el departamento de X") y llama a la función transfer_to_department con el nombre exacto. Departamentos disponibles: ${deptLabels.join(', ')}.`
-          : `TRANSFER TO ANOTHER DEPARTMENT: If the caller needs a different area, say a short heads-up ("Let me put you through to X") and call transfer_to_department with the exact name. Available departments: ${deptLabels.join(', ')}.`)
+          ? `TRANSFERIR A OTRO DEPARTAMENTO: Solo si el cliente necesita un ÁREA DE NEGOCIO distinta (ventas, soporte, etc.), di una frase breve ("Te paso ahora con el departamento de X") y llama a transfer_to_department con el nombre exacto. Departamentos: ${deptLabels.join(', ')}. NUNCA uses transfer_to_department por un tema de idioma.`
+          : `TRANSFER TO ANOTHER DEPARTMENT: Only if the caller needs a different BUSINESS AREA (sales, support, etc.), say a short heads-up ("Let me put you through to X") and call transfer_to_department with the exact name. Departments: ${deptLabels.join(', ')}. NEVER use transfer_to_department for a language issue.`)
       : '';
     const humanRule = hasHumanTransfer
       ? (isEs
           ? 'TRANSFERIR A UN HUMANO: Si el cliente pide hablar con una persona real (o el caso lo requiere), di una frase breve ("Te paso con un agente, un momento") y llama a la función transfer_to_human.'
           : 'TRANSFER TO A HUMAN: If the caller asks to speak with a real person (or the case requires it), say a short heads-up ("Let me put you through to an agent, one moment") and call transfer_to_human.')
       : '';
-    const prompt = [bot.system_prompt ?? '', dateRule, langRule, voiceRule, apptRule, deptRule, humanRule, hangupRule].filter(Boolean).join('\n\n');
+    // A caller asking to be helped in a language this bot doesn't speak must go to a
+    // HUMAN, never to another bot/department.
+    const langTransferRule = hasHumanTransfer
+      ? (isEs
+          ? 'IDIOMA DEL CLIENTE: Si el cliente pide ser atendido en otro idioma que no manejas (p. ej. te piden inglés), NO lo transfieras a un departamento ni a otro bot: transfiérelo a un agente humano con transfer_to_human.'
+          : 'CALLER LANGUAGE: If the caller asks to be helped in another language you do not handle (e.g. they ask for Spanish), do NOT transfer them to a department or another bot: transfer them to a human agent with transfer_to_human.')
+      : '';
+    const prompt = [bot.system_prompt ?? '', dateRule, langRule, voiceRule, apptRule, langTransferRule, deptRule, humanRule, hangupRule].filter(Boolean).join('\n\n');
 
     // Use the Aura voice the tenant picked in the Voice Catalog (getBot resolves
     // voice_catalog_id → tts_provider/tts_voice_id); else the catalog's default voice
