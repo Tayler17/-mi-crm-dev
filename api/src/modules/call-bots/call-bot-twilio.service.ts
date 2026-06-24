@@ -924,9 +924,10 @@ ${addTagInstruction}
     const meta = this.callMeta.get(callSid);
     const tenantId = meta?.tenantId ?? bot.tenant_id;
 
-    const [crmCtx, dentallyConnected] = await Promise.all([
+    const [crmCtx, dentallyConnected, ai] = await Promise.all([
       this.getCrmCtx(tenantId),
       this.integrations.isConnected(tenantId, 'dentally').catch(() => false),
+      this.platformSettings.getAI().catch(() => ({ apiKey: '', provider: '', model: '' })),
     ]);
     const tools = buildTools(
       crmCtx.stages.map((s: any) => (s.pipeline_name ? `${s.name} (${s.pipeline_name})` : s.name)),
@@ -979,7 +980,17 @@ ${addTagInstruction}
       agent: {
         language: isEs ? 'es' : 'en',
         listen: { provider: { type: 'deepgram', model: 'nova-3' } },
-        think:  { provider: { type: 'open_ai', model: 'gpt-4o-mini', temperature: 0.7 }, prompt, ...(functions.length ? { functions } : {}) },
+        think:  {
+          provider: { type: 'open_ai', model: 'gpt-4o-mini', temperature: 0.7 },
+          // Use OUR OpenAI key so the LLM does NATIVE tool-calling. With Deepgram's
+          // managed LLM the model wrote "functions.end_call()" as text instead of
+          // emitting a real FunctionCallRequest, so no function ever ran.
+          ...(ai.provider === 'openai' && ai.apiKey
+            ? { endpoint: { url: 'https://api.openai.com/v1/chat/completions', headers: { authorization: `Bearer ${ai.apiKey}` } } }
+            : {}),
+          prompt,
+          ...(functions.length ? { functions } : {}),
+        },
         speak:  { provider: { type: 'deepgram', model: speakModel } },
         greeting,
       },
