@@ -873,6 +873,7 @@ export default function SettingsPage() {
     'meta.app_id': '', 'meta.app_secret': '', 'meta.verify_token': '',
     'elevenlabs.api_key': '',
     'deepgram.api_key': '',
+    'call.streaming_global': 'off',
     'stripe.secret_key': '', 'stripe.webhook_secret': '', 'stripe.publishable_key': '',
     'backup.enabled': 'false', 'backup.cron': '0 2 * * *', 'backup.retention_days': '7',
     'backup.s3_bucket': '', 'backup.s3_region': 'us-east-1',
@@ -957,6 +958,7 @@ export default function SettingsPage() {
         'meta.verify_token':    p['meta.verify_token']?.masked     ? '••••••••' : (p['meta.verify_token']?.value || ''),
         'elevenlabs.api_key':   p['elevenlabs.api_key']?.masked    ? '••••••••' : (p['elevenlabs.api_key']?.value || ''),
         'deepgram.api_key':     p['deepgram.api_key']?.masked      ? '••••••••' : (p['deepgram.api_key']?.value || ''),
+        'call.streaming_global': p['call.streaming_global']?.value || 'off',
         'stripe.secret_key':    p['stripe.secret_key']?.masked     ? '••••••••' : (p['stripe.secret_key']?.value || ''),
         'stripe.webhook_secret':p['stripe.webhook_secret']?.masked ? '••••••••' : (p['stripe.webhook_secret']?.value || ''),
         'stripe.publishable_key':p['stripe.publishable_key']?.value || '',
@@ -1758,6 +1760,14 @@ export default function SettingsPage() {
                   <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
                 )}
               </div>
+            </Row>
+            <Row label="Modo tiempo real global" hint="Cuando está activado, TODOS los call bots de TODOS los tenants usan tiempo real (streaming con Deepgram + ElevenLabs). Requiere las API Keys de Deepgram y ElevenLabs. Si falta alguna, los bots caen al modo normal automáticamente.">
+              <select className="form-input" style={{ maxWidth: 280 }}
+                value={platformForm['call.streaming_global']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'call.streaming_global': e.target.value }))}>
+                <option value="off">Desactivado (modo normal)</option>
+                <option value="on">Activado para todo el sistema</option>
+              </select>
             </Row>
           </Section>
 
