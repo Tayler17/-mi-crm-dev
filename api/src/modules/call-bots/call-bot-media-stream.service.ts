@@ -113,6 +113,7 @@ export class CallBotMediaStreamService {
           }),
           new Promise<void>((_, reject) => setTimeout(() => reject(new Error('tts-stream-timeout')), 20000)),
         ]);
+        this.logger.log(`[media-stream] spoke ${bytes}B streamSid=${streamSid || '(EMPTY!)'} text="${clean.slice(0, 40)}"`);
         // We send all frames in <1s but Twilio PLAYS them over several seconds.
         // Hold `speaking` for the real playback duration (mulaw 8kHz = 8000 B/s)
         // so barge-in can interrupt — WITHOUT depending on Twilio's mark echo,
@@ -221,7 +222,7 @@ export class CallBotMediaStreamService {
       try { data = JSON.parse(raw.toString()); } catch { return; }
       switch (data.event) {
         case 'start': {
-          streamSid = data.start?.streamSid ?? '';
+          streamSid = data.start?.streamSid ?? data.streamSid ?? '';
           callSid   = data.start?.callSid ?? '';
           const botId = data.start?.customParameters?.botId ?? '';
           this.logger.log(`[media-stream] start call=${callSid} bot=${botId}`);
