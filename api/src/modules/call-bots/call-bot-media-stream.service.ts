@@ -4,20 +4,20 @@ import { DataSource } from 'typeorm';
 import { IncomingMessage, Server as HttpServer } from 'http';
 import { Duplex } from 'stream';
 import { WebSocketServer, WebSocket, RawData } from 'ws';
-import axios from 'axios';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
 import { CallBotTwilioService } from './call-bot-twilio.service';
 
 /**
- * Real-time voice via Twilio Media Streams.
+ * Real-time voice via Twilio Media Streams ↔ Deepgram Voice Agent.
  *
- *   Twilio ──(wss, mulaw 8kHz)──► this server
- *      ▲                            │ audio → Deepgram (streaming STT: VAD + noise-robust)
- *      │                            │ utterance end → LLM (reuses CallBotTwilioService)
- *      └────────(mulaw 8kHz)────────┘ reply → ElevenLabs streaming TTS (ulaw_8000) → Twilio
+ *   Twilio ──(wss, mulaw 8kHz)──► this bridge ──► Deepgram Voice Agent
+ *      ▲                                          (STT + turn-taking + LLM + TTS)
+ *      └──────────(mulaw 8kHz audio)──────────────┘
  *
- * Barge-in: if the caller talks while the bot is playing, we flush Twilio's
- * buffer and abort the in-flight TTS.
+ * The Voice Agent handles listening, interruptions, thinking and speaking in a
+ * single connection (far more stable than a hand-built STT+LLM+TTS pipeline).
+ * CRM/Dentally tools run as client-side functions: the agent sends
+ * FunctionCallRequest, we execute it and reply with FunctionCallResponse.
  *
  * Path: wss://<api-host>/call-bots/twilio/media-stream
  */
@@ -42,184 +42,92 @@ export class CallBotMediaStreamService {
       if (pathname !== '/call-bots/twilio/media-stream') return; // leave other upgrades alone
       this.wss!.handleUpgrade(req, socket, head, (ws) => this.handleConnection(ws));
     });
-    this.logger.log('[media-stream] bound at /call-bots/twilio/media-stream');
+    this.logger.log('[voice-agent] bound at /call-bots/twilio/media-stream');
   }
 
   private async handleConnection(twilioWs: WebSocket) {
     let streamSid = '';
     let callSid = '';
     let bot: any = null;
-    let aiCfg: { apiKey: string; provider: string; model: string } | null = null;
-    let dgWs: WebSocket | null = null;
-    let speaking = false;
-    let processing = false;
+    let agentWs: WebSocket | null = null;
     let closed = false;
-    let ttsAbort: AbortController | null = null;
-    let finalsBuffer: string[] = [];
-    let speakTimer: ReturnType<typeof setTimeout> | null = null;
+    let keepAlive: ReturnType<typeof setInterval> | null = null;
 
     const sendToTwilio = (obj: any) => {
       if (twilioWs.readyState === WebSocket.OPEN) twilioWs.send(JSON.stringify(obj));
     };
 
-    /** Stop whatever the bot is saying (barge-in). */
-    const stopSpeaking = () => {
-      if (speakTimer) { clearTimeout(speakTimer); speakTimer = null; }
-      if (!speaking) return;
-      speaking = false;
-      try { ttsAbort?.abort(); } catch { /* ignore */ }
-      ttsAbort = null;
-      sendToTwilio({ event: 'clear', streamSid });
-    };
-
-    /** ElevenLabs streaming TTS (ulaw_8000) → Twilio media frames.
-     *  Returns the estimated playback duration in ms (so a hang-up can wait for
-     *  the farewell to finish playing instead of cutting it off). */
-    const speak = async (text: string): Promise<number> => {
-      const clean = (text ?? '').trim();
-      if (!clean || closed) return 0;
-      const elevenKey = (await this.platformSettings.get('elevenlabs.api_key').catch(() => '')) as string;
-      if (!elevenKey) { this.logger.warn('[media-stream] no ElevenLabs key; cannot speak'); return 0; }
-      const voiceId = bot?.tts_voice_id || '21m00Tcm4TlvDq8ikWAM';
-
-      speaking = true;
-      ttsAbort = new AbortController();
-      let bytes = 0;
-      try {
-        const res = await axios.post(
-          `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?output_format=ulaw_8000&optimize_streaming_latency=3`,
-          { text: clean, model_id: 'eleven_turbo_v2_5', voice_settings: { stability: 0.5, similarity_boost: 0.8 } },
-          {
-            headers: { 'xi-api-key': elevenKey, 'Content-Type': 'application/json', Accept: 'audio/basic' },
-            responseType: 'stream',
-            signal: ttsAbort.signal,
-            timeout: 30000,
-          },
-        );
-        // Stream the audio, but never let this promise hang forever (would freeze
-        // the whole turn loop → the "stuck" the user reported).
-        await Promise.race([
-          new Promise<void>((resolve, reject) => {
-            res.data.on('data', (chunk: Buffer) => {
-              if (!speaking || closed) return;
-              bytes += chunk.length;
-              for (let i = 0; i < chunk.length; i += 320) {
-                const slice = chunk.subarray(i, i + 320);
-                sendToTwilio({ event: 'media', streamSid, media: { payload: slice.toString('base64') } });
-              }
-            });
-            res.data.on('end', () => resolve());
-            res.data.on('error', reject);
-          }),
-          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('tts-stream-timeout')), 20000)),
-        ]);
-        this.logger.log(`[media-stream] spoke ${bytes}B streamSid=${streamSid || '(EMPTY!)'} text="${clean.slice(0, 40)}"`);
-        // We send all frames in <1s but Twilio PLAYS them over several seconds.
-        // Hold `speaking` for the real playback duration (mulaw 8kHz = 8000 B/s)
-        // so barge-in can interrupt — WITHOUT depending on Twilio's mark echo,
-        // which isn't always sent and was leaving the bot stuck.
-        if (speaking && !closed) {
-          sendToTwilio({ event: 'mark', streamSid, mark: { name: 'end-of-turn' } });
-          const playMs = Math.ceil((bytes / 8000) * 1000) + 300;
-          if (speakTimer) clearTimeout(speakTimer);
-          speakTimer = setTimeout(() => { speaking = false; speakTimer = null; }, playMs);
-          return playMs;
-        }
-      } catch (e: any) {
-        speaking = false;
-        if (e?.name !== 'CanceledError' && e?.code !== 'ERR_CANCELED') {
-          this.logger.warn(`[media-stream] TTS failed: ${e.message}`);
-        }
-      }
-      return 0;
-    };
-
-    /** A finished user utterance → LLM reply → speak. */
-    const onUserUtterance = (text: string) => {
-      if (processing || closed || !bot || !aiCfg) return;
-      processing = true;
-      // Safety: never let a hung LLM/TTS leave `processing` stuck (= bot ignores
-      // every later turn → "stuck"). Force-release after 25s no matter what.
-      const watchdog = setTimeout(() => { processing = false; }, 25000);
-      this.logger.log(`[media-stream] user said: "${text}"`);
-      stopSpeaking();
-      this.twilio.generateVoiceReply(bot, callSid, text, aiCfg!)
-        .then(async ({ text: spoken, hangup }) => {
-          let playMs = 0;
-          if (spoken) playMs = await speak(spoken);
-          // Wait for the farewell to finish PLAYING before hanging up (was cutting off).
-          if (hangup) setTimeout(() => { try { twilioWs.close(); } catch { /* ignore */ } }, playMs + 800);
-        })
-        .catch((e) => this.logger.warn(`[media-stream] reply failed: ${e.message}`))
-        .finally(() => { clearTimeout(watchdog); processing = false; });
-    };
-
-    /** Open the Deepgram streaming STT connection. */
-    const openDeepgram = async () => {
-      const dgKey = (await this.platformSettings.get('deepgram.api_key').catch(() => '')) as string;
-      if (!dgKey) { this.logger.error('[media-stream] no Deepgram key configured'); return; }
-      // Single language (the bot's Call language) is the most STABLE: multilingual
-      // 'multi' occasionally mis-detected short Spanish words as English, which made
-      // the bot flip languages mid-call. Set each bot's Call language to its audience.
-      const lang = (bot?.language || 'es').slice(0, 2);
-      const qs = new URLSearchParams({
-        encoding: 'mulaw', sample_rate: '8000', channels: '1',
-        model: 'nova-2', language: lang, smart_format: 'true',
-        interim_results: 'true', vad_events: 'true',
-        // Wait a bit longer before finalizing so natural mid-sentence pauses don't
-        // chop one phrase into garbled fragments (better recognition).
-        endpointing: '600', utterance_end_ms: '1200',
-      });
-      dgWs = new WebSocket(`wss://api.deepgram.com/v1/listen?${qs.toString()}`, {
-        headers: { Authorization: `Token ${dgKey}` },
-      });
-      const flushUtterance = () => {
-        const text = finalsBuffer.join(' ').replace(/\s+/g, ' ').trim();
-        finalsBuffer = [];
-        if (text) onUserUtterance(text);
-      };
-      dgWs.on('open', () => this.logger.log(`[media-stream] Deepgram open (call ${callSid})`));
-      dgWs.on('message', (raw: RawData) => {
-        let msg: any;
-        try { msg = JSON.parse(raw.toString()); } catch { return; }
-        // Surface only Deepgram errors/warnings (not routine speech events).
-        if (msg.error || (msg.type && /error|warning/i.test(msg.type))) {
-          this.logger.warn(`[media-stream] Deepgram: ${JSON.stringify(msg).slice(0, 200)}`);
-        }
-        // NOTE: we deliberately do NOT barge-in on SpeechStarted (raw VAD) — it
-        // fired on any noise (keyboard, objects) and cut the bot off. We only
-        // interrupt when Deepgram actually recognizes WORDS (below).
-        if (msg.type === 'Results') {
-          const alt = msg.channel?.alternatives?.[0];
-          const transcript: string = alt?.transcript ?? '';
-          const confidence: number = alt?.confidence ?? 1;
-          // Barge-in: only on confident, real words. Background voices are usually
-          // lower-confidence (farther from the phone mic), so this avoids the bot
-          // stopping for people talking nearby, while you (close to the mic) cut in.
-          if (speaking && confidence >= 0.6 && /[a-zA-Záéíóúñ]{2,}/i.test(transcript)) stopSpeaking();
-          if (msg.is_final && transcript) finalsBuffer.push(transcript);
-          // speech_final = Deepgram is confident speech ended → respond now.
-          if (msg.speech_final) flushUtterance();
-          return;
-        }
-        // Fallback: end-of-utterance by silence timer, even if speech_final never came
-        // (this is what fixed the bot "getting stuck" waiting forever).
-        if (msg.type === 'UtteranceEnd') flushUtterance();
-      });
-      dgWs.on('error', (e) => this.logger.warn(`[media-stream] Deepgram error: ${(e as any).message}`));
-      dgWs.on('close', (code: number, reason: Buffer) => {
-        this.logger.warn(`[media-stream] Deepgram closed code=${code} reason=${reason?.toString() || '(none)'}`);
-        dgWs = null;
-      });
-    };
-
     const cleanup = () => {
       if (closed) return;
       closed = true;
-      stopSpeaking();
-      try { dgWs?.close(); } catch { /* ignore */ }
+      if (keepAlive) { clearInterval(keepAlive); keepAlive = null; }
+      try { agentWs?.close(); } catch { /* ignore */ }
       try { twilioWs.close(); } catch { /* ignore */ }
-      if (callSid) this.twilio.endVoiceSession(callSid);
+    };
+
+    /** Open the Deepgram Voice Agent socket and wire its events. */
+    const openAgent = async () => {
+      const dgKey = (await this.platformSettings.get('deepgram.api_key').catch(() => '')) as string;
+      if (!dgKey) { this.logger.error('[voice-agent] no Deepgram key configured'); cleanup(); return; }
+
+      agentWs = new WebSocket('wss://agent.deepgram.com/v1/agent/converse', ['token', dgKey]);
+
+      agentWs.on('open', async () => {
+        try {
+          const settings = await this.twilio.buildVoiceAgentSettings(bot, callSid);
+          agentWs!.send(JSON.stringify(settings));
+          this.logger.log(`[voice-agent] settings sent call=${callSid} lang=${settings.agent.language} fns=${settings.agent.think.functions?.length ?? 0}`);
+          keepAlive = setInterval(() => {
+            if (agentWs?.readyState === WebSocket.OPEN) agentWs.send(JSON.stringify({ type: 'KeepAlive' }));
+          }, 8000);
+        } catch (e: any) { this.logger.error(`[voice-agent] settings failed: ${e.message}`); cleanup(); }
+      });
+
+      agentWs.on('message', async (data: RawData, isBinary: boolean) => {
+        // Binary frames = TTS audio (mulaw 8k) → forward to Twilio in small frames.
+        if (isBinary) {
+          const buf = data as Buffer;
+          for (let i = 0; i < buf.length; i += 640) {
+            sendToTwilio({ event: 'media', streamSid, media: { payload: buf.subarray(i, i + 640).toString('base64') } });
+          }
+          return;
+        }
+        let msg: any;
+        try { msg = JSON.parse(data.toString()); } catch { return; }
+        switch (msg.type) {
+          case 'UserStartedSpeaking':
+            // Barge-in: stop whatever the bot is playing.
+            sendToTwilio({ event: 'clear', streamSid });
+            break;
+          case 'ConversationText':
+            if (msg.content) this.twilio.appendCallTranscript(callSid, msg.role === 'user' ? 'user' : 'bot', msg.content);
+            break;
+          case 'FunctionCallRequest': {
+            const fns = Array.isArray(msg.functions) ? msg.functions : [];
+            for (const fn of fns) {
+              if (fn.client_side === false) continue; // server-side function: nothing to do
+              let args: any = {};
+              try { args = fn.arguments ? JSON.parse(fn.arguments) : {}; } catch { /* ignore */ }
+              this.logger.log(`[voice-agent] fn ${fn.name}(${(fn.arguments || '{}').slice(0, 120)})`);
+              let content = '';
+              try { content = await this.twilio.runVoiceAgentFunction(bot, callSid, fn.name, args); }
+              catch (e: any) { content = `Error: ${e.message}`; }
+              if (agentWs?.readyState === WebSocket.OPEN) {
+                agentWs.send(JSON.stringify({ type: 'FunctionCallResponse', id: fn.id, name: fn.name, content: content || 'OK' }));
+              }
+            }
+            break;
+          }
+          case 'Error':
+          case 'Warning':
+            this.logger.warn(`[voice-agent] ${msg.type}: ${JSON.stringify(msg).slice(0, 200)}`);
+            break;
+          // Welcome / SettingsApplied / AgentStartedSpeaking / AgentAudioDone / AgentThinking → ignore
+        }
+      });
+
+      agentWs.on('error', (e) => this.logger.warn(`[voice-agent] ws error: ${(e as any).message}`));
+      agentWs.on('close', (code: number) => { this.logger.log(`[voice-agent] agent closed code=${code} call=${callSid}`); agentWs = null; });
     };
 
     twilioWs.on('message', async (raw: RawData) => {
@@ -230,40 +138,22 @@ export class CallBotMediaStreamService {
           streamSid = data.start?.streamSid ?? data.streamSid ?? '';
           callSid   = data.start?.callSid ?? '';
           const botId = data.start?.customParameters?.botId ?? '';
-          this.logger.log(`[media-stream] start call=${callSid} bot=${botId}`);
-          try {
-            // getBot resolves the voice catalog (voice_catalog_id) into tts_provider/tts_voice_id,
-            // so streaming uses the same ElevenLabs voice as the standard bot.
-            bot = await this.twilio.getBot(botId);
-            const ai = await this.platformSettings.getAI();
-            aiCfg = { apiKey: ai.apiKey, provider: ai.provider, model: ai.model };
-            this.logger.log(`[media-stream] bot loaded: ttsProvider=${bot?.tts_provider} voiceId=${bot?.tts_voice_id || '(default)'}`);
-          } catch (e: any) { this.logger.error(`[media-stream] bot load failed: ${e.message}`); }
-          await openDeepgram();
-          const welcome = bot?.welcome_message || ((bot?.language || 'es').startsWith('es')
-            ? 'Hola, ¿en qué puedo ayudarte?' : 'Hello, how can I help you?');
-          await speak(welcome);
+          this.logger.log(`[voice-agent] start call=${callSid} bot=${botId} streamSid=${streamSid}`);
+          try { bot = await this.twilio.getBot(botId); }
+          catch (e: any) { this.logger.error(`[voice-agent] bot load failed: ${e.message}`); }
+          if (!bot) { cleanup(); return; }
+          await openAgent();
           break;
         }
         case 'media': {
           const payload = data.media?.payload;
-          if (payload && dgWs?.readyState === WebSocket.OPEN) dgWs.send(Buffer.from(payload, 'base64'));
+          if (payload && agentWs?.readyState === WebSocket.OPEN) agentWs.send(Buffer.from(payload, 'base64'));
           break;
         }
-        case 'mark': {
-          // Twilio finished playing our audio up to this mark → the bot is done
-          // talking (faster than the playback timer when Twilio does echo it).
-          if (data.mark?.name === 'end-of-turn') {
-            speaking = false;
-            if (speakTimer) { clearTimeout(speakTimer); speakTimer = null; }
-          }
-          break;
-        }
-        case 'stop': {
-          this.logger.log(`[media-stream] stop call=${callSid}`);
+        case 'stop':
+          this.logger.log(`[voice-agent] stop call=${callSid}`);
           cleanup();
           break;
-        }
       }
     });
 

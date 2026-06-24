@@ -916,6 +916,82 @@ ${addTagInstruction}
     return '';
   }
 
+  // ── Deepgram Voice Agent (real-time) ──────────────────────────────────────────
+
+  /** Build the Deepgram Voice Agent "Settings" message for a bot/call. */
+  async buildVoiceAgentSettings(bot: any, callSid: string): Promise<any> {
+    const isEs = bot.language?.startsWith('es') ?? true;
+    const meta = this.callMeta.get(callSid);
+    const tenantId = meta?.tenantId ?? bot.tenant_id;
+
+    const [crmCtx, dentallyConnected] = await Promise.all([
+      this.getCrmCtx(tenantId),
+      this.integrations.isConnected(tenantId, 'dentally').catch(() => false),
+    ]);
+    const tools = buildTools(
+      crmCtx.stages.map((s: any) => (s.pipeline_name ? `${s.name} (${s.pipeline_name})` : s.name)),
+      crmCtx.tags.map((t: any) => t.name),
+      dentallyConnected,
+    );
+    const functions = tools.map((t) => ({
+      name: t.name, description: t.description, parameters: t.parameters, client_side: true,
+    }));
+
+    const nowDt = new Date();
+    const dateRule = `FECHA Y HORA ACTUAL: ${nowDt.toISOString().slice(0, 16).replace('T', ' ')} UTC (${nowDt.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}). Usa SIEMPRE esta fecha para "hoy"/"mañana". Nunca uses fechas de años anteriores; las citas son a futuro.`;
+    const langRule = isEs
+      ? 'IDIOMA: Responde SIEMPRE en español.'
+      : 'LANGUAGE: Always reply in English.';
+    const voiceRule = isEs
+      ? 'ESTILO DE VOZ: Es una llamada. Responde en 1-2 frases cortas y deja hablar al cliente; no des monólogos.'
+      : 'VOICE STYLE: This is a phone call. Reply in 1-2 short sentences and let the caller speak; no monologues.';
+    const apptRule = !dentallyConnected ? '' : (isEs
+      ? 'CITAS: Para disponibilidad lo único obligatorio es la FECHA; si no la dieron, pregúntala (nunca asumas hoy). El profesional es OPCIONAL. En cuanto elijan horario, agenda con dentally_book_appointment. No pidas datos personales por teléfono salvo que la herramienta los exija.'
+      : 'APPOINTMENTS: The only required field for availability is the DATE; if not given, ask for it (never assume today). The practitioner is OPTIONAL. As soon as they pick a time, book with dentally_book_appointment. Do not ask for personal data over the phone unless the tool requires it.');
+    const prompt = [bot.system_prompt ?? '', dateRule, langRule, voiceRule, apptRule].filter(Boolean).join('\n\n');
+
+    const speakModel = isEs ? 'aura-2-celeste-es' : 'aura-2-thalia-en';
+    const greeting = bot.welcome_message || (isEs ? 'Hola, gracias por llamar. ¿En qué puedo ayudarte?' : 'Hello, thanks for calling. How can I help you?');
+
+    return {
+      type: 'Settings',
+      audio: {
+        input:  { encoding: 'mulaw', sample_rate: 8000 },
+        output: { encoding: 'mulaw', sample_rate: 8000, container: 'none' },
+      },
+      agent: {
+        language: isEs ? 'es' : 'en',
+        listen: { provider: { type: 'deepgram', model: 'nova-3' } },
+        think:  { provider: { type: 'open_ai', model: 'gpt-4o-mini', temperature: 0.7 }, prompt, ...(functions.length ? { functions } : {}) },
+        speak:  { provider: { type: 'deepgram', model: speakModel } },
+        greeting,
+      },
+    };
+  }
+
+  /** Execute a tool requested by the Voice Agent and return the string result. */
+  async runVoiceAgentFunction(bot: any, callSid: string, name: string, args: any): Promise<string> {
+    const meta = this.callMeta.get(callSid);
+    const tenantId = meta?.tenantId ?? bot.tenant_id;
+    const contactId = meta?.contactId ?? null;
+    if (name.startsWith('dentally_')) {
+      const lang: 'es' | 'en' = (bot.language?.startsWith('es') ?? true) ? 'es' : 'en';
+      return this.runDentallyTool(tenantId, contactId, name, args, lang);
+    }
+    try {
+      const r: any = await this.botActions.executeTool(tenantId, contactId, name, args);
+      return typeof r === 'string' ? r : (r?.message ?? 'OK');
+    } catch (e: any) {
+      return `No pude completar la acción: ${e?.message || 'error'}.`;
+    }
+  }
+
+  /** Append a line to the call transcript (so the call_log/inbox is saved on hangup). */
+  appendCallTranscript(callSid: string, role: 'user' | 'bot', text: string) {
+    const tag = role === 'user' ? 'Usuario' : 'Bot';
+    this.callTranscripts.set(callSid, (this.callTranscripts.get(callSid) ?? '') + `[${tag}]: ${text}\n`);
+  }
+
   async generateVoiceReply(
     bot: any,
     sessionId: string,
