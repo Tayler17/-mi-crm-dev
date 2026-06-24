@@ -11,6 +11,72 @@ const TTS_PROVIDERS = [
   { value: 'elevenlabs',   label: '🎙️ ElevenLabs (hiperrealista)' },
 ];
 
+// Full Deepgram Aura-2 catalog (es + en). Source: developers.deepgram.com/docs/tts-models
+const AURA2_VOICES: { es: { id: string; label: string }[]; en: { id: string; label: string }[] } = {
+  es: [
+    { id: 'aura-2-celeste-es',  label: 'Celeste — es-CO (femenina)' },
+    { id: 'aura-2-diana-es',    label: 'Diana — es-ES (femenina)' },
+    { id: 'aura-2-carina-es',   label: 'Carina — es-ES (femenina)' },
+    { id: 'aura-2-agustina-es', label: 'Agustina — es-ES (femenina)' },
+    { id: 'aura-2-silvia-es',   label: 'Silvia — es-ES (femenina)' },
+    { id: 'aura-2-gloria-es',   label: 'Gloria — es-CO (femenina)' },
+    { id: 'aura-2-estrella-es', label: 'Estrella — es-MX (femenina)' },
+    { id: 'aura-2-olivia-es',   label: 'Olivia — es-MX (femenina)' },
+    { id: 'aura-2-antonia-es',  label: 'Antonia — es-AR (femenina)' },
+    { id: 'aura-2-selena-es',   label: 'Selena — es-419 (femenina)' },
+    { id: 'aura-2-javier-es',   label: 'Javier — es-MX (masculino)' },
+    { id: 'aura-2-alvaro-es',   label: 'Álvaro — es-ES (masculino)' },
+    { id: 'aura-2-nestor-es',   label: 'Néstor — es-ES (masculino)' },
+    { id: 'aura-2-luciano-es',  label: 'Luciano — es-MX (masculino)' },
+    { id: 'aura-2-sirio-es',    label: 'Sirio — es-MX (masculino)' },
+    { id: 'aura-2-valerio-es',  label: 'Valerio — es-MX (masculino)' },
+    { id: 'aura-2-aquila-es',   label: 'Aquila — es-419 (masculino)' },
+  ],
+  en: [
+    { id: 'aura-2-thalia-en',    label: 'Thalia — en-US (female)' },
+    { id: 'aura-2-andromeda-en', label: 'Andromeda — en-US (female)' },
+    { id: 'aura-2-asteria-en',   label: 'Asteria — en-US (female)' },
+    { id: 'aura-2-athena-en',    label: 'Athena — en-US (female)' },
+    { id: 'aura-2-aurora-en',    label: 'Aurora — en-US (female)' },
+    { id: 'aura-2-luna-en',      label: 'Luna — en-US (female)' },
+    { id: 'aura-2-selene-en',    label: 'Selene — en-US (female)' },
+    { id: 'aura-2-hera-en',      label: 'Hera — en-US (female)' },
+    { id: 'aura-2-iris-en',      label: 'Iris — en-US (female)' },
+    { id: 'aura-2-helena-en',    label: 'Helena — en-US (female)' },
+    { id: 'aura-2-phoebe-en',    label: 'Phoebe — en-US (female)' },
+    { id: 'aura-2-cora-en',      label: 'Cora — en-US (female)' },
+    { id: 'aura-2-cordelia-en',  label: 'Cordelia — en-US (female)' },
+    { id: 'aura-2-delia-en',     label: 'Delia — en-US (female)' },
+    { id: 'aura-2-electra-en',   label: 'Electra — en-US (female)' },
+    { id: 'aura-2-harmonia-en',  label: 'Harmonia — en-US (female)' },
+    { id: 'aura-2-callista-en',  label: 'Callista — en-US (female)' },
+    { id: 'aura-2-janus-en',     label: 'Janus — en-US (female)' },
+    { id: 'aura-2-juno-en',      label: 'Juno — en-US (female)' },
+    { id: 'aura-2-minerva-en',   label: 'Minerva — en-US (female)' },
+    { id: 'aura-2-ophelia-en',   label: 'Ophelia — en-US (female)' },
+    { id: 'aura-2-vesta-en',     label: 'Vesta — en-US (female)' },
+    { id: 'aura-2-pandora-en',   label: 'Pandora — en-GB (female)' },
+    { id: 'aura-2-theia-en',     label: 'Theia — en-AU (female)' },
+    { id: 'aura-2-amalthea-en',  label: 'Amalthea — en-PH (female)' },
+    { id: 'aura-2-apollo-en',    label: 'Apollo — en-US (male)' },
+    { id: 'aura-2-arcas-en',     label: 'Arcas — en-US (male)' },
+    { id: 'aura-2-aries-en',     label: 'Aries — en-US (male)' },
+    { id: 'aura-2-atlas-en',     label: 'Atlas — en-US (male)' },
+    { id: 'aura-2-hermes-en',    label: 'Hermes — en-US (male)' },
+    { id: 'aura-2-jupiter-en',   label: 'Jupiter — en-US (male)' },
+    { id: 'aura-2-mars-en',      label: 'Mars — en-US (male)' },
+    { id: 'aura-2-neptune-en',   label: 'Neptune — en-US (male)' },
+    { id: 'aura-2-odysseus-en',  label: 'Odysseus — en-US (male)' },
+    { id: 'aura-2-orion-en',     label: 'Orion — en-US (male)' },
+    { id: 'aura-2-orpheus-en',   label: 'Orpheus — en-US (male)' },
+    { id: 'aura-2-pluto-en',     label: 'Pluto — en-US (male)' },
+    { id: 'aura-2-saturn-en',    label: 'Saturn — en-US (male)' },
+    { id: 'aura-2-zeus-en',      label: 'Zeus — en-US (male)' },
+    { id: 'aura-2-draco-en',     label: 'Draco — en-GB (male)' },
+    { id: 'aura-2-hyperion-en',  label: 'Hyperion — en-AU (male)' },
+  ],
+};
+
 const ELEVENLABS_VOICES = [
   { id: 'EXAVITQu4vr4xnSDxMaL', label: 'Sarah — EN, neutral' },
   { id: 'TX3LPaxmHKxFdv7VOQHJ', label: 'Liam — EN, masculina' },
@@ -149,15 +215,10 @@ function VoiceModal({ voice, onSave, onClose }: {
               <select className="form-input" value={form.ttsVoiceId} onChange={(e) => upd('ttsVoiceId', e.target.value)}>
                 <option value="">— Elige una voz Aura-2 —</option>
                 <optgroup label="Español">
-                  <option value="aura-2-celeste-es">Celeste — español (femenina)</option>
-                  <option value="aura-2-diana-es">Diana — español (femenina)</option>
-                  <option value="aura-2-javier-es">Javier — español (masculino)</option>
-                  <option value="aura-2-alvaro-es">Álvaro — español (masculino)</option>
+                  {AURA2_VOICES.es.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
                 </optgroup>
                 <optgroup label="English">
-                  <option value="aura-2-thalia-en">Thalia — English (female)</option>
-                  <option value="aura-2-andromeda-en">Andromeda — English (female)</option>
-                  <option value="aura-2-apollo-en">Apollo — English (male)</option>
+                  {AURA2_VOICES.en.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
                 </optgroup>
               </select>
               <div style={{ marginTop: 6 }}>
