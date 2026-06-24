@@ -935,7 +935,10 @@ ${addTagInstruction}
       const apptRule = !dentallyOn ? '' : (isEs
         ? '\n\nPROTOCOLO DE CITAS: Para consultar disponibilidad lo ÚNICO obligatorio es la FECHA. Si el paciente quiere cita pero no dijo qué día, pregúntale qué día desea; NUNCA asumas la fecha de hoy. El profesional es OPCIONAL: solo usa un profesional si el paciente lo menciona; si no menciona ninguno, NO preguntes por el profesional y consulta la disponibilidad con todos (deja practitioner_name vacío). Llama a dentally_check_availability en cuanto tengas la fecha. Lee únicamente los horarios reales que devuelva la herramienta; nunca inventes horarios ni digas que no hay disponibilidad sin haber llamado a la herramienta con la fecha que pidió el paciente.'
         : '\n\nAPPOINTMENT PROTOCOL: To check availability the ONLY required field is the DATE. If the patient wants an appointment but did not give a day, ask which day they want; NEVER assume today\'s date. The practitioner is OPTIONAL: only use a practitioner if the patient mentions one; if they don\'t, do NOT ask about the practitioner and check availability across all of them (leave practitioner_name empty). Call dentally_check_availability as soon as you have the date. Read only the real times the tool returns; never invent times or say there is no availability without having called the tool with the date the patient requested.');
-      this.callHistories.set(sessionId, [{ role: 'system', content: (bot.system_prompt ?? '') + dateRule + apptRule + hangupRule }]);
+      // Deepgram (streaming) transcribes multilingual accurately, so we can safely
+      // mirror the caller's language in the reply.
+      const langRule = '\n\nIDIOMA: Responde en el MISMO idioma en que te habló el cliente en su último mensaje (español o inglés, según corresponda). Si el cliente cambia de idioma, cambia con él. NUNCA mezcles dos idiomas en una misma frase.';
+      this.callHistories.set(sessionId, [{ role: 'system', content: (bot.system_prompt ?? '') + dateRule + apptRule + langRule + hangupRule }]);
       // Keep the contact resolved by handleIncomingCall; only default if missing.
       if (!this.callMeta.has(sessionId)) {
         this.callMeta.set(sessionId, { contactId: null, tenantId: bot.tenant_id, botId: bot.id });
@@ -994,10 +997,10 @@ ${addTagInstruction}
     );
 
     const isEs = bot.language?.startsWith('es') ?? true;
-    // On voice, Twilio's speech recognition is locked to ONE language (the bot's
-    // Call language). Detecting language from a (possibly garbled) transcript made
-    // the bot flip languages mid-call, so we stick to the configured language.
-    const langKey: 'es' | 'en' = isEs ? 'es' : 'en';
+    // With Deepgram multilingual STT the transcript is reliable, so detect the
+    // caller's language from their message (falling back to the configured one)
+    // — this keeps Dentally/tool messages in the same language as the caller.
+    const langKey: 'es' | 'en' = this.detectLang(userMessage, isEs ? 'es' : 'en');
 
     /** Fire CRM tools in background without blocking voice response */
     const fireTools = (calls: Array<{ name: string; args: any }>) => {
