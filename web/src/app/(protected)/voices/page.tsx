@@ -22,12 +22,12 @@ const ELEVENLABS_VOICES = [
 
 type VoiceForm = {
   name: string; description: string; language: string; gender: string;
-  ttsProvider: string; ttsVoiceId: string; isActive: boolean; sortOrder: number;
+  ttsProvider: string; ttsVoiceId: string; isActive: boolean; isDefault: boolean; sortOrder: number;
 };
 
 const EMPTY_FORM: VoiceForm = {
   name: '', description: '', language: 'es-MX', gender: 'neutral',
-  ttsProvider: 'twilio_basic', ttsVoiceId: '', isActive: true, sortOrder: 0,
+  ttsProvider: 'twilio_basic', ttsVoiceId: '', isActive: true, isDefault: false, sortOrder: 0,
 };
 
 // ── Voice Modal ───────────────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ function VoiceModal({ voice, onSave, onClose }: {
 }) {
   const [form, setForm] = useState<VoiceForm>(
     voice
-      ? { name: voice.name, description: voice.description ?? '', language: voice.language, gender: voice.gender, ttsProvider: voice.ttsProvider, ttsVoiceId: voice.ttsVoiceId ?? '', isActive: voice.isActive, sortOrder: voice.sortOrder }
+      ? { name: voice.name, description: voice.description ?? '', language: voice.language, gender: voice.gender, ttsProvider: voice.ttsProvider, ttsVoiceId: voice.ttsVoiceId ?? '', isActive: voice.isActive, isDefault: !!voice.isDefault, sortOrder: voice.sortOrder }
       : { ...EMPTY_FORM },
   );
   const [saving, setSaving] = useState(false);
@@ -155,6 +155,16 @@ function VoiceModal({ voice, onSave, onClose }: {
                 <option value="true">✅ Activa</option>
                 <option value="false">⏸ Inactiva</option>
               </select>
+            </div>
+          </div>
+
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <input type="checkbox" checked={form.isDefault} onChange={(e) => upd('isDefault', e.target.checked)} />
+              ⭐ Voz predeterminada para su idioma
+            </label>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+              Los Call Bots sin voz elegida usarán esta voz (una predeterminada por idioma: es / en).
             </div>
           </div>
 
@@ -281,7 +291,10 @@ export default function VoicesPage() {
                 <tr key={v.id} style={{ borderBottom: '1px solid var(--border)', opacity: v.isActive ? 1 : 0.55 }}>
                   <td style={{ padding: '10px 14px', color: 'var(--text-muted)', fontSize: 12 }}>{v.sortOrder}</td>
                   <td style={{ padding: '10px 14px' }}>
-                    <div style={{ fontWeight: 600 }}>{v.name}</div>
+                    <div style={{ fontWeight: 600 }}>
+                      {v.name}
+                      {v.isDefault && <span title="Predeterminada para su idioma" style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, color: '#d97706' }}>⭐ Predet.</span>}
+                    </div>
                     {v.description && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{v.description}</div>}
                   </td>
                   <td style={{ padding: '10px 14px', color: 'var(--text-muted)' }}>{v.language}</td>
