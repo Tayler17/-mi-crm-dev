@@ -726,6 +726,8 @@ export const getCallLogs = (botId?: string) =>
 export const getCallBotStats = () => apiGet<CallBotStats>('/call-bots/stats');
 export const initiateCall = (botId: string, toNumber: string) =>
   apiPost<{ callSid: string; status: string }>(`/call-bots/${botId}/call`, { toNumber });
+export const hangupCall = (botId: string, callSid: string) =>
+  apiPost<{ ok: boolean }>(`/call-bots/${botId}/hangup`, { callSid });
 
 // ── Phone numbers (on-demand Twilio provisioning) ──────────────────────────────
 
@@ -2035,6 +2037,7 @@ export interface Voice {
   ttsProvider: string;
   ttsVoiceId?: string;
   isActive: boolean;
+  isDefault?: boolean;
   sortOrder: number;
 }
 

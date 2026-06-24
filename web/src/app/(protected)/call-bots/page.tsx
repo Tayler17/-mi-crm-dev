@@ -13,6 +13,7 @@ import {
   getQueues,
   getInboxes,
   initiateCall,
+  hangupCall,
   getCallBotKnowledgeSources,
   addCallBotKnowledgeUrl,
   reindexCallBotKnowledgeSource,
@@ -311,9 +312,12 @@ function WebhookUrlBox({ botId }: { botId: string }) {
 function DialModal({ bot, onClose }: { bot: CallBot; onClose: () => void }) {
   const { lang } = useLangCtx();
   const i = APP[lang];
+  const t = (en: string, es: string) => (lang === 'en' ? en : es);
   const [toNumber, setToNumber] = useState('');
   const [calling, setCalling] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [activeCallSid, setActiveCallSid] = useState<string | null>(null);
+  const [hangingUp, setHangingUp] = useState(false);
 
   async function handleCall() {
     const num = toNumber.trim();
@@ -322,11 +326,26 @@ function DialModal({ bot, onClose }: { bot: CallBot; onClose: () => void }) {
     setResult(null);
     try {
       const res = await initiateCall(bot.id, num);
+      setActiveCallSid(res.callSid);
       setResult({ ok: true, message: `${i.callBotCallStarted} — SID: ${res.callSid}` });
     } catch (e: any) {
       setResult({ ok: false, message: e.message || i.error });
     } finally {
       setCalling(false);
+    }
+  }
+
+  async function handleHangup() {
+    if (!activeCallSid) return;
+    setHangingUp(true);
+    try {
+      await hangupCall(bot.id, activeCallSid);
+      setActiveCallSid(null);
+      setResult({ ok: true, message: t('Call ended.', 'Llamada colgada.') });
+    } catch (e: any) {
+      setResult({ ok: false, message: e.message || i.error });
+    } finally {
+      setHangingUp(false);
     }
   }
 
@@ -372,9 +391,14 @@ function DialModal({ bot, onClose }: { bot: CallBot; onClose: () => void }) {
 
         <div className="modal-footer" style={{ marginTop: 20 }}>
           <button className="btn btn-secondary" onClick={onClose}>
-            {result?.ok ? i.close : i.cancel}
+            {activeCallSid ? i.close : (result?.ok ? i.close : i.cancel)}
           </button>
-          {!result?.ok && (
+          {activeCallSid ? (
+            <button className="btn btn-primary" disabled={hangingUp} onClick={handleHangup}
+              style={{ background: '#ef4444', borderColor: '#ef4444' }}>
+              {hangingUp ? `⏳ ${t('Hanging up…', 'Colgando…')}` : `📵 ${t('Hang up', 'Colgar')}`}
+            </button>
+          ) : (
             <button className="btn btn-primary" disabled={calling || !toNumber.trim()} onClick={handleCall}
               style={{ background: '#10b981', borderColor: '#10b981' }}>
               {calling ? `⏳ ${i.callBotCalling}` : i.callBotDialBtn}
@@ -1346,7 +1370,7 @@ export default function CallBotsPage() {
   // Voice catalog management state (owner only)
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
   const [editingVoice, setEditingVoice] = useState<Voice | null>(null);
-  const [voiceForm, setVoiceForm] = useState({ name: '', description: '', language: 'es-MX', gender: 'neutral', ttsProvider: 'twilio_basic', ttsVoiceId: '', isActive: true, sortOrder: 0 });
+  const [voiceForm, setVoiceForm] = useState({ name: '', description: '', language: 'es-MX', gender: 'neutral', ttsProvider: 'twilio_basic', ttsVoiceId: '', isActive: true, isDefault: false, sortOrder: 0 });
   const [voiceSaving, setVoiceSaving] = useState(false);
   const [platformPhoneNumbers, setPlatformPhoneNumbers] = useState<string[]>([]);
 
@@ -1425,8 +1449,8 @@ export default function CallBotsPage() {
   function openVoiceModal(voice: Voice | null) {
     setEditingVoice(voice);
     setVoiceForm(voice
-      ? { name: voice.name, description: voice.description ?? '', language: voice.language, gender: voice.gender, ttsProvider: voice.ttsProvider, ttsVoiceId: voice.ttsVoiceId ?? '', isActive: voice.isActive, sortOrder: voice.sortOrder }
-      : { name: '', description: '', language: 'es-MX', gender: 'neutral', ttsProvider: 'twilio_basic', ttsVoiceId: '', isActive: true, sortOrder: 0 },
+      ? { name: voice.name, description: voice.description ?? '', language: voice.language, gender: voice.gender, ttsProvider: voice.ttsProvider, ttsVoiceId: voice.ttsVoiceId ?? '', isActive: voice.isActive, isDefault: !!voice.isDefault, sortOrder: voice.sortOrder }
+      : { name: '', description: '', language: 'es-MX', gender: 'neutral', ttsProvider: 'twilio_basic', ttsVoiceId: '', isActive: true, isDefault: false, sortOrder: 0 },
     );
     setVoiceModalOpen(true);
   }
@@ -1654,7 +1678,10 @@ export default function CallBotsPage() {
                   <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>{t('No voices. Add one so bots can use it.', 'No hay voces. Añade una para que los bots puedan usarla.')}</td></tr>
                 ) : voices.map((v) => (
                   <tr key={v.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '8px 12px', fontWeight: 500 }}>{v.name}</td>
+                    <td style={{ padding: '8px 12px', fontWeight: 500 }}>
+                      {v.name}
+                      {v.isDefault && <span title={t('Default for its language', 'Predeterminada para su idioma')} style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: '#d97706' }}>⭐ {t('Default', 'Predet.')}</span>}
+                    </td>
                     <td style={{ padding: '8px 12px' }}>{v.language}</td>
                     <td style={{ padding: '8px 12px' }}>{v.gender}</td>
                     <td style={{ padding: '8px 12px' }}>
@@ -1760,6 +1787,15 @@ export default function CallBotsPage() {
                     <option value="true">{t('Active', 'Activa')}</option>
                     <option value="false">{t('Inactive', 'Inactiva')}</option>
                   </select>
+                </div>
+                <div className="form-group" style={{ margin: 0, gridColumn: '1/-1' }}>
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={voiceForm.isDefault} onChange={(e) => setVoiceForm((p) => ({ ...p, isDefault: e.target.checked }))} />
+                    ⭐ {t('Default voice for its language', 'Voz predeterminada para su idioma')}
+                  </label>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {t('Bots without a selected voice will use this one (one default per language).', 'Los bots sin voz elegida usarán esta (una predeterminada por idioma).')}
+                  </div>
                 </div>
                 <div className="form-group" style={{ margin: 0, gridColumn: '1/-1' }}>
                   <label className="form-label">{t('Description (internal)', 'Descripción (interna)')}</label>

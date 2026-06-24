@@ -165,6 +165,26 @@ export class CallBotsService implements OnModuleInit {
     throw new BadRequestException(`Proveedor "${bot.provider}" no soporta llamadas salientes desde este sistema aún.`);
   }
 
+  /** Hang up an in-progress call (e.g. an outbound call placed from the panel). */
+  async hangupOutboundCall(botId: string, callSid: string, tenantId: string): Promise<{ ok: boolean }> {
+    await this.findOne(botId, tenantId); // 404 if the bot isn't the tenant's
+    if (!callSid) throw new BadRequestException('callSid requerido');
+    const { accountSid, authToken } = await this.platformSettings.getVoice();
+    if (!accountSid || !authToken) {
+      throw new BadRequestException('Faltan credenciales de voz. Configúralas en Ajustes → Plataforma.');
+    }
+    await axios.post(
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${callSid}.json`,
+      new URLSearchParams({ Status: 'completed' }).toString(),
+      {
+        auth:    { username: accountSid, password: authToken },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 10000,
+      },
+    );
+    return { ok: true };
+  }
+
   async getStats(tenantId: string) {
     const bots = await this.botRepo.find({ where: { tenantId } });
     const totalBots = bots.length;

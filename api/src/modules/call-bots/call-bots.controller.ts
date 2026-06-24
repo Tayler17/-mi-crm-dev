@@ -118,5 +118,14 @@ export class CallBotsController {
       ?? `${req.headers['x-forwarded-proto'] ?? req.protocol ?? 'https'}://${req.headers['x-forwarded-host'] ?? req.headers['host'] ?? req.get('host')}`;
     return this.svc.initiateOutboundCall(id, toNumber, tenantId, baseUrl);
   }
+
+  @Post(':id/hangup')
+  hangupCall(
+    @Param('id') id: string,
+    @Body('callSid') callSid: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.svc.hangupOutboundCall(id, callSid, tenantId);
+  }
 }
 // trigger
