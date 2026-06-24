@@ -40,6 +40,7 @@ export interface SeedArticle {
 // ── NEW categories (only ones that did not already exist) ──────────────────────
 
 export const HELP_CATEGORIES: SeedCategory[] = [
+  { seedKey: 'call-bots',     name: 'Bots de llamada',       icon: '📞', position: 40, isGlobal: true },
   { seedKey: 'internal-chat', name: 'Chat interno',           icon: '💬', position: 50, isGlobal: true },
   { seedKey: 'owner-admin',   name: 'Administración (Owner)', icon: '🔧', position: 99, isGlobal: false },
 ];
@@ -47,6 +48,65 @@ export const HELP_CATEGORIES: SeedCategory[] = [
 // ── NEW articles (new features only) ──────────────────────────────────────────
 
 export const HELP_ARTICLES: SeedArticle[] = [
+  // ───────── Tenant-facing: configuring call bots ─────────
+  {
+    seedKey: 'callbot-setup',
+    categorySeedKey: 'call-bots',
+    isGlobal: true,
+    position: 1,
+    lang: 'es',
+    title: 'Cómo configurar tu bot de llamada',
+    body: `# Cómo configurar tu bot de llamada
+
+Tu bot de llamada atiende el teléfono con IA: entiende al cliente, responde con voz natural, registra datos y puede transferir la llamada.
+
+## 1. Voz
+En el bot → pestaña **Voz** → **Voz del sistema**: elige una voz del catálogo. Para llamadas en tiempo real usa una voz **Deepgram Aura-2** (las de Twilio/ElevenLabs no suenan en llamadas en vivo). Elige una voz acorde al idioma del bot.
+
+## 2. Idioma
+Configura el **idioma** del bot. El bot **entiende a quien llame en cualquier idioma** y responde en el suyo; si el cliente le habla en otro idioma, normalmente se adapta.
+
+## 3. Transferir a otro departamento/bot
+Si tienes varios bots (p. ej. uno en español y otro en inglés), mételos en una **Cola** (menú **Colas**). Así un bot puede pasar la llamada al bot correcto cuando el cliente necesita otra área u otro idioma. El bot elige el destino por el idioma del que llama.
+
+## 4. Transferir a un humano
+En la configuración del bot pon el **número de transferencia**. Cuando el cliente pida hablar con una persona real, el bot desviará la llamada a ese número.
+
+## 5. Conocimiento
+En la pestaña **Conocimiento** añade URLs o PDFs de tu negocio: el bot usará esa información para responder.
+
+## 6. Probar
+Pulsa **Llamar** para una llamada de prueba; puedes **Colgar** desde el panel. El bot cuelga solo cuando la conversación termina.`,
+  },
+  {
+    seedKey: 'callbot-setup-en',
+    categorySeedKey: 'call-bots',
+    isGlobal: true,
+    position: 1,
+    lang: 'en',
+    title: 'How to set up your call bot',
+    body: `# How to set up your call bot
+
+Your call bot answers the phone with AI: it understands the caller, replies with a natural voice, captures data and can transfer the call.
+
+## 1. Voice
+On the bot → **Voice** tab → **System voice**: pick a voice from the catalog. For real-time calls use a **Deepgram Aura-2** voice (Twilio/ElevenLabs voices don't play on live calls). Choose a voice matching the bot's language.
+
+## 2. Language
+Set the bot's **language**. The bot **understands callers in any language** and replies in its own; if the caller speaks another language, it usually adapts.
+
+## 3. Transfer to another department/bot
+If you have several bots (e.g. one in Spanish and one in English), put them in a **Queue** (**Queues** menu). A bot can then pass the call to the right bot when the caller needs another area or language. The bot picks the destination by the caller's language.
+
+## 4. Transfer to a human
+In the bot's settings set the **transfer number**. When the caller asks to speak to a real person, the bot forwards the call to that number.
+
+## 5. Knowledge
+On the **Knowledge** tab add URLs or PDFs about your business: the bot uses that info to answer.
+
+## 6. Testing
+Click **Call** for a test call; you can **Hang up** from the panel. The bot hangs up on its own when the conversation ends.`,
+  },
   // ───────── Into existing "Conversaciones" / Inbox category ─────────
   {
     seedKey: 'inbox-voice-media',
@@ -375,19 +435,28 @@ cd /opt/crm && git pull && docker compose up -d --build --renew-anon-volumes api
 
 > 🔒 **Solo el propietario (owner).** Los tenants no ven este artículo.
 
+## Motor de voz: Deepgram Voice Agent
+
+Los bots de llamada funcionan en **tiempo real** con el **Deepgram Voice Agent** (escucha + IA + voz en una sola conexión, baja latencia). En llamadas en vivo:
+
+- **Voz (TTS):** SOLO funcionan las voces **Deepgram Aura-2**. Las voces ElevenLabs/Twilio del catálogo **se ignoran** en tiempo real (suena una Aura por defecto). Aura es la de menor latencia.
+- **Escucha:** Deepgram **nova-3 multilingüe** → el bot **entiende cualquier idioma**; responde en su idioma (y con el modelo gpt-4o se adapta al del cliente).
+- **Audio:** Twilio Media Streams bidireccional, con corte por interrupción (*barge-in*).
+
+Requisitos: clave de **Deepgram** configurada y el bloque WebSocket de Nginx para \`/call-bots/twilio/media-stream\`.
+
 ## Catálogo global de voces
 
-En **Catálogo de Voces** defines las voces (ElevenLabs / Twilio) disponibles para que los tenants asignen a sus bots, sin que tengan que tocar credenciales.
+En **Catálogo de Voces** defines las voces disponibles para los tenants (sin que toquen credenciales). Para llamadas, añade voces **Deepgram Aura-2**. Marca una ⭐ como **predeterminada por idioma** (es/en): los bots sin voz elegida usan esa.
 
-## Modo en tiempo real (streaming)
+## Modelo de IA (LLM)
 
-Los bots de llamada pueden funcionar en **modo streaming** (baja latencia) usando:
+El "cerebro" de los bots se configura en **Ajustes → Plataforma → IA → Model** (afecta a call bots y chatbots). Recomendado: **gpt-4o** (gpt-4o-mini titubeaba al llamar funciones como transferir/colgar).
 
-- **Deepgram** para transcripción en vivo.
-- **ElevenLabs** para la voz.
-- **Twilio Media Streams** para el audio bidireccional, con corte por interrupción (*barge-in*).
+## Transferencias
 
-Requisitos: claves de Deepgram y ElevenLabs configuradas, y el bloque WebSocket de Nginx para \`/call-bots/twilio/media-stream\`. En modo streaming la voz de Twilio no está disponible; usa el catálogo de voces.
+- **A otro departamento/bot:** se enrutan por **colas** — un bot aparece como destino si está en una cola activa. El destino se elige por **idioma** del que llama.
+- **A un humano:** se marca el número en \`Número de transferencia\` del bot.
 
 ## Números de teléfono
 
@@ -404,19 +473,28 @@ Los números de Twilio se administran desde el owner y se asignan a los bots de 
 
 > 🔒 **Owner only.** Tenants do not see this article.
 
+## Voice engine: Deepgram Voice Agent
+
+Call bots run in **real time** on the **Deepgram Voice Agent** (listen + LLM + speech in one connection, low latency). On live calls:
+
+- **Voice (TTS):** ONLY **Deepgram Aura-2** voices work. ElevenLabs/Twilio catalog voices are **ignored** in real time (a default Aura is used). Aura has the lowest latency.
+- **Listening:** Deepgram **nova-3 multilingual** → the bot **understands any language**; it replies in its own language (and with the gpt-4o model it adapts to the caller's).
+- **Audio:** bidirectional Twilio Media Streams, with interruption cutoff (*barge-in*).
+
+Requirements: **Deepgram** key configured and the Nginx WebSocket block for \`/call-bots/twilio/media-stream\`.
+
 ## Global voice catalog
 
-In **Voice Catalog** you define the voices (ElevenLabs / Twilio) available for tenants to assign to their bots, without them having to touch credentials.
+In **Voice Catalog** you define the voices available to tenants (without them touching credentials). For calls, add **Deepgram Aura-2** voices. Mark one ⭐ as **default per language** (es/en): bots with no voice chosen use it.
 
-## Real-time mode (streaming)
+## AI model (LLM)
 
-Call bots can run in **streaming mode** (low latency) using:
+The bots' "brain" is set in **Settings → Platform → AI → Model** (affects call bots and chatbots). Recommended: **gpt-4o** (gpt-4o-mini hesitated when calling functions like transfer/hang-up).
 
-- **Deepgram** for live transcription.
-- **ElevenLabs** for the voice.
-- **Twilio Media Streams** for bidirectional audio, with interruption cutoff (*barge-in*).
+## Transfers
 
-Requirements: Deepgram and ElevenLabs keys configured, and the Nginx WebSocket block for \`/call-bots/twilio/media-stream\`. In streaming mode the Twilio voice isn't available; use the voice catalog.
+- **To another department/bot:** routed via **queues** — a bot appears as a destination if it's in an active queue. The destination is chosen by the caller's **language**.
+- **To a human:** set the number in the bot's \`Transfer number\`.
 
 ## Phone numbers
 
