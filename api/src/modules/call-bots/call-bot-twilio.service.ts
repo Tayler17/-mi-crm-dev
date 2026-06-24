@@ -1003,6 +1003,25 @@ ${addTagInstruction}
     this.callTranscripts.set(callSid, (this.callTranscripts.get(callSid) ?? '') + `[${tag}]: ${text}\n`);
   }
 
+  /** End an active Twilio call via REST (closing the media-stream WS alone doesn't
+   *  reliably hang up the PSTN leg). */
+  async hangupCall(callSid: string): Promise<void> {
+    try {
+      const { accountSid, authToken } = await this.platformSettings.getVoice();
+      if (!accountSid || !authToken || !callSid) return;
+      const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+      const body = 'Status=completed';
+      await httpPost(
+        `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${callSid}.json`,
+        body,
+        { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body).toString() },
+      );
+      this.logger.log(`[callbot] hung up call ${callSid} via REST`);
+    } catch (e: any) {
+      this.logger.warn(`[callbot] hangupCall failed: ${e?.message}`);
+    }
+  }
+
   async generateVoiceReply(
     bot: any,
     sessionId: string,

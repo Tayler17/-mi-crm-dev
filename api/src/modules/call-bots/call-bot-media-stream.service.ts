@@ -112,7 +112,7 @@ export class CallBotMediaStreamService {
                   agentWs.send(JSON.stringify({ type: 'FunctionCallResponse', id: fn.id, name: fn.name, content: 'ok' }));
                 }
                 this.logger.log(`[voice-agent] end_call → hanging up call=${callSid}`);
-                setTimeout(() => cleanup(), 4000);
+                setTimeout(() => { this.twilio.hangupCall(callSid).finally(() => cleanup()); }, 4000);
                 continue;
               }
               let args: any = {};
