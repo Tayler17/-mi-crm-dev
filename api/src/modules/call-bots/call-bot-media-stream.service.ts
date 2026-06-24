@@ -109,15 +109,27 @@ export class CallBotMediaStreamService {
             // Barge-in: stop whatever the bot is playing.
             sendToTwilio({ event: 'clear', streamSid });
             break;
-          case 'ConversationText':
-            this.logger.log(`[voice-agent] ${msg.role}: ${(msg.content || '').slice(0, 70)}`);
-            if (msg.content) this.twilio.appendCallTranscript(callSid, msg.role === 'user' ? 'user' : 'bot', msg.content);
-            // If the caller clearly says goodbye, arm a hangup for after the bot's
-            // farewell finishes (independent of whether the LLM calls end_call).
-            if (msg.role === 'user' && /\b(bye|good\s?bye|adi[oó]s|hasta luego|hasta pronto|eso es todo|that'?s all|nothing else|nada m[aá]s)\b/i.test(msg.content || '')) {
+          case 'ConversationText': {
+            const content = msg.content || '';
+            this.logger.log(`[voice-agent] ${msg.role}: ${content.slice(0, 70)}`);
+            if (content) this.twilio.appendCallTranscript(callSid, msg.role === 'user' ? 'user' : 'bot', content);
+            // The LLM almost never calls end_call on its own, so we close the call by
+            // watching the transcript and hanging up on the NEXT AgentAudioDone (so the
+            // farewell finishes playing). Two triggers:
+            //   • the CALLER clearly says goodbye, OR
+            //   • the BOT delivers a terminal sign-off ("hasta luego", "que tengas un
+            //     buen día", "nos vemos"…) — this used to be ignored, leaving the call
+            //     alive in silence until the caller happened to say a goodbye word.
+            const userGoodbye = msg.role === 'user' &&
+              /\b(bye|good\s?bye|adi[oó]s|hasta luego|hasta pronto|eso es todo|that'?s all|nothing else|nada m[aá]s)\b/i.test(content);
+            const botFarewell = msg.role !== 'user' &&
+              /(\badi[oó]s\b|hasta (luego|pronto|mañana)|nos vemos|(buen|buena|excelente|gran|lindo|linda|bonito|bonita|maravilloso|maravillosa) (d[ií]a|tarde|noche|jornada)|feliz (d[ií]a|tarde|noche)|\bgood\s?bye\b|take care|have a (great|good|nice|wonderful|lovely) (day|one|evening))/i.test(content);
+            if (userGoodbye || botFarewell) {
+              if (botFarewell) this.logger.log('[voice-agent] bot farewell detected → will hang up after it plays');
               pendingHangup = true;
             }
             break;
+          }
           case 'AgentAudioDone':
             if (pendingHangup && !closed) {
               this.logger.log(`[voice-agent] goodbye detected → hanging up call=${callSid}`);
