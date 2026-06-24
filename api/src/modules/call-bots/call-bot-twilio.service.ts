@@ -959,7 +959,10 @@ ${addTagInstruction}
     const apptRule = !dentallyConnected ? '' : (isEs
       ? 'CITAS: Para disponibilidad lo único obligatorio es la FECHA; si no la dieron, pregúntala (nunca asumas hoy). El profesional es OPCIONAL. En cuanto elijan horario, agenda con dentally_book_appointment. No pidas datos personales por teléfono salvo que la herramienta los exija.'
       : 'APPOINTMENTS: The only required field for availability is the DATE; if not given, ask for it (never assume today). The practitioner is OPTIONAL. As soon as they pick a time, book with dentally_book_appointment. Do not ask for personal data over the phone unless the tool requires it.');
-    const prompt = [bot.system_prompt ?? '', dateRule, langRule, voiceRule, apptRule].filter(Boolean).join('\n\n');
+    const hangupRule = isEs
+      ? 'FINALIZAR LLAMADA: Cuando el cliente se despida o la conversación haya terminado (ej. "gracias, adiós", "eso es todo", "nada más"), di UNA frase corta de despedida y a continuación LLAMA SIEMPRE a la función end_call para colgar. No te quedes en silencio esperando.'
+      : 'ENDING THE CALL: When the caller says goodbye or the conversation is over (e.g. "thanks, bye", "that\'s all", "nothing else"), say ONE short farewell and then ALWAYS call the end_call function to hang up. Do not stay silent waiting.';
+    const prompt = [bot.system_prompt ?? '', dateRule, langRule, voiceRule, apptRule, hangupRule].filter(Boolean).join('\n\n');
 
     // Use the Aura voice the tenant picked in the Voice Catalog (getBot resolves
     // voice_catalog_id → tts_provider/tts_voice_id); else a sensible default per language.
