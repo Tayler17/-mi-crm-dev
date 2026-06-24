@@ -1008,13 +1008,13 @@ ${addTagInstruction}
       : 'ENDING THE CALL: When the caller says goodbye or the conversation is over (e.g. "thanks, bye", "that\'s all", "nothing else"), say ONE short farewell and then ALWAYS call the end_call function to hang up. Do not stay silent waiting.';
     const deptRule = deptLabels.length
       ? (isEs
-          ? `TRANSFERIR A OTRO DEPARTAMENTO: Si el cliente necesita un área distinta, di una frase breve ("Te paso ahora con el departamento de X") y llama a la función transfer_to_department con el nombre exacto. Departamentos disponibles: ${deptLabels.join(', ')}.`
-          : `TRANSFER TO ANOTHER DEPARTMENT: If the caller needs a different area, say a short heads-up ("Let me put you through to X") and call transfer_to_department with the exact name. Available departments: ${deptLabels.join(', ')}.`)
+          ? `TRANSFERIR A OTRO DEPARTAMENTO: Si el cliente necesita un área distinta o ser atendido en otro idioma, di una frase MUY breve ("Te paso ahora, un momento") y llama a transfer_to_department con el nombre exacto, TODO EN EL MISMO turno. CRÍTICO: llama a la función inmediatamente; NO esperes a que el cliente responda ni le hagas más preguntas después de avisar. Departamentos disponibles: ${deptLabels.join(', ')}.`
+          : `TRANSFER TO ANOTHER DEPARTMENT: If the caller needs a different area or to be helped in another language, say a VERY short heads-up ("One moment, putting you through") and call transfer_to_department with the exact name, ALL IN THE SAME turn. CRITICAL: call the function immediately; do NOT wait for the caller to reply or ask anything else after the heads-up. Available departments: ${deptLabels.join(', ')}.`)
       : '';
     const humanRule = hasHumanTransfer
       ? (isEs
-          ? 'TRANSFERIR A UN HUMANO: Si el cliente pide hablar con una persona real (o el caso lo requiere), di una frase breve ("Te paso con un agente, un momento") y llama a la función transfer_to_human.'
-          : 'TRANSFER TO A HUMAN: If the caller asks to speak with a real person (or the case requires it), say a short heads-up ("Let me put you through to an agent, one moment") and call transfer_to_human.')
+          ? 'TRANSFERIR A UN HUMANO: Si el cliente pide hablar con una persona real, di una frase MUY breve ("Te paso con un agente, un momento") y llama a transfer_to_human EN EL MISMO turno. CRÍTICO: llama a la función inmediatamente; NO esperes a que el cliente responda.'
+          : 'TRANSFER TO A HUMAN: If the caller asks to speak with a real person, say a VERY short heads-up ("One moment, connecting you to an agent") and call transfer_to_human IN THE SAME turn. CRITICAL: call the function immediately; do NOT wait for the caller to reply.')
       : '';
     const prompt = [bot.system_prompt ?? '', dateRule, langRule, voiceRule, apptRule, deptRule, humanRule, hangupRule].filter(Boolean).join('\n\n');
 
