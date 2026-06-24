@@ -1042,8 +1042,11 @@ ${addTagInstruction}
         output: { encoding: 'mulaw', sample_rate: 8000, container: 'none' },
       },
       agent: {
-        language: isEs ? 'es' : 'en',
-        listen: { provider: { type: 'deepgram', model: 'nova-3' } },
+        // `agent.language` is deprecated. Use multilingual listening so the bot
+        // UNDERSTANDS any language the caller speaks (Nova-3 multi, code-switching);
+        // it still REPLIES in its own language via the prompt + its Aura voice, and
+        // routes/transfers as needed. Fixes "the bot only understands its own language".
+        listen: { provider: { type: 'deepgram', model: 'nova-3', language: 'multi' } },
         think:  {
           provider: { type: 'open_ai', model: 'gpt-4o-mini', temperature: 0.7 },
           // Use OUR OpenAI key so the LLM does NATIVE tool-calling. With Deepgram's

@@ -96,7 +96,7 @@ export class CallBotMediaStreamService {
         try {
           agentWs!.send(JSON.stringify(settings));
           settingsSent = true; // now it's safe to forward audio
-          this.logger.log(`[voice-agent] settings sent call=${callSid} lang=${settings.agent.language} fns=${settings.agent.think.functions?.length ?? 0}`);
+          this.logger.log(`[voice-agent] settings sent call=${callSid} listen=${settings.agent?.listen?.provider?.language ?? '?'} fns=${settings.agent.think.functions?.length ?? 0}`);
           keepAlive = setInterval(() => {
             if (agentWs?.readyState === WebSocket.OPEN) agentWs.send(JSON.stringify({ type: 'KeepAlive' }));
           }, 8000);
