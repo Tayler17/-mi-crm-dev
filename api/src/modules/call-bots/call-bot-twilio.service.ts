@@ -305,7 +305,7 @@ export class CallBotTwilioService {
     const c = this.queuesCache.get(botId);
     if (c && c.exp > Date.now()) return c.v;
     const rows = await this.db.query(
-      `SELECT DISTINCT q.name AS queue_name, cb.name AS bot_name
+      `SELECT DISTINCT q.name AS queue_name, cb.name AS bot_name, cb.language AS bot_language
        FROM queues q
        INNER JOIN call_bots cb ON q.tenant_id::text = cb.tenant_id AND q.id = ANY(cb.queue_ids::uuid[])
        WHERE q.tenant_id::text = $1 AND q.is_active = true AND cb.status = 'active' AND cb.id != $2
@@ -946,7 +946,14 @@ ${addTagInstruction}
       this.platformSettings.getAI().catch(() => ({ apiKey: '', provider: '', model: '' })),
       this.getQueues(bot.id, tenantId).catch(() => []),
     ]);
-    const deptLabels: string[] = (transferableQueues as any[]).map((q) => q.bot_name).filter(Boolean);
+    // Department options carry the destination bot's LANGUAGE so the agent can route
+    // by the caller's language (not just guess by name) when several bots exist.
+    const langName = (l?: string) => (l || '').startsWith('es') ? 'español' : (l || '').startsWith('en') ? 'English' : (l || 'idioma');
+    const deptOptions = (transferableQueues as any[])
+      .filter((q) => q.bot_name)
+      .map((q) => ({ name: q.bot_name as string, lang: langName(q.bot_language) }));
+    const deptLabels: string[] = deptOptions.map((o) => o.name);
+    const deptListStr = deptOptions.map((o) => `"${o.name}" (${o.lang})`).join(', ');
     const tools = buildTools(
       crmCtx.stages.map((s: any) => (s.pipeline_name ? `${s.name} (${s.pipeline_name})` : s.name)),
       crmCtx.tags.map((t: any) => t.name),
@@ -972,11 +979,11 @@ ${addTagInstruction}
       functions.push({
         name: 'transfer_to_department',
         description: isEs
-          ? 'Transfiere la llamada a otro departamento del negocio cuando el cliente necesita un área distinta. Di una frase breve de aviso ANTES de llamarla.'
-          : 'Transfer the call to another department when the caller needs a different area. Say a short heads-up BEFORE calling it.',
+          ? `Transfiere la llamada a otro departamento/equipo cuando el cliente necesita un área distinta o ser atendido en otro idioma. Elige el destino cuyo IDIOMA coincida con el del cliente. Destinos: ${deptListStr}.`
+          : `Transfer the call to another department/team when the caller needs a different area or to be helped in another language. Choose the destination whose LANGUAGE matches the caller's. Destinations: ${deptListStr}.`,
         parameters: {
           type: 'object',
-          properties: { department: { type: 'string', enum: deptLabels, description: isEs ? 'Nombre exacto del departamento de destino.' : 'Exact destination department name.' } },
+          properties: { department: { type: 'string', enum: deptLabels, description: isEs ? `Nombre exacto del destino. Opciones e idioma: ${deptListStr}.` : `Exact destination name. Options and language: ${deptListStr}.` } },
           required: ['department'],
         },
       });
@@ -1008,8 +1015,8 @@ ${addTagInstruction}
       : 'ENDING THE CALL: When the caller says goodbye or the conversation is over (e.g. "thanks, bye", "that\'s all", "nothing else"), say ONE short farewell and then ALWAYS call the end_call function to hang up. Do not stay silent waiting.';
     const deptRule = deptLabels.length
       ? (isEs
-          ? `TRANSFERIR A OTRO DEPARTAMENTO: Si el cliente necesita un área distinta o ser atendido en otro idioma, di una frase MUY breve ("Te paso ahora, un momento") y llama a transfer_to_department con el nombre exacto, TODO EN EL MISMO turno. CRÍTICO: llama a la función inmediatamente; NO esperes a que el cliente responda ni le hagas más preguntas después de avisar. Departamentos disponibles: ${deptLabels.join(', ')}.`
-          : `TRANSFER TO ANOTHER DEPARTMENT: If the caller needs a different area or to be helped in another language, say a VERY short heads-up ("One moment, putting you through") and call transfer_to_department with the exact name, ALL IN THE SAME turn. CRITICAL: call the function immediately; do NOT wait for the caller to reply or ask anything else after the heads-up. Available departments: ${deptLabels.join(', ')}.`)
+          ? `TRANSFERIR A OTRO DEPARTAMENTO: Si el cliente necesita un área distinta o ser atendido en otro idioma, di una frase MUY breve ("Te paso ahora, un momento") y llama a transfer_to_department con el nombre exacto, TODO EN EL MISMO turno. Elige el destino cuyo IDIOMA coincida con el del cliente. CRÍTICO: llama a la función inmediatamente; NO esperes a que el cliente responda ni le hagas más preguntas después de avisar. Destinos (con idioma): ${deptListStr}.`
+          : `TRANSFER TO ANOTHER DEPARTMENT: If the caller needs a different area or to be helped in another language, say a VERY short heads-up ("One moment, putting you through") and call transfer_to_department with the exact name, ALL IN THE SAME turn. Choose the destination whose LANGUAGE matches the caller's. CRITICAL: call the function immediately; do NOT wait for the caller to reply or ask anything else after the heads-up. Destinations (with language): ${deptListStr}.`)
       : '';
     const humanRule = hasHumanTransfer
       ? (isEs
@@ -1035,6 +1042,11 @@ ${addTagInstruction}
     }
     const greeting = bot.welcome_message || (isEs ? 'Hola, gracias por llamar. ¿En qué puedo ayudarte?' : 'Hello, thanks for calling. How can I help you?');
 
+    // LLM (the "brain"): use the OpenAI model configured in Settings → AI (ai.model);
+    // default to gpt-4o (gpt-4o-mini was too slow/unreliable calling functions, causing
+    // the 15-39s transfer hesitation). Only OpenAI models go through think.provider here.
+    const thinkModel = (ai.provider === 'openai' && ai.model) ? ai.model : 'gpt-4o';
+
     return {
       type: 'Settings',
       audio: {
@@ -1048,7 +1060,7 @@ ${addTagInstruction}
         // routes/transfers as needed. Fixes "the bot only understands its own language".
         listen: { provider: { type: 'deepgram', model: 'nova-3', language: 'multi' } },
         think:  {
-          provider: { type: 'open_ai', model: 'gpt-4o-mini', temperature: 0.7 },
+          provider: { type: 'open_ai', model: thinkModel, temperature: 0.7 },
           // Use OUR OpenAI key so the LLM does NATIVE tool-calling. With Deepgram's
           // managed LLM the model wrote "functions.end_call()" as text instead of
           // emitting a real FunctionCallRequest, so no function ever ran.
