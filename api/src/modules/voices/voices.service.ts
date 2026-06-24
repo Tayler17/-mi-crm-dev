@@ -7,6 +7,7 @@ const SELECT_COLS = `
   tts_provider  AS "ttsProvider",
   tts_voice_id  AS "ttsVoiceId",
   is_active     AS "isActive",
+  is_default    AS "isDefault",
   sort_order    AS "sortOrder",
   created_at    AS "createdAt",
   updated_at    AS "updatedAt"
@@ -20,6 +21,7 @@ export class VoicesService implements OnModuleInit {
   /** Seed default Deepgram Aura-2 voices (used by the real-time Voice Agent) so the
    *  Voice Catalog isn't empty and tenants can pick one. Idempotent. */
   async onModuleInit() {
+    await this.db.query(`ALTER TABLE voices ADD COLUMN IF NOT EXISTS is_default boolean NOT NULL DEFAULT false`).catch(() => {});
     const defaults = [
       { name: 'Celeste — Español (femenina)', language: 'es', gender: 'female', ttsVoiceId: 'aura-2-celeste-es', sortOrder: 1 },
       { name: 'Diana — Español (femenina)',   language: 'es', gender: 'female', ttsVoiceId: 'aura-2-diana-es',   sortOrder: 2 },
@@ -47,6 +49,15 @@ export class VoicesService implements OnModuleInit {
     return v;
   }
 
+  /** Only one default voice per language family (es / en). Unset the others. */
+  private async clearDefaults(language: string, exceptId?: string) {
+    const fam = (language || '').slice(0, 2) + '%';
+    await this.db.query(
+      `UPDATE voices SET is_default=false WHERE language LIKE $1 AND is_default=true${exceptId ? ' AND id<>$2' : ''}`,
+      exceptId ? [fam, exceptId] : [fam],
+    ).catch(() => {});
+  }
+
   async create(data: {
     name: string;
     description?: string;
@@ -55,11 +66,13 @@ export class VoicesService implements OnModuleInit {
     ttsProvider: string;
     ttsVoiceId?: string;
     isActive?: boolean;
+    isDefault?: boolean;
     sortOrder?: number;
   }): Promise<any> {
+    if (data.isDefault) await this.clearDefaults(data.language ?? 'es');
     const [v] = await this.db.query(
-      `INSERT INTO voices (name, description, language, gender, tts_provider, tts_voice_id, is_active, sort_order)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO voices (name, description, language, gender, tts_provider, tts_voice_id, is_active, is_default, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING ${SELECT_COLS}`,
       [
         data.name,
@@ -69,6 +82,7 @@ export class VoicesService implements OnModuleInit {
         data.ttsProvider ?? 'twilio_basic',
         data.ttsVoiceId ?? '',
         data.isActive ?? true,
+        data.isDefault ?? false,
         data.sortOrder ?? 0,
       ],
     );
@@ -83,8 +97,15 @@ export class VoicesService implements OnModuleInit {
     ttsProvider: string;
     ttsVoiceId: string;
     isActive: boolean;
+    isDefault: boolean;
     sortOrder: number;
   }>): Promise<any> {
+    // Marking as default: unset other defaults of the same language family first.
+    if (data.isDefault === true) {
+      const lang = data.language ?? (await this.findOne(id)).language ?? 'es';
+      await this.clearDefaults(lang, id);
+    }
+
     const fields: string[] = [];
     const values: any[] = [];
     let idx = 1;
@@ -96,6 +117,7 @@ export class VoicesService implements OnModuleInit {
     if (data.ttsProvider !== undefined) { fields.push(`tts_provider=$${idx++}`);  values.push(data.ttsProvider); }
     if (data.ttsVoiceId  !== undefined) { fields.push(`tts_voice_id=$${idx++}`);  values.push(data.ttsVoiceId); }
     if (data.isActive    !== undefined) { fields.push(`is_active=$${idx++}`);     values.push(data.isActive); }
+    if (data.isDefault   !== undefined) { fields.push(`is_default=$${idx++}`);    values.push(data.isDefault); }
     if (data.sortOrder   !== undefined) { fields.push(`sort_order=$${idx++}`);    values.push(data.sortOrder); }
 
     if (!fields.length) return this.findOne(id);
