@@ -58,9 +58,21 @@ export class CallBotMediaStreamService {
     // Safety net: the LLM doesn't reliably call end_call, so when the caller clearly
     // says goodbye we hang up ourselves after the bot's next reply finishes playing.
     let pendingHangup = false;
+    // Set when the agent calls transfer_to_human / transfer_to_department; executed
+    // after the agent's "putting you through" line plays (or a fallback timeout).
+    let pendingTransfer: { kind: 'human' | 'department'; department?: string } | null = null;
 
     const sendToTwilio = (obj: any) => {
       if (twilioWs.readyState === WebSocket.OPEN) twilioWs.send(JSON.stringify(obj));
+    };
+
+    // Run the pending transfer exactly once, then tear down the bridge.
+    const executeTransfer = () => {
+      if (!pendingTransfer || closed) return;
+      const t = pendingTransfer;
+      pendingTransfer = null;
+      this.logger.log(`[voice-agent] transferring call=${callSid} → ${t.kind}${t.department ? ` (${t.department})` : ''}`);
+      this.twilio.transferCall(callSid, bot, t).finally(() => cleanup());
     };
 
     const cleanup = () => {
@@ -131,7 +143,10 @@ export class CallBotMediaStreamService {
             break;
           }
           case 'AgentAudioDone':
-            if (pendingHangup && !closed) {
+            // Transfer takes priority over hangup: execute it once the heads-up plays.
+            if (pendingTransfer && !closed) {
+              setTimeout(executeTransfer, 800);
+            } else if (pendingHangup && !closed) {
               this.logger.log(`[voice-agent] goodbye detected → hanging up call=${callSid}`);
               setTimeout(() => { this.twilio.hangupCall(callSid).finally(() => cleanup()); }, 800);
             }
@@ -147,6 +162,21 @@ export class CallBotMediaStreamService {
                 }
                 this.logger.log(`[voice-agent] end_call → hanging up call=${callSid}`);
                 setTimeout(() => { this.twilio.hangupCall(callSid).finally(() => cleanup()); }, 4000);
+                continue;
+              }
+              // transfer_to_human / transfer_to_department: ack so the agent says its
+              // heads-up line, then redirect the call (on AgentAudioDone, or 6s fallback).
+              if (fn.name === 'transfer_to_human' || fn.name === 'transfer_to_department') {
+                let targs: any = {};
+                try { targs = fn.arguments ? JSON.parse(fn.arguments) : {}; } catch { /* ignore */ }
+                pendingTransfer = fn.name === 'transfer_to_human'
+                  ? { kind: 'human' }
+                  : { kind: 'department', department: targs.department };
+                if (agentWs?.readyState === WebSocket.OPEN) {
+                  agentWs.send(JSON.stringify({ type: 'FunctionCallResponse', id: fn.id, name: fn.name, content: 'ok, transferring now' }));
+                }
+                this.logger.log(`[voice-agent] ${fn.name}(${(fn.arguments || '{}').slice(0, 80)}) → will transfer call=${callSid}`);
+                setTimeout(executeTransfer, 6000); // fallback if no AgentAudioDone arrives
                 continue;
               }
               let args: any = {};

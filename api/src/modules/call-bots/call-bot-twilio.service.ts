@@ -57,7 +57,7 @@ const TOOL_ACK: Record<string, Record<string, string>> = {
 };
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
-type CallMeta = { contactId: string | null; tenantId: string; contactName?: string | null; botId?: string };
+type CallMeta = { contactId: string | null; tenantId: string; contactName?: string | null; botId?: string; baseUrl?: string };
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
@@ -438,7 +438,7 @@ export class CallBotTwilioService {
       contact = existingMeta.contactId ? { id: existingMeta.contactId, name: existingMeta.contactName ?? '', email: null } : null;
     } else {
       contact = await this.botActions.lookupContactByPhone(bot.tenant_id, from);
-      this.callMeta.set(callSid, { contactId: contact?.id ?? null, tenantId: bot.tenant_id, contactName: contact?.name, botId });
+      this.callMeta.set(callSid, { contactId: contact?.id ?? null, tenantId: bot.tenant_id, contactName: contact?.name, botId, baseUrl });
     }
 
     // Auto-create contact for unknown callers so CRM actions work
@@ -473,7 +473,7 @@ export class CallBotTwilioService {
       }
 
       if (contact) {
-        this.callMeta.set(callSid, { contactId: contact.id, tenantId: bot.tenant_id, contactName: contact.name, botId });
+        this.callMeta.set(callSid, { contactId: contact.id, tenantId: bot.tenant_id, contactName: contact.name, botId, baseUrl });
         this.logger.log(`[callbot] Contact resolved for ${from}: ${contact.id}`);
       }
     }
@@ -924,11 +924,16 @@ ${addTagInstruction}
     const meta = this.callMeta.get(callSid);
     const tenantId = meta?.tenantId ?? bot.tenant_id;
 
-    const [crmCtx, dentallyConnected, ai] = await Promise.all([
+    const pc = bot.provider_config ?? {};
+    const hasHumanTransfer = !!(pc.transferToNumber ?? pc.transfer_to_number);
+
+    const [crmCtx, dentallyConnected, ai, transferableQueues] = await Promise.all([
       this.getCrmCtx(tenantId),
       this.integrations.isConnected(tenantId, 'dentally').catch(() => false),
       this.platformSettings.getAI().catch(() => ({ apiKey: '', provider: '', model: '' })),
+      this.getQueues(bot.id, tenantId).catch(() => []),
     ]);
+    const deptLabels: string[] = (transferableQueues as any[]).map((q) => q.bot_name).filter(Boolean);
     const tools = buildTools(
       crmCtx.stages.map((s: any) => (s.pipeline_name ? `${s.name} (${s.pipeline_name})` : s.name)),
       crmCtx.tags.map((t: any) => t.name),
@@ -948,6 +953,31 @@ ${addTagInstruction}
         : 'End the call when the caller says goodbye or the conversation is complete. Say a short farewell BEFORE calling it.',
       parameters: { type: 'object', properties: {} },
     });
+    // Transfer to another department/bot of the same tenant (the bridge redirects the
+    // live call to the destination bot's voice webhook).
+    if (deptLabels.length) {
+      functions.push({
+        name: 'transfer_to_department',
+        description: isEs
+          ? 'Transfiere la llamada a otro departamento del negocio cuando el cliente necesita un área distinta. Di una frase breve de aviso ANTES de llamarla.'
+          : 'Transfer the call to another department when the caller needs a different area. Say a short heads-up BEFORE calling it.',
+        parameters: {
+          type: 'object',
+          properties: { department: { type: 'string', enum: deptLabels, description: isEs ? 'Nombre exacto del departamento de destino.' : 'Exact destination department name.' } },
+          required: ['department'],
+        },
+      });
+    }
+    // Transfer to a human agent (dials the tenant's configured number).
+    if (hasHumanTransfer) {
+      functions.push({
+        name: 'transfer_to_human',
+        description: isEs
+          ? 'Transfiere la llamada a un agente humano (persona real) cuando el cliente lo pide o el caso lo requiere. Di una frase breve de aviso ANTES de llamarla.'
+          : 'Transfer the call to a human agent (real person) when the caller asks or the case requires it. Say a short heads-up BEFORE calling it.',
+        parameters: { type: 'object', properties: {} },
+      });
+    }
 
     const nowDt = new Date();
     const dateRule = `FECHA Y HORA ACTUAL: ${nowDt.toISOString().slice(0, 16).replace('T', ' ')} UTC (${nowDt.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}). Usa SIEMPRE esta fecha para "hoy"/"mañana". Nunca uses fechas de años anteriores; las citas son a futuro.`;
@@ -963,12 +993,33 @@ ${addTagInstruction}
     const hangupRule = isEs
       ? 'FINALIZAR LLAMADA: Cuando el cliente se despida o la conversación haya terminado (ej. "gracias, adiós", "eso es todo", "nada más"), di UNA frase corta de despedida y a continuación LLAMA SIEMPRE a la función end_call para colgar. No te quedes en silencio esperando.'
       : 'ENDING THE CALL: When the caller says goodbye or the conversation is over (e.g. "thanks, bye", "that\'s all", "nothing else"), say ONE short farewell and then ALWAYS call the end_call function to hang up. Do not stay silent waiting.';
-    const prompt = [bot.system_prompt ?? '', dateRule, langRule, voiceRule, apptRule, hangupRule].filter(Boolean).join('\n\n');
+    const deptRule = deptLabels.length
+      ? (isEs
+          ? `TRANSFERIR A OTRO DEPARTAMENTO: Si el cliente necesita un área distinta, di una frase breve ("Te paso ahora con el departamento de X") y llama a la función transfer_to_department con el nombre exacto. Departamentos disponibles: ${deptLabels.join(', ')}.`
+          : `TRANSFER TO ANOTHER DEPARTMENT: If the caller needs a different area, say a short heads-up ("Let me put you through to X") and call transfer_to_department with the exact name. Available departments: ${deptLabels.join(', ')}.`)
+      : '';
+    const humanRule = hasHumanTransfer
+      ? (isEs
+          ? 'TRANSFERIR A UN HUMANO: Si el cliente pide hablar con una persona real (o el caso lo requiere), di una frase breve ("Te paso con un agente, un momento") y llama a la función transfer_to_human.'
+          : 'TRANSFER TO A HUMAN: If the caller asks to speak with a real person (or the case requires it), say a short heads-up ("Let me put you through to an agent, one moment") and call transfer_to_human.')
+      : '';
+    const prompt = [bot.system_prompt ?? '', dateRule, langRule, voiceRule, apptRule, deptRule, humanRule, hangupRule].filter(Boolean).join('\n\n');
 
     // Use the Aura voice the tenant picked in the Voice Catalog (getBot resolves
-    // voice_catalog_id → tts_provider/tts_voice_id); else a sensible default per language.
-    const pickedAura = (bot.tts_provider === 'deepgram' && /^aura/i.test(bot.tts_voice_id || '')) ? bot.tts_voice_id : null;
-    const speakModel = pickedAura || (isEs ? 'aura-2-celeste-es' : 'aura-2-thalia-en');
+    // voice_catalog_id → tts_provider/tts_voice_id); else the catalog's default voice
+    // for this language (owner-marked in the Voice Catalog); else a hardcoded fallback.
+    let speakModel = (bot.tts_provider === 'deepgram' && /^aura/i.test(bot.tts_voice_id || '')) ? bot.tts_voice_id : null;
+    if (!speakModel) {
+      const fam = (isEs ? 'es' : 'en') + '%';
+      const [def] = await this.db.query(
+        `SELECT tts_voice_id FROM voices
+          WHERE is_default = true AND tts_provider = 'deepgram'
+            AND language LIKE $1 AND COALESCE(tts_voice_id,'') <> ''
+          LIMIT 1`,
+        [fam],
+      ).catch(() => [null]);
+      speakModel = def?.tts_voice_id || (isEs ? 'aura-2-celeste-es' : 'aura-2-thalia-en');
+    }
     const greeting = bot.welcome_message || (isEs ? 'Hola, gracias por llamar. ¿En qué puedo ayudarte?' : 'Hello, thanks for calling. How can I help you?');
 
     return {
@@ -1036,6 +1087,53 @@ ${addTagInstruction}
       this.logger.log(`[callbot] hung up call ${callSid} via REST`);
     } catch (e: any) {
       this.logger.warn(`[callbot] hangupCall failed: ${e?.message}`);
+    }
+  }
+
+  /** Transfer an active Voice-Agent call via Twilio REST (redirect the live call):
+   *   • kind 'department' → redirect to the destination bot's voice webhook.
+   *   • kind 'human'      → replace TwiML with a <Dial> to the configured number.
+   *  Returns true on success. The caller should clean up the media-stream after. */
+  async transferCall(callSid: string, bot: any, target: { kind: 'human' | 'department'; department?: string }): Promise<boolean> {
+    try {
+      const { accountSid, authToken } = await this.platformSettings.getVoice();
+      if (!accountSid || !authToken || !callSid) { this.logger.warn('[callbot] transferCall: missing Twilio creds or callSid'); return false; }
+
+      let param: { key: 'Twiml' | 'Url'; value: string } | null = null;
+
+      if (target.kind === 'department' && target.department) {
+        const toSlug = (n: string) => n.replace(/[^\w\s]/g, ' ').trim().toLowerCase().replace(/\s+/g, '-').replace(/-+/g, '-');
+        const destBotId = await this.resolveQueueBotId(bot.tenant_id, toSlug(target.department), bot.id);
+        if (!destBotId) { this.logger.warn(`[callbot] transfer: department "${target.department}" not resolved`); return false; }
+        const baseUrl = this.callMeta.get(callSid)?.baseUrl || process.env.TWILIO_WEBHOOK_BASE_URL || '';
+        if (!baseUrl) { this.logger.warn('[callbot] transfer: no baseUrl available'); return false; }
+        await this.db.query(`UPDATE call_bots SET transferred_calls=transferred_calls+1, updated_at=NOW() WHERE id=$1`, [bot.id]).catch(() => {});
+        param = { key: 'Url', value: `${baseUrl}/call-bots/twilio/${destBotId}/voice` };
+      } else if (target.kind === 'human') {
+        const pc = bot.provider_config ?? {};
+        const num = pc.transferToNumber ?? pc.transfer_to_number ?? '';
+        if (!num) { this.logger.warn('[callbot] transfer: no human number configured'); return false; }
+        await this.db.query(`UPDATE call_bots SET transferred_calls=transferred_calls+1, updated_at=NOW() WHERE id=$1`, [bot.id]).catch(() => {});
+        const callerId = bot.phone_number ?? '';
+        param = { key: 'Twiml', value: `<Response><Dial timeout="30"${callerId ? ` callerId="${xe(callerId)}"` : ''}>${xe(num)}</Dial></Response>` };
+      }
+      if (!param) return false;
+
+      const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+      const usp = new URLSearchParams();
+      usp.set(param.key, param.value);
+      if (param.key === 'Url') usp.set('Method', 'POST');
+      const body = usp.toString();
+      await httpPost(
+        `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${callSid}.json`,
+        body,
+        { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body).toString() },
+      );
+      this.logger.log(`[callbot] transferred call ${callSid} → ${target.kind}${target.department ? ` (${target.department})` : ''} via REST`);
+      return true;
+    } catch (e: any) {
+      this.logger.warn(`[callbot] transferCall failed: ${e?.message}`);
+      return false;
     }
   }
 
