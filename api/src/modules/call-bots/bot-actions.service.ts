@@ -146,6 +146,39 @@ export class BotActionsService {
     return { success: true, message: `Trato actualizado.` };
   }
 
+  /** Save details the caller gives onto their contact record so it isn't left as just
+   *  a phone number. Name overwrites only a placeholder; email/address fill only if
+   *  empty; notes are appended. */
+  async updateContact(
+    tenantId: string,
+    contactId: string,
+    args: { name?: string; email?: string; address?: string; notes?: string },
+  ): Promise<{ success: boolean; message: string }> {
+    const [cur] = await this.db.query(
+      `SELECT full_name, email, location, notes FROM contacts WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+      [contactId, tenantId],
+    ).catch(() => [null]);
+    if (!cur) return { success: false, message: 'Contacto no encontrado.' };
+
+    const sets: string[] = ['updated_at = NOW()'];
+    const params: any[] = [contactId, tenantId];
+    let i = 3;
+
+    // Name: set only if the current one is empty or an auto placeholder ("Llamada entrante +44…").
+    const isPlaceholder = !cur.full_name || /^(llamada entrante|llamada|sin nombre|unknown|desconocido|\+?\d)/i.test(String(cur.full_name).trim());
+    if (args.name?.trim() && isPlaceholder) { sets.push(`full_name = $${i++}`); params.push(args.name.trim()); }
+    // Email / address: fill only when empty (never overwrite existing good data).
+    if (args.email?.trim() && !cur.email) { sets.push(`email = $${i++}`); params.push(args.email.trim()); }
+    if (args.address?.trim() && !cur.location) { sets.push(`location = $${i++}`); params.push(args.address.trim()); }
+    // Notes: append, don't replace.
+    if (args.notes?.trim()) { sets.push(`notes = $${i++}`); params.push([cur.notes, args.notes.trim()].filter(Boolean).join('\n')); }
+
+    if (sets.length === 1) return { success: true, message: 'Contacto sin cambios.' };
+    await this.db.query(`UPDATE contacts SET ${sets.join(', ')} WHERE id = $1 AND tenant_id = $2`, params).catch(() => {});
+    this.logger.log(`[bot-action] Updated contact ${contactId}`);
+    return { success: true, message: 'Datos del contacto actualizados.' };
+  }
+
   /** Unified tool executor called from callAi */
   async executeTool(
     tenantId: string,
@@ -173,6 +206,9 @@ export class BotActionsService {
           break;
         case 'update_deal':
           result = await this.updateDeal(tenantId, args.deal_id ?? args.dealId ?? '', args);
+          break;
+        case 'update_contact':
+          result = await this.updateContact(tenantId, contactId!, args as any);
           break;
         default:
           result = { success: false, message: `Herramienta desconocida: ${toolName}` };

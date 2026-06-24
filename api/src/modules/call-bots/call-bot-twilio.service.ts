@@ -76,7 +76,7 @@ function buildTools(stageNames: string[], tagNames: string[] = [], dentallyConne
           title:      { type: 'string',  description: 'Short deal title, e.g. "Envío Londres - María García"' },
           value:      { type: 'number',  description: 'Monetary value of the deal (optional)' },
           stage_name: { type: 'string',  description: `Pipeline stage to assign. ${stagesDesc}` },
-          notes:      { type: 'string',  description: 'Additional notes gathered during the call' },
+          notes:      { type: 'string',  description: 'IMPORTANT: include EVERY detail the caller gave during the call, organized and complete — names, full pickup AND destination addresses, item description, weight, dimensions, recipient name/phone/ID, payment method, dates, prices and any other specifics. Do not summarize away or drop details; this is the record the team works from.' },
           priority:   { type: 'string',  enum: ['low', 'medium', 'high'], description: 'Deal priority' },
         },
         required: ['title'],
@@ -105,6 +105,19 @@ function buildTools(stageNames: string[], tagNames: string[] = [], dentallyConne
           tag_name: { type: 'string', description: tagNames.length ? `Tag to assign. Choose from: ${tagNames.join(', ')}` : 'Tag name to add to the contact' },
         },
         required: ['tag_name'],
+      },
+    },
+    {
+      name: 'update_contact',
+      description: 'Save the caller\'s details onto their CRM contact record. Call this AS SOON AS you learn the caller\'s name (so the contact is not left as just a phone number), and again if they give an email or address. Silent — do not mention it to the caller.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name:    { type: 'string', description: 'Full name of the caller' },
+          email:   { type: 'string', description: 'Caller email (optional)' },
+          address: { type: 'string', description: 'Caller address, e.g. the pickup address (optional)' },
+          notes:   { type: 'string', description: 'Other useful info about the contact (optional)' },
+        },
       },
     },
     {
