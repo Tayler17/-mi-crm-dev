@@ -55,6 +55,9 @@ export class CallBotMediaStreamService {
     // Deepgram rejects any audio sent before the Settings message ("Received binary
     // before Settings"). Gate audio forwarding until Settings has been sent.
     let settingsSent = false;
+    // Safety net: the LLM doesn't reliably call end_call, so when the caller clearly
+    // says goodbye we hang up ourselves after the bot's next reply finishes playing.
+    let pendingHangup = false;
 
     const sendToTwilio = (obj: any) => {
       if (twilioWs.readyState === WebSocket.OPEN) twilioWs.send(JSON.stringify(obj));
@@ -109,6 +112,17 @@ export class CallBotMediaStreamService {
           case 'ConversationText':
             this.logger.log(`[voice-agent] ${msg.role}: ${(msg.content || '').slice(0, 70)}`);
             if (msg.content) this.twilio.appendCallTranscript(callSid, msg.role === 'user' ? 'user' : 'bot', msg.content);
+            // If the caller clearly says goodbye, arm a hangup for after the bot's
+            // farewell finishes (independent of whether the LLM calls end_call).
+            if (msg.role === 'user' && /\b(bye|good\s?bye|adi[oó]s|hasta luego|hasta pronto|eso es todo|that'?s all|nothing else|nada m[aá]s)\b/i.test(msg.content || '')) {
+              pendingHangup = true;
+            }
+            break;
+          case 'AgentAudioDone':
+            if (pendingHangup && !closed) {
+              this.logger.log(`[voice-agent] goodbye detected → hanging up call=${callSid}`);
+              setTimeout(() => { this.twilio.hangupCall(callSid).finally(() => cleanup()); }, 800);
+            }
             break;
           case 'FunctionCallRequest': {
             const fns = Array.isArray(msg.functions) ? msg.functions : [];
