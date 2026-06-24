@@ -961,7 +961,10 @@ ${addTagInstruction}
       : 'APPOINTMENTS: The only required field for availability is the DATE; if not given, ask for it (never assume today). The practitioner is OPTIONAL. As soon as they pick a time, book with dentally_book_appointment. Do not ask for personal data over the phone unless the tool requires it.');
     const prompt = [bot.system_prompt ?? '', dateRule, langRule, voiceRule, apptRule].filter(Boolean).join('\n\n');
 
-    const speakModel = isEs ? 'aura-2-celeste-es' : 'aura-2-thalia-en';
+    // Use the Aura voice the tenant picked in the Voice Catalog (getBot resolves
+    // voice_catalog_id → tts_provider/tts_voice_id); else a sensible default per language.
+    const pickedAura = (bot.tts_provider === 'deepgram' && /^aura/i.test(bot.tts_voice_id || '')) ? bot.tts_voice_id : null;
+    const speakModel = pickedAura || (isEs ? 'aura-2-celeste-es' : 'aura-2-thalia-en');
     const greeting = bot.welcome_message || (isEs ? 'Hola, gracias por llamar. ¿En qué puedo ayudarte?' : 'Hello, thanks for calling. How can I help you?');
 
     return {

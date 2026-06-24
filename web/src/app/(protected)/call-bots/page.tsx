@@ -1735,6 +1735,7 @@ export default function CallBotsPage() {
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">{t('TTS Provider', 'Proveedor TTS')}</label>
                   <select className="form-input" value={voiceForm.ttsProvider} onChange={(e) => setVoiceForm((p) => ({ ...p, ttsProvider: e.target.value }))}>
+                    <option value="deepgram">⚡ Deepgram Aura-2 (tiempo real)</option>
                     <option value="twilio_basic">{t('🔊 Twilio Polly (included)', '🔊 Twilio Polly (incluido)')}</option>
                     <option value="openai_tts">🟢 OpenAI TTS</option>
                     <option value="elevenlabs">🎙️ ElevenLabs</option>
@@ -1742,8 +1743,12 @@ export default function CallBotsPage() {
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">{t('Voice ID (provider)', 'Voice ID (proveedor)')}</label>
-                  <input className="form-input" value={voiceForm.ttsVoiceId} onChange={(e) => setVoiceForm((p) => ({ ...p, ttsVoiceId: e.target.value }))} placeholder="EXAVITQu4vr4xnSDxMaL" />
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{t('Provider internal ID. Empty = default voice.', 'ID interno del proveedor. Vacío = voz por defecto.')}</div>
+                  <input className="form-input" value={voiceForm.ttsVoiceId} onChange={(e) => setVoiceForm((p) => ({ ...p, ttsVoiceId: e.target.value }))} placeholder={voiceForm.ttsProvider === 'deepgram' ? 'aura-2-celeste-es' : 'EXAVITQu4vr4xnSDxMaL'} />
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+                    {voiceForm.ttsProvider === 'deepgram'
+                      ? 'Para el modo tiempo real (Voice Agent). Voces ES: aura-2-celeste-es, aura-2-diana-es, aura-2-carina-es, aura-2-selena-es, aura-2-sirio-es, aura-2-nestor-es, aura-2-javier-es, aura-2-alvaro-es. EN: aura-2-thalia-en, aura-2-andromeda-en, aura-2-apollo-en.'
+                      : t('Provider internal ID. Empty = default voice.', 'ID interno del proveedor. Vacío = voz por defecto.')}
+                  </div>
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">{t('Order', 'Orden')}</label>
