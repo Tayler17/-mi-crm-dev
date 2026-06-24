@@ -5,6 +5,7 @@ import { getVoices, createVoice, updateVoice, deleteVoice, type Voice } from '@/
 
 const LANGUAGES = ['es-MX', 'es-ES', 'es-AR', 'es-CO', 'en-US', 'en-GB', 'pt-BR'];
 const TTS_PROVIDERS = [
+  { value: 'deepgram',     label: '⚡ Deepgram Aura-2 (llamadas en tiempo real)' },
   { value: 'twilio_basic', label: '🔊 Twilio Polly (incluido)' },
   { value: 'openai_tts',   label: '🟢 OpenAI TTS' },
   { value: 'elevenlabs',   label: '🎙️ ElevenLabs (hiperrealista)' },
@@ -142,6 +143,35 @@ function VoiceModal({ voice, onSave, onClose }: {
             </div>
           )}
 
+          {form.ttsProvider === 'deepgram' && (
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Voice ID — Deepgram Aura-2</label>
+              <select className="form-input" value={form.ttsVoiceId} onChange={(e) => upd('ttsVoiceId', e.target.value)}>
+                <option value="">— Elige una voz Aura-2 —</option>
+                <optgroup label="Español">
+                  <option value="aura-2-celeste-es">Celeste — español (femenina)</option>
+                  <option value="aura-2-diana-es">Diana — español (femenina)</option>
+                  <option value="aura-2-javier-es">Javier — español (masculino)</option>
+                  <option value="aura-2-alvaro-es">Álvaro — español (masculino)</option>
+                </optgroup>
+                <optgroup label="English">
+                  <option value="aura-2-thalia-en">Thalia — English (female)</option>
+                  <option value="aura-2-andromeda-en">Andromeda — English (female)</option>
+                  <option value="aura-2-apollo-en">Apollo — English (male)</option>
+                </optgroup>
+              </select>
+              <div style={{ marginTop: 6 }}>
+                <label className="form-label" style={{ marginBottom: 4 }}>O escribe un ID Aura-2 personalizado</label>
+                <input className="form-input" value={form.ttsVoiceId}
+                  onChange={(e) => upd('ttsVoiceId', e.target.value)}
+                  placeholder="aura-2-celeste-es" />
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                ⚡ Es la única que funciona en llamadas en tiempo real. Requiere Deepgram API Key en Configuración → Plataforma.
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group" style={{ margin: 0 }}>
               <label className="form-label">Orden de aparición</label>
@@ -224,6 +254,7 @@ export default function VoicesPage() {
   const inactiveCount = voices.length - activeCount;
 
   const providerColor: Record<string, string> = {
+    deepgram:     '#f59e0b',
     twilio_basic: '#3b82f6',
     openai_tts:   '#10b981',
     elevenlabs:   '#8b5cf6',
@@ -248,6 +279,7 @@ export default function VoicesPage() {
           { label: 'Total voces',     value: voices.length,  color: 'var(--text)' },
           { label: 'Activas',         value: activeCount,    color: '#10b981' },
           { label: 'Inactivas',       value: inactiveCount,  color: '#6b7280' },
+          { label: 'Deepgram Aura',   value: voices.filter((v) => v.ttsProvider === 'deepgram').length,     color: '#f59e0b' },
           { label: 'Twilio Polly',    value: voices.filter((v) => v.ttsProvider === 'twilio_basic').length,  color: '#3b82f6' },
           { label: 'ElevenLabs',      value: voices.filter((v) => v.ttsProvider === 'elevenlabs').length,   color: '#8b5cf6' },
           { label: 'OpenAI TTS',      value: voices.filter((v) => v.ttsProvider === 'openai_tts').length,   color: '#10b981' },
