@@ -158,12 +158,13 @@ export class CallBotMediaStreamService {
     const openDeepgram = async () => {
       const dgKey = (await this.platformSettings.get('deepgram.api_key').catch(() => '')) as string;
       if (!dgKey) { this.logger.error('[media-stream] no Deepgram key configured'); return; }
-      // Multilingual: Deepgram nova-2 'multi' transcribes Spanish AND English
-      // (code-switching), so recognition no longer depends on the bot's Call
-      // language — the caller can speak either and it's transcribed correctly.
+      // Single language (the bot's Call language) is the most STABLE: multilingual
+      // 'multi' occasionally mis-detected short Spanish words as English, which made
+      // the bot flip languages mid-call. Set each bot's Call language to its audience.
+      const lang = (bot?.language || 'es').slice(0, 2);
       const qs = new URLSearchParams({
         encoding: 'mulaw', sample_rate: '8000', channels: '1',
-        model: 'nova-2', language: 'multi', smart_format: 'true',
+        model: 'nova-2', language: lang, smart_format: 'true',
         interim_results: 'true', vad_events: 'true',
         endpointing: '300', utterance_end_ms: '1000',
       });
