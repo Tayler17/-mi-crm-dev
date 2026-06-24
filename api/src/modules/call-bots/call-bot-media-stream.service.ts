@@ -106,6 +106,15 @@ export class CallBotMediaStreamService {
             const fns = Array.isArray(msg.functions) ? msg.functions : [];
             for (const fn of fns) {
               if (fn.client_side === false) continue; // server-side function: nothing to do
+              // end_call: acknowledge, then hang up after the farewell has played.
+              if (fn.name === 'end_call') {
+                if (agentWs?.readyState === WebSocket.OPEN) {
+                  agentWs.send(JSON.stringify({ type: 'FunctionCallResponse', id: fn.id, name: fn.name, content: 'ok' }));
+                }
+                this.logger.log(`[voice-agent] end_call → hanging up call=${callSid}`);
+                setTimeout(() => cleanup(), 4000);
+                continue;
+              }
               let args: any = {};
               try { args = fn.arguments ? JSON.parse(fn.arguments) : {}; } catch { /* ignore */ }
               this.logger.log(`[voice-agent] fn ${fn.name}(${(fn.arguments || '{}').slice(0, 120)})`);

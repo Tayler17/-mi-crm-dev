@@ -936,9 +936,17 @@ ${addTagInstruction}
     // Client-side functions are defined WITHOUT an `endpoint` (Deepgram then sends
     // us a FunctionCallRequest). A `client_side` field here is NOT valid and makes
     // Deepgram reject the whole think config.
-    const functions = tools.map((t) => ({
+    const functions: any[] = tools.map((t) => ({
       name: t.name, description: t.description, parameters: t.parameters,
     }));
+    // Lets the agent end the call when the conversation is over (the bridge hangs up).
+    functions.push({
+      name: 'end_call',
+      description: isEs
+        ? 'Finaliza la llamada cuando el cliente se despide o la conversación ha terminado. Despídete brevemente ANTES de llamarla.'
+        : 'End the call when the caller says goodbye or the conversation is complete. Say a short farewell BEFORE calling it.',
+      parameters: { type: 'object', properties: {} },
+    });
 
     const nowDt = new Date();
     const dateRule = `FECHA Y HORA ACTUAL: ${nowDt.toISOString().slice(0, 16).replace('T', ' ')} UTC (${nowDt.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}). Usa SIEMPRE esta fecha para "hoy"/"mañana". Nunca uses fechas de años anteriores; las citas son a futuro.`;
