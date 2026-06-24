@@ -99,12 +99,15 @@ export class CallBotMediaStreamService {
         }
         let msg: any;
         try { msg = JSON.parse(data.toString()); } catch { return; }
+        // TEMP diagnostic: see every non-audio event Deepgram sends.
+        if (msg.type && msg.type !== 'ConversationText') this.logger.log(`[voice-agent] evt ${msg.type}`);
         switch (msg.type) {
           case 'UserStartedSpeaking':
             // Barge-in: stop whatever the bot is playing.
             sendToTwilio({ event: 'clear', streamSid });
             break;
           case 'ConversationText':
+            this.logger.log(`[voice-agent] ${msg.role}: ${(msg.content || '').slice(0, 70)}`);
             if (msg.content) this.twilio.appendCallTranscript(callSid, msg.role === 'user' ? 'user' : 'bot', msg.content);
             break;
           case 'FunctionCallRequest': {
