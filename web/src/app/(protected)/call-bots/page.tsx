@@ -1070,8 +1070,10 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
                 </div>
               )}
 
-              {/* TTS settings — owner only (or when no catalog voice chosen) */}
-              {(isOwner || !form.voiceCatalogId) && (
+              {/* Manual TTS settings — only when NO catalog voice is chosen (the catalog
+                  voice always takes priority, so showing these alongside it just confuses).
+                  Choosing "— Manual configuration (advanced) —" brings them back. */}
+              {!form.voiceCatalogId && (
                 <>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div className="form-group" style={{ margin: 0 }}>
