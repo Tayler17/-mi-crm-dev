@@ -1088,6 +1088,13 @@ export default function InboxPage() {
     if (!convMatchIds.length) return;
     setConvMatchIdx((i) => (i + dir + convMatchIds.length) % convMatchIds.length);
   };
+  // Traceability: which human agents actually replied in this conversation (distinct).
+  const attendedBy = Array.from(new Set(
+    messages
+      .filter((m) => m.direction === 'outbound' && m.senderType === 'agent' && m.senderId)
+      .map((m) => agents.find((a) => a.id === m.senderId)?.fullName)
+      .filter(Boolean) as string[],
+  ));
   const listConv = conversations.find((c) => c.id === activeId);
   const filteredCanned = cannedResponses.filter((cr) =>
     !cannedSearch || cr.title.toLowerCase().includes(cannedSearch.toLowerCase()) || cr.content.toLowerCase().includes(cannedSearch.toLowerCase())
@@ -2261,6 +2268,12 @@ export default function InboxPage() {
               <div className="inbox-detail-row">
                 <span className="inbox-detail-label">{i.inbxAgent}</span>
                 <span className="inbox-detail-value">{listConv.assignedAgent.fullName}</span>
+              </div>
+            )}
+            {attendedBy.length > 0 && (
+              <div className="inbox-detail-row">
+                <span className="inbox-detail-label">{lang === 'en' ? 'Attended by' : 'Atendido por'}</span>
+                <span className="inbox-detail-value">{attendedBy.join(', ')}</span>
               </div>
             )}
             {conv.teamId && (
