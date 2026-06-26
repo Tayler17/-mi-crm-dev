@@ -514,6 +514,22 @@ export default function InboxPage() {
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
 
+  // in-conversation search (client-side, over the already-loaded messages)
+  const [convSearchOpen, setConvSearchOpen] = useState(false);
+  const [convSearch, setConvSearch] = useState('');
+  const [convMatchIdx, setConvMatchIdx] = useState(0);
+  const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // Scroll the current search match into view (recomputes from the same inputs as the thread).
+  useEffect(() => {
+    const q = convSearch.trim().toLowerCase();
+    if (!q) return;
+    const list = composerTab === 'message' ? messages : notes;
+    const ids = list.filter((m) => m.contentType !== 'activity' && (m.body ?? '').toLowerCase().includes(q)).map((m) => m.id);
+    const id = ids[convMatchIdx];
+    if (id && msgRefs.current[id]) msgRefs.current[id]!.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [convSearch, convMatchIdx, messages, notes, composerTab]);
+
   // scheduled messages
   const [scheduledMsgs, setScheduledMsgs] = useState<ScheduledMessage[]>([]);
   const [scheduleMode, setScheduleMode] = useState(false);
@@ -1061,6 +1077,17 @@ export default function InboxPage() {
   }
 
   const chatItems = composerTab === 'message' ? messages : notes;
+
+  // In-conversation search matches (over the visible thread).
+  const convSearchQ = convSearch.trim().toLowerCase();
+  const convMatchIds = convSearchQ
+    ? chatItems.filter((m) => m.contentType !== 'activity' && (m.body ?? '').toLowerCase().includes(convSearchQ)).map((m) => m.id)
+    : [];
+  const currentMatchId = convMatchIds[convMatchIdx] ?? null;
+  const gotoMatch = (dir: 1 | -1) => {
+    if (!convMatchIds.length) return;
+    setConvMatchIdx((i) => (i + dir + convMatchIds.length) % convMatchIds.length);
+  };
   const listConv = conversations.find((c) => c.id === activeId);
   const filteredCanned = cannedResponses.filter((cr) =>
     !cannedSearch || cr.title.toLowerCase().includes(cannedSearch.toLowerCase()) || cr.content.toLowerCase().includes(cannedSearch.toLowerCase())
@@ -1586,6 +1613,12 @@ export default function InboxPage() {
               >ℹ️</button>
               <button
                 className="btn btn-secondary"
+                style={{ fontSize: 13, padding: '4px 9px' }}
+                title={lang === 'en' ? 'Search in conversation' : 'Buscar en la conversación'}
+                onClick={() => { setConvSearchOpen((o) => !o); setConvSearch(''); setConvMatchIdx(0); }}
+              >🔍</button>
+              <button
+                className="btn btn-secondary"
                 style={{ fontSize: 11, padding: '4px 10px' }}
                 title={i.inbxExportPdf}
                 onClick={() => exportConversationPdf(conv, listConv?.contact ?? null, messages, i)}
@@ -1626,6 +1659,27 @@ export default function InboxPage() {
             </div>
           </div>
 
+          {/* In-conversation search bar */}
+          {convSearchOpen && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+              <input
+                className="form-input"
+                autoFocus
+                value={convSearch}
+                onChange={(e) => { setConvSearch(e.target.value); setConvMatchIdx(0); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); gotoMatch(e.shiftKey ? -1 : 1); } if (e.key === 'Escape') { setConvSearchOpen(false); setConvSearch(''); } }}
+                placeholder={lang === 'en' ? 'Search in this conversation…' : 'Buscar en esta conversación…'}
+                style={{ flex: 1, fontSize: 13, padding: '5px 10px' }}
+              />
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 48, textAlign: 'center' }}>
+                {convSearchQ ? `${convMatchIds.length ? convMatchIdx + 1 : 0}/${convMatchIds.length}` : ''}
+              </span>
+              <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 13 }} disabled={!convMatchIds.length} title={lang === 'en' ? 'Previous' : 'Anterior'} onClick={() => gotoMatch(-1)}>▲</button>
+              <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 13 }} disabled={!convMatchIds.length} title={lang === 'en' ? 'Next' : 'Siguiente'} onClick={() => gotoMatch(1)}>▼</button>
+              <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 13 }} title={lang === 'en' ? 'Close' : 'Cerrar'} onClick={() => { setConvSearchOpen(false); setConvSearch(''); }}>✕</button>
+            </div>
+          )}
+
           {/* Thread */}
           <div className="inbox-chat-body" ref={threadRef}>
             {loadingChat ? (
@@ -1662,8 +1716,8 @@ export default function InboxPage() {
                   else if (isFile) { fileUrl = m.body; fileName = m.body.split('/').pop() ?? 'archivo'; }
                   const isTranscript = !isFile && m.body?.includes('**Transcript:**');
                   return (
-                    <div key={m.id} className={`msg ${m.isPrivate ? 'msg-note' : m.direction === 'outbound' ? 'msg-out' : 'msg-in'}`} style={isTranscript ? { maxWidth: '95%', alignSelf: 'stretch' } : undefined}>
-                      <div className="msg-bubble" style={isTranscript ? { background: 'transparent', border: '1px solid var(--border)', padding: '12px 14px' } : undefined}>
+                    <div key={m.id} ref={(el) => { msgRefs.current[m.id] = el; }} className={`msg ${m.isPrivate ? 'msg-note' : m.direction === 'outbound' ? 'msg-out' : 'msg-in'}`} style={isTranscript ? { maxWidth: '95%', alignSelf: 'stretch' } : undefined}>
+                      <div className="msg-bubble" style={{ ...(isTranscript ? { background: 'transparent', border: '1px solid var(--border)', padding: '12px 14px' } : {}), ...(m.id === currentMatchId ? { outline: '2px solid #f59e0b', outlineOffset: '1px' } : {}) }}>
                         {m.replyToMessageId && (() => {
                           const orig = messages.find((x) => x.id === m.replyToMessageId);
                           return (
