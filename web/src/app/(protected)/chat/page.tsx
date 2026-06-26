@@ -101,6 +101,19 @@ export default function ChatPage() {
   const justOpenedRef = useRef(false);
   const lastMsgIdRef = useRef<string | null>(null);
 
+  // in-conversation search (client-side, over the already-loaded messages)
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [matchIdx, setMatchIdx] = useState(0);
+  const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  useEffect(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return;
+    const ids = messages.filter((m) => (m.body ?? '').toLowerCase().includes(q)).map((m) => m.id);
+    const id = ids[matchIdx];
+    if (id && msgRefs.current[id]) msgRefs.current[id]!.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [search, matchIdx, messages]);
+
   const loadChats = useCallback(async () => {
     try { const data = await getMyChats(); setChats(data); } catch {}
   }, []);
@@ -345,6 +358,15 @@ export default function ChatPage() {
 
   const peer = activeChat ? getChatPeer(activeChat, myId) : null;
 
+  // In-conversation search matches (over the loaded messages).
+  const searchQ = search.trim().toLowerCase();
+  const matchIds = searchQ ? messages.filter((m) => (m.body ?? '').toLowerCase().includes(searchQ)).map((m) => m.id) : [];
+  const currentMatchId = matchIds[matchIdx] ?? null;
+  const gotoMatch = (dir: 1 | -1) => {
+    if (!matchIds.length) return;
+    setMatchIdx((n) => (n + dir + matchIds.length) % matchIds.length);
+  };
+
   return (
     <div className="chat-layout" data-panel={mobilePanel} style={{ display: 'flex', overflow: 'hidden', position: 'fixed', top: 'var(--header-h, 56px)', left: 'var(--sidebar-w, 220px)', right: 0, bottom: 0 }}>
 
@@ -452,6 +474,11 @@ export default function ChatPage() {
                 </button>
               )}
               <button
+                title={lang === 'en' ? 'Search in chat' : 'Buscar en el chat'}
+                style={{ fontSize: 14, padding: '4px 9px', flexShrink: 0, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer' }}
+                onClick={() => { setSearchOpen((o) => !o); setSearch(''); setMatchIdx(0); }}
+              >🔍</button>
+              <button
                 title="Eliminar conversación"
                 style={{ fontSize: 12, padding: '4px 10px', flexShrink: 0, color: '#fff', background: 'var(--danger, #ef4444)', border: 'none', borderRadius: 6, cursor: 'pointer' }}
                 onClick={handleDeleteChat}
@@ -459,6 +486,24 @@ export default function ChatPage() {
                 🗑 Eliminar
               </button>
             </div>
+
+            {searchOpen && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+                <input
+                  className="form-input" autoFocus value={search}
+                  onChange={(e) => { setSearch(e.target.value); setMatchIdx(0); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); gotoMatch(e.shiftKey ? -1 : 1); } if (e.key === 'Escape') { setSearchOpen(false); setSearch(''); } }}
+                  placeholder={lang === 'en' ? 'Search in this chat…' : 'Buscar en este chat…'}
+                  style={{ flex: 1, fontSize: 13, padding: '5px 10px' }}
+                />
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 48, textAlign: 'center' }}>
+                  {searchQ ? `${matchIds.length ? matchIdx + 1 : 0}/${matchIds.length}` : ''}
+                </span>
+                <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 13 }} disabled={!matchIds.length} onClick={() => gotoMatch(-1)}>▲</button>
+                <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 13 }} disabled={!matchIds.length} onClick={() => gotoMatch(1)}>▼</button>
+                <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 13 }} onClick={() => { setSearchOpen(false); setSearch(''); }}>✕</button>
+              </div>
+            )}
 
             <div ref={messagesContainerRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
               {loadingMsgs ? (
@@ -469,9 +514,9 @@ export default function ChatPage() {
                 messages.map((msg) => {
                   const isMe = msg.senderId === myId;
                   return (
-                    <div key={msg.id} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', gap: 8, alignItems: 'flex-end' }}>
+                    <div key={msg.id} ref={(el) => { msgRefs.current[msg.id] = el; }} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', gap: 8, alignItems: 'flex-end' }}>
                       {!isMe && <Avatar name={msg.sender?.full_name} email={msg.sender?.email} size={28} />}
-                      <div className="chat-msg-wrap" style={{ maxWidth: '65%' }}>
+                      <div className="chat-msg-wrap" style={{ maxWidth: '65%', ...(msg.id === currentMatchId ? { outline: '2px solid #f59e0b', outlineOffset: '2px', borderRadius: 8 } : {}) }}>
                         {!isMe && (
                           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>
                             {msg.sender?.full_name || msg.sender?.email}
