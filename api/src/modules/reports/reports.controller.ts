@@ -52,15 +52,25 @@ export class ReportsController {
          GROUP BY channel_type ORDER BY total DESC`,
         [tenantId, f, t],
       ),
-      // By agent
+      // By agent — counts conversations each agent actually ATTENDED (sent at least
+      // one human reply), not just ones assigned to them. Bots (sender_type='bot',
+      // no sender_id) are excluded. One row per (agent, conversation) via DISTINCT.
       this.db.query(
         `SELECT u.full_name AS agent, u.id AS agent_id,
-                COUNT(c.id)::int AS total,
-                COUNT(c.id) FILTER (WHERE c.status = 'resolved')::int AS resolved,
-                ROUND(AVG(EXTRACT(EPOCH FROM (c.updated_at - c.created_at))/3600)::numeric, 1) AS avg_hours
-         FROM conversations c
-         JOIN users u ON u.id = c.assigned_to
-         WHERE c.tenant_id = $1 AND c.created_at::date BETWEEN $2 AND $3
+                COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE x.status = 'resolved')::int AS resolved,
+                ROUND(AVG(x.hours)::numeric, 1) AS avg_hours
+         FROM (
+           SELECT DISTINCT m.sender_id AS agent_id, m.conversation_id,
+                  c.status, EXTRACT(EPOCH FROM (c.updated_at - c.created_at))/3600 AS hours
+           FROM messages m
+           JOIN conversations c ON c.id = m.conversation_id
+           WHERE m.tenant_id = $1
+             AND m.sender_type = 'agent' AND m.sender_id IS NOT NULL
+             AND m.is_private = false AND m.direction = 'outbound'
+             AND c.created_at::date BETWEEN $2 AND $3
+         ) x
+         JOIN users u ON u.id = x.agent_id
          GROUP BY u.id, u.full_name ORDER BY total DESC LIMIT 10`,
         [tenantId, f, t],
       ),
