@@ -55,7 +55,16 @@ export class ConversationsController {
   ) {
     const conv = await this.service.update(id, dto as any, tenantId, req.user.id);
     const d = dto as any;
-    if (d.status === 'resolved') this.events.emit('conversation.resolved', { tenantId, conversationId: id, conversation: conv });
+    if (d.status === 'resolved') {
+      // Resolving returns the conversation to the bot: reactivate any human-handoff
+      // session so the bot handles the next message automatically (no manual "return to bot").
+      await this.db.query(
+        `UPDATE ai_chatbot_sessions SET status='active', handed_off_at=NULL
+         WHERE conversation_id = $1 AND tenant_id = $2 AND status='handed_off'`,
+        [id, tenantId],
+      ).catch(() => {});
+      this.events.emit('conversation.resolved', { tenantId, conversationId: id, conversation: conv });
+    }
     else if (d.status === 'open')  this.events.emit('conversation.reopened', { tenantId, conversationId: id, conversation: conv });
     if (d.assignedTo)              this.events.emit('conversation.assigned',  { tenantId, conversationId: id, conversation: conv });
     return conv;
