@@ -32,6 +32,9 @@ export class InternalChatMessage {
   @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
   deletedAt: Date | null;
 
+  @Column({ name: 'reply_to_message_id', type: 'uuid', nullable: true })
+  replyToMessageId: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }

@@ -77,6 +77,7 @@ export default function ChatPage() {
   const [uploading, setUploading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordSecs, setRecordSecs] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -186,10 +187,12 @@ export default function ChatPage() {
   async function handleSend() {
     if (!input.trim() || !activeChat || sending) return;
     const body = input.trim();
+    const replyId = replyTo?.id;
     setInput('');
+    setReplyTo(null);
     setSending(true);
     try {
-      const msg = await sendChatMessage(activeChat.id, body);
+      const msg = await sendChatMessage(activeChat.id, replyId ? { body, replyToMessageId: replyId } : { body });
       setMessages((prev) => [...prev, msg]);
       setChats((prev) =>
         prev.map((c) =>
@@ -551,6 +554,16 @@ export default function ChatPage() {
                             borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
                             fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word',
                           }}>
+                            {msg.replyToMessageId && (() => {
+                              const orig = messages.find((x) => x.id === msg.replyToMessageId);
+                              const who = orig ? (orig.senderId === myId ? (lang === 'en' ? 'You' : 'Tú') : (orig.sender?.full_name || orig.sender?.email || '')) : '';
+                              const prev = orig ? (orig.body || (orig.attachmentType ? `📎 ${orig.attachmentName || 'archivo'}` : '…')) : '…';
+                              return (
+                                <div style={{ borderLeft: '3px solid currentColor', padding: '2px 8px', marginBottom: 5, background: 'rgba(0,0,0,.15)', borderRadius: 4, fontSize: 12, opacity: 0.85, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  ↩ {who ? `${who}: ` : ''}{prev.length > 60 ? prev.slice(0, 60) + '…' : prev}
+                                </div>
+                              );
+                            })()}
                             {msg.attachmentUrl && msg.attachmentType === 'image' && (
                               <a href={`${API_URL}${msg.attachmentUrl}`} target="_blank" rel="noopener noreferrer">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -571,12 +584,15 @@ export default function ChatPage() {
                         )}
                         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, textAlign: isMe ? 'right' : 'left', display: 'flex', gap: 8, justifyContent: isMe ? 'flex-end' : 'flex-start', alignItems: 'center' }}>
                           <span>{formatTime(msg.createdAt, i.locale)}{msg.editedAt && !msg.deletedAt ? ' · editado' : ''}</span>
-                          {isMe && !msg.deletedAt && editingId !== msg.id && (
+                          {!msg.deletedAt && editingId !== msg.id && (
                             <span className="chat-msg-actions" style={{ display: 'flex', gap: 6 }}>
-                              {!msg.attachmentUrl && (
+                              <button onClick={() => setReplyTo(msg)} title={lang === 'en' ? 'Reply' : 'Responder'} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}>↩</button>
+                              {isMe && !msg.attachmentUrl && (
                                 <button onClick={() => startEdit(msg)} title="Editar" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}>✎</button>
                               )}
-                              <button onClick={() => handleDelete(msg.id)} title="Eliminar" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}>🗑</button>
+                              {isMe && (
+                                <button onClick={() => handleDelete(msg.id)} title="Eliminar" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}>🗑</button>
+                              )}
                             </span>
                           )}
                         </div>
@@ -588,6 +604,15 @@ export default function ChatPage() {
               )}
               <div ref={messagesEndRef} />
             </div>
+
+            {replyTo && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderTop: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+                <div style={{ borderLeft: '3px solid var(--primary)', paddingLeft: 8, flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  ↩ {lang === 'en' ? 'Replying to' : 'Respondiendo a'} <strong>{replyTo.senderId === myId ? (lang === 'en' ? 'you' : 'ti') : (replyTo.sender?.full_name || replyTo.sender?.email || '')}</strong>: {(replyTo.body || (replyTo.attachmentType ? `📎 ${replyTo.attachmentName || 'archivo'}` : '')).slice(0, 80)}
+                </div>
+                <button onClick={() => setReplyTo(null)} title={lang === 'en' ? 'Cancel' : 'Cancelar'} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--text-muted)', flexShrink: 0 }}>✕</button>
+              </div>
+            )}
 
             <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', background: 'var(--bg)', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
               <input

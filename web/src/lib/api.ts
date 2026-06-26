@@ -989,6 +989,7 @@ export interface ChatMessage {
   attachmentName?: string | null;
   editedAt?: string | null;
   deletedAt?: string | null;
+  replyToMessageId?: string | null;
   createdAt: string;
   sender: { id: string; full_name?: string; email?: string };
 }
@@ -998,6 +999,7 @@ export interface ChatSendPayload {
   attachmentUrl?: string;
   attachmentType?: string;
   attachmentName?: string;
+  replyToMessageId?: string;
 }
 
 export const getMyChats = () => apiGet<InternalChat[]>('/internal-chat');

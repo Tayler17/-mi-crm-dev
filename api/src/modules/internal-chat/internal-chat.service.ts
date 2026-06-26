@@ -25,7 +25,8 @@ export class InternalChatService implements OnModuleInit {
         ADD COLUMN IF NOT EXISTS attachment_type TEXT,
         ADD COLUMN IF NOT EXISTS attachment_name TEXT,
         ADD COLUMN IF NOT EXISTS edited_at  TIMESTAMPTZ,
-        ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ
+        ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS reply_to_message_id UUID
     `).catch(() => {});
     await this.msgRepo.query(`ALTER TABLE internal_chat_messages ALTER COLUMN body SET DEFAULT ''`).catch(() => {});
   }
@@ -214,6 +215,7 @@ export class InternalChatService implements OnModuleInit {
         attachmentUrl: dto.attachmentUrl ?? null,
         attachmentType: dto.attachmentType ?? null,
         attachmentName: dto.attachmentName ?? null,
+        replyToMessageId: dto.replyToMessageId ?? null,
       }),
     );
     // touch updated_at on the chat

@@ -33,6 +33,10 @@ export class SendMessageDto {
   @IsString()
   @IsOptional()
   attachmentName?: string;
+
+  @IsUUID()
+  @IsOptional()
+  replyToMessageId?: string;
 }
 
 export class EditMessageDto {
