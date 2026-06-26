@@ -1152,7 +1152,10 @@ export class WhatsappWebService implements OnModuleInit {
           }
           const fileUrl  = `/uploads/messages/${filename}`;
           const origName = msgContent.documentMessage?.fileName ?? msgContent.audioMessage?.fileName ?? filename;
-          body = `${fileUrl}|${origName}`;
+          // Keep the caption the sender attached to the media (e.g. an invoice number)
+          // as a 3rd "|" segment so it isn't lost in the CRM.
+          const mediaCaption: string = (msgContent.imageMessage?.caption || msgContent.videoMessage?.caption || msgContent.documentMessage?.caption || '').replace(/\|/g, ' ').trim();
+          body = mediaCaption ? `${fileUrl}|${origName}|${mediaCaption}` : `${fileUrl}|${origName}`;
           // Treat document messages with image extension as images so they render inline
           const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic'];
           if (contentType === 'imageMessage' || contentType === 'stickerMessage') dbContentType = 'image';

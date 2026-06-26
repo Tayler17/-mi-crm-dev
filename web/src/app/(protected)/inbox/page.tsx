@@ -1718,8 +1718,8 @@ export default function InboxPage() {
                       : /^(mp4|mov|avi|webm|3gp)$/.test(ext) ? 'video' : 'file';
                   }
                   const isFile = ctype === 'image' || ctype === 'audio' || ctype === 'video' || ctype === 'file';
-                  let fileUrl = ''; let fileName = '';
-                  if (isFile && m.body?.includes('|')) { [fileUrl, fileName] = m.body.split('|'); }
+                  let fileUrl = ''; let fileName = ''; let fileCaption = '';
+                  if (isFile && m.body?.includes('|')) { const _p = m.body.split('|'); fileUrl = _p[0]; fileName = _p[1] ?? ''; fileCaption = _p.slice(2).join('|'); }
                   else if (isFile) { fileUrl = m.body; fileName = m.body.split('/').pop() ?? 'archivo'; }
                   const isTranscript = !isFile && m.body?.includes('**Transcript:**');
                   return (
@@ -1781,6 +1781,9 @@ export default function InboxPage() {
                             📎 <span style={{ textDecoration: 'underline', wordBreak: 'break-all' }}>{fileName}</span>
                           </a>
                         ) : renderBody(m.body)}
+                        {isFile && fileCaption && (
+                          <div style={{ marginTop: 5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fileCaption}</div>
+                        )}
                         </>)}
                       </div>
                       <div className="msg-time" style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: m.direction === 'outbound' ? 'flex-end' : 'flex-start' }}>
