@@ -323,31 +323,55 @@ export class WhatsappWebService implements OnModuleInit {
     }
   }
 
-  /** Mark the last inbound message from this JID as read (WhatsApp blue ticks). */
+  /** Mark the last inbound message from this JID as read (WhatsApp blue ticks).
+   *  Marks ONLY when the bot/agent replies (this is called from send). The in-memory
+   *  key map is lost on restart, so we fall back to reconstructing the key from the DB
+   *  (last inbound message's external_id) — this way replying still marks read after a
+   *  redeploy. */
   private async markPendingRead(connectionId: string, remoteJid: string): Promise<void> {
     const session = this.sessions.get(connectionId);
-    const pending = this.pendingReadKeys.get(connectionId);
-    if (!session?.sock || !pending || pending.size === 0) return;
+    if (!session?.sock) return;
 
-    // Find the stored key. Exact JID first; else match by phone tail (last 9 digits)
-    // so a LID-stored key still resolves when we reply via the phone JID (or vice versa).
     const tail = (s?: string) => (s || '').replace(/\D/g, '').slice(-9);
-    let matchJid: string | undefined;
-    if (pending.has(remoteJid)) {
-      matchJid = remoteJid;
-    } else {
-      const want = tail(remoteJid);
-      for (const k of pending.keys()) { if (want && tail(k) === want) { matchJid = k; break; } }
-    }
-    if (!matchJid) return;
+    let key: any = null;
 
-    const key = pending.get(matchJid)!;
-    pending.delete(matchJid);
+    // 1. Prefer the exact in-memory key (most reliable when available).
+    const pending = this.pendingReadKeys.get(connectionId);
+    if (pending && pending.size > 0) {
+      let matchJid: string | undefined;
+      if (pending.has(remoteJid)) {
+        matchJid = remoteJid;
+      } else {
+        const want = tail(remoteJid);
+        for (const k of pending.keys()) { if (want && tail(k) === want) { matchJid = k; break; } }
+      }
+      if (matchJid) { key = pending.get(matchJid); pending.delete(matchJid); }
+    }
+
+    // 2. Fallback: reconstruct from DB (survives restarts). Last inbound WA message
+    //    of the conversation tied to this connection + phone.
+    if (!key) {
+      const want = tail(remoteJid);
+      const [row] = await this.db.query(
+        `SELECT m.external_id, c.external_id AS conv_jid
+           FROM messages m
+           JOIN conversations c ON c.id = m.conversation_id
+          WHERE c.connection_id = $1 AND m.direction = 'inbound'
+            AND m.external_id IS NOT NULL AND RIGHT(regexp_replace(c.external_id, '\\D', '', 'g'), 9) = $2
+          ORDER BY m.created_at DESC LIMIT 1`,
+        [connectionId, want],
+      ).catch(() => [null]);
+      if (row?.external_id) {
+        key = { remoteJid: row.conv_jid || remoteJid, id: row.external_id, fromMe: false };
+      }
+    }
+
+    if (!key) return;
     try {
       await session.sock.readMessages([key]);
-      this.logger.log(`[whatsapp_web] marked read for ${matchJid}`);
+      this.logger.log(`[whatsapp_web] marked read for ${remoteJid}`);
     } catch (e: any) {
-      this.logger.warn(`[whatsapp_web] readMessages failed for ${matchJid}: ${e?.message}`);
+      this.logger.warn(`[whatsapp_web] readMessages failed for ${remoteJid}: ${e?.message}`);
     }
   }
 
