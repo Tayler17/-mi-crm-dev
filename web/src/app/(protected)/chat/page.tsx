@@ -618,7 +618,7 @@ export default function ChatPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*,audio/*"
+                accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"
                 style={{ display: 'none' }}
                 onChange={handleAttach}
               />

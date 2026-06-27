@@ -670,7 +670,11 @@ export class WhatsappWebService implements OnModuleInit {
               `SELECT body FROM messages WHERE external_id=$1 LIMIT 1`,
               [key.id],
             );
-            if (msg?.body) return { conversation: msg.body };
+            // Only re-send TEXT messages this way. A media body is a file path
+            // ("/uploads/…|name|caption"); returning it as `conversation` would deliver
+            // the raw path as text to the recipient on a retry. For media, return
+            // undefined (can't reconstruct the original media frame here).
+            if (msg?.body && !/^\/uploads\//.test(msg.body)) return { conversation: msg.body };
           } catch {}
           return undefined;
         },
