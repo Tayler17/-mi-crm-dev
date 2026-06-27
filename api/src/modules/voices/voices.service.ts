@@ -1,6 +1,10 @@
-import { Injectable, NotFoundException, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import axios from 'axios';
+import { PlatformSettingsService } from '../settings/platform-settings.service';
 
 const SELECT_COLS = `
   id, name, description, language, gender,
@@ -16,7 +20,41 @@ const SELECT_COLS = `
 @Injectable()
 export class VoicesService implements OnModuleInit {
   private readonly logger = new Logger(VoicesService.name);
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly platformSettings: PlatformSettingsService,
+  ) {}
+
+  /** Generate (or serve from cache) a short audio sample for a Deepgram Aura voice,
+   *  so owners/tenants can preview it before assigning. Cached on disk per voice model
+   *  → Deepgram is hit only the FIRST time each voice is previewed. */
+  async getPreviewAudio(id: string): Promise<{ buffer: Buffer; contentType: string }> {
+    const voice = await this.findOne(id); // 404 if missing
+    const model = String(voice.ttsVoiceId || '');
+    if (voice.ttsProvider !== 'deepgram' || !/^aura/i.test(model)) {
+      throw new BadRequestException('La previsualización solo está disponible para voces Deepgram Aura.');
+    }
+    const dir = join(process.cwd(), 'uploads', 'voice-previews');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const file = join(dir, `${model.replace(/[^\w.-]/g, '_')}.wav`);
+    if (existsSync(file)) {
+      return { buffer: readFileSync(file), contentType: 'audio/wav' };
+    }
+    const key = (await this.platformSettings.get('deepgram.api_key').catch(() => '')) as string;
+    if (!key) throw new BadRequestException('Falta la API Key de Deepgram en Ajustes → Plataforma.');
+    const isEs = String(voice.language || '').toLowerCase().startsWith('es');
+    const text = isEs
+      ? 'Hola, soy tu asistente de AutoMarkIQ. ¿En qué puedo ayudarte hoy?'
+      : 'Hi, I am your AutoMarkIQ assistant. How can I help you today?';
+    const res = await axios.post(
+      `https://api.deepgram.com/v1/speak?model=${encodeURIComponent(model)}&encoding=linear16&container=wav&sample_rate=24000`,
+      { text },
+      { headers: { Authorization: `Token ${key}`, 'Content-Type': 'application/json' }, responseType: 'arraybuffer', timeout: 15000 },
+    );
+    const buffer = Buffer.from(res.data);
+    try { writeFileSync(file, buffer); } catch { /* cache best-effort */ }
+    return { buffer, contentType: 'audio/wav' };
+  }
 
   /** Seed default Deepgram Aura-2 voices (used by the real-time Voice Agent) so the
    *  Voice Catalog isn't empty and tenants can pick one. Idempotent. */

@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Request, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Request, Res, ForbiddenException } from '@nestjs/common';
+import { Response } from 'express';
 import { VoicesService } from './voices.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -11,6 +12,14 @@ export class VoicesController {
   @Get()
   findAll() {
     return this.svc.findAll();
+  }
+
+  /** Audio sample of a voice (owner + tenants). Cached per voice → minimal Deepgram cost. */
+  @Get(':id/preview')
+  async preview(@Param('id') id: string, @Res() res: Response) {
+    const { buffer, contentType } = await this.svc.getPreviewAudio(id);
+    res.set({ 'Content-Type': contentType, 'Cache-Control': 'private, max-age=86400' });
+    res.send(buffer);
   }
 
   @Get(':id')

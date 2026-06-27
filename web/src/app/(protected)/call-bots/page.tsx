@@ -14,6 +14,7 @@ import {
   getInboxes,
   initiateCall,
   hangupCall,
+  previewVoice,
   getCallBotKnowledgeSources,
   addCallBotKnowledgeUrl,
   reindexCallBotKnowledgeSource,
@@ -545,11 +546,27 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
   const [error, setError] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
+  const [previewingVoice, setPreviewingVoice] = useState(false);
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
   function upd<K extends keyof BotForm>(k: K, v: BotForm[K]) {
     setForm((p) => ({ ...p, [k]: v }));
     setDirty(true);
+  }
+
+  async function playVoicePreview() {
+    if (!form.voiceCatalogId || previewingVoice) return;
+    setPreviewingVoice(true);
+    try {
+      const url = await previewVoice(form.voiceCatalogId);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      await audio.play();
+    } catch (e: any) {
+      alert(e?.message || t('Could not play the sample', 'No se pudo reproducir la muestra'));
+    } finally {
+      setPreviewingVoice(false);
+    }
   }
 
   function f(k: keyof BotForm) {
@@ -1057,13 +1074,21 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
               {voices.filter((v) => v.isActive).length > 0 && (
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">{t('System voice', 'Voz del sistema')}</label>
-                  <select className="form-input" value={form.voiceCatalogId}
-                    onChange={(e) => { upd('voiceCatalogId', e.target.value); }}>
-                    <option value="">{isOwner ? t('— Manual configuration (advanced) —', '— Configuración manual (avanzado) —') : t('— Select voice —', '— Seleccionar voz —')}</option>
-                    {voices.filter((v) => v.isActive).map((v) => (
-                      <option key={v.id} value={v.id}>{v.name}</option>
-                    ))}
-                  </select>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <select className="form-input" style={{ flex: 1 }} value={form.voiceCatalogId}
+                      onChange={(e) => { upd('voiceCatalogId', e.target.value); }}>
+                      <option value="">{isOwner ? t('— Manual configuration (advanced) —', '— Configuración manual (avanzado) —') : t('— Select voice —', '— Seleccionar voz —')}</option>
+                      {voices.filter((v) => v.isActive).map((v) => (
+                        <option key={v.id} value={v.id}>{v.name}</option>
+                      ))}
+                    </select>
+                    <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', flexShrink: 0 }}
+                      disabled={!form.voiceCatalogId || previewingVoice}
+                      title={t('Listen to a sample', 'Escuchar una muestra')}
+                      onClick={playVoicePreview}>
+                      {previewingVoice ? '⏳' : '▶'}
+                    </button>
+                  </div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
                     {t('In real-time mode, choose a "Deepgram Aura-2" voice — this is the voice the bot will use.', 'En modo tiempo real, elige una voz "Deepgram Aura-2" — esa es la voz que usará el bot.')}
                   </div>

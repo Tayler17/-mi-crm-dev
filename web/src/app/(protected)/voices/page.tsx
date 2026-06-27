@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getVoices, createVoice, updateVoice, deleteVoice, type Voice } from '@/lib/api';
+import { getVoices, createVoice, updateVoice, deleteVoice, previewVoice, type Voice } from '@/lib/api';
 
 const LANGUAGES = ['es-MX', 'es-ES', 'es-AR', 'es-CO', 'en-US', 'en-GB', 'pt-BR'];
 const TTS_PROVIDERS = [
@@ -306,6 +306,22 @@ export default function VoicesPage() {
     setVoices((p) => p.filter((x) => x.id !== v.id));
   }
 
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  async function playPreview(v: Voice) {
+    if (previewingId) return;
+    setPreviewingId(v.id);
+    try {
+      const url = await previewVoice(v.id);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      await audio.play();
+    } catch (e: any) {
+      alert(e?.message || 'No se pudo reproducir la muestra');
+    } finally {
+      setPreviewingId(null);
+    }
+  }
+
   function openModal(voice: Voice | null) {
     setEditing(voice);
     setShowModal(true);
@@ -411,6 +427,11 @@ export default function VoicesPage() {
                   </td>
                   <td style={{ padding: '10px 14px' }}>
                     <div style={{ display: 'flex', gap: 6 }}>
+                      {v.ttsProvider === 'deepgram' && (
+                        <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 12 }} disabled={previewingId === v.id} title="Escuchar muestra" onClick={() => playPreview(v)}>
+                          {previewingId === v.id ? '⏳' : '▶'}
+                        </button>
+                      )}
                       <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => openModal(v)}>Editar</button>
                       <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 12, color: 'var(--danger)' }} onClick={() => handleDelete(v)}>✕</button>
                     </div>

@@ -2048,3 +2048,9 @@ export const createVoice = (data: Omit<Voice, 'id'>) => apiPost<Voice>('/voices'
 export const updateVoice = (id: string, data: Partial<Omit<Voice, 'id'>>) =>
   apiPatch<Voice>(`/voices/${id}`, data);
 export const deleteVoice = (id: string) => apiDelete(`/voices/${id}`);
+/** Fetch a voice's audio sample (auth) and return a playable object URL. */
+export async function previewVoice(id: string): Promise<string> {
+  const res = await fetch(`${API_URL}/voices/${id}/preview`, { headers: { Authorization: `Bearer ${getToken()}` } });
+  if (!res.ok) throw new Error((await res.text().catch(() => '')) || 'No se pudo generar la muestra de voz');
+  return URL.createObjectURL(await res.blob());
+}
