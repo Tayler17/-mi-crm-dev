@@ -70,6 +70,7 @@ export class CallBotsService implements OnModuleInit {
       ttsVoiceId: dto.ttsVoiceId,
       transferToNumber: dto.transferToNumber,
       voiceCatalogId: dto.voiceCatalogId,
+      streamingMode: dto.streamingMode ?? false,
       status: 'draft',
       createdBy: userId,
     });

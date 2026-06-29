@@ -52,6 +52,9 @@ export class CreateCallBotDto {
   @IsUUID('4') @IsOptional()
   voiceCatalogId?: string;
 
+  @IsBoolean() @IsOptional()
+  streamingMode?: boolean;
+
   // Accept both camelCase (TS convention) and snake_case (sent by frontend)
   @IsObject() @IsOptional()
   visualConfig?: Record<string, any>;
