@@ -1023,7 +1023,31 @@ ${addTagInstruction}
           ? 'TRANSFERIR A UN HUMANO: Si el cliente pide hablar con una persona real, di una frase MUY breve ("Te paso con un agente, un momento") y llama a transfer_to_human EN EL MISMO turno. CRÍTICO: llama a la función inmediatamente; NO esperes a que el cliente responda.'
           : 'TRANSFER TO A HUMAN: If the caller asks to speak with a real person, say a VERY short heads-up ("One moment, connecting you to an agent") and call transfer_to_human IN THE SAME turn. CRITICAL: call the function immediately; do NOT wait for the caller to reply.')
       : '';
-    const prompt = [bot.system_prompt ?? '', dateRule, langRule, voiceRule, apptRule, deptRule, humanRule, hangupRule].filter(Boolean).join('\n\n');
+    // CRM actions: the Voice Agent has the functions (create_deal, update_deal,
+    // create_task, add_tag, update_contact) but the prompt never told it WHEN to use
+    // them, so it almost never did. Mirror the guidance the legacy Gather path had.
+    const stageList = crmCtx.stages.length
+      ? (isEs ? ` Etapas disponibles: ${crmCtx.stages.map((s: any) => s.pipeline_name ? `${s.name} (${s.pipeline_name})` : s.name).join(', ')}.`
+              : ` Available stages: ${crmCtx.stages.map((s: any) => s.pipeline_name ? `${s.name} (${s.pipeline_name})` : s.name).join(', ')}.`)
+      : '';
+    const tagList = crmCtx.tags.length
+      ? (isEs ? ` Etiquetas disponibles: ${crmCtx.tags.map((t: any) => t.name).join(', ')}.`
+              : ` Available tags: ${crmCtx.tags.map((t: any) => t.name).join(', ')}.`)
+      : '';
+    const crmRule = isEs
+      ? `ACCIONES EN EL CRM (hazlas en silencio, sin mencionarlas al cliente, DURANTE la llamada y no al final):
+- update_contact: cuando el cliente comparta o corrija sus datos (nombre, teléfono, email, dirección), guárdalos.
+- create_deal: cuando el cliente muestre interés, haga una reserva/cita o se cierre una venta, crea un trato con la etapa adecuada.${stageList}
+- update_deal: cuando un trato avance (cita confirmada, venta cerrada), muévelo a la etapa correspondiente.
+- create_task: crea una tarea de seguimiento cuando el cliente pida que le llamen, deje una nota o necesite seguimiento.
+- add_tag: en cuanto identifiques la intención principal del cliente, etiqueta el contacto.${tagList}`
+      : `CRM ACTIONS (do them silently, without mentioning them to the caller, DURING the call and not at the end):
+- update_contact: when the caller shares or corrects their details (name, phone, email, address), save them.
+- create_deal: when the caller shows interest, makes a booking/appointment or closes a sale, create a deal with the right stage.${stageList}
+- update_deal: when a deal progresses (appointment confirmed, sale closed), move it to the matching stage.
+- create_task: create a follow-up task when the caller asks to be called back, leaves a note, or needs follow-up.
+- add_tag: as soon as you identify the caller's main intent, tag the contact.${tagList}`;
+    const prompt = [bot.system_prompt ?? '', dateRule, langRule, voiceRule, apptRule, crmRule, deptRule, humanRule, hangupRule].filter(Boolean).join('\n\n');
 
     // Use the Aura voice the tenant picked in the Voice Catalog (getBot resolves
     // voice_catalog_id → tts_provider/tts_voice_id); else the catalog's default voice
