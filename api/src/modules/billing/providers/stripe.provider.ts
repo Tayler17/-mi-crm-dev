@@ -145,6 +145,13 @@ export class StripeProvider implements PaymentProvider {
     return { url: link.url };
   }
 
+  /** Delete an Express/Custom connected account created by this platform. */
+  async deleteConnectAccount(accountId: string): Promise<{ deleted: boolean }> {
+    const stripe = await this.sdk();
+    const res = await stripe.accounts.del(accountId);
+    return { deleted: !!res?.deleted };
+  }
+
   /** Creates a one-time Checkout Session on behalf of a connected account */
   async createConnectCheckoutSession(params: {
     accountId: string;

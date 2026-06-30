@@ -5,8 +5,18 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   getConnectAccount, createConnectOnboarding, syncConnectAccount, getCurrentPlan,
+  disconnectConnectAccount,
   type ConnectAccount,
 } from '@/lib/api';
+
+// Stripe Connect Express — supported countries (subset). Country is fixed at account
+// creation and cannot be changed later, so the tenant picks it before connecting.
+const CONNECT_COUNTRIES: Array<[string, string]> = [
+  ['GB', 'Reino Unido'], ['US', 'Estados Unidos'], ['IE', 'Irlanda'],
+  ['ES', 'España'], ['FR', 'Francia'], ['DE', 'Alemania'], ['IT', 'Italia'],
+  ['PT', 'Portugal'], ['NL', 'Países Bajos'], ['BE', 'Bélgica'],
+  ['CA', 'Canadá'], ['AU', 'Australia'], ['MX', 'México'],
+];
 
 // ── Inner component (uses useSearchParams — must be inside <Suspense>) ────────
 
@@ -18,6 +28,7 @@ function PaymentsSettingsContent() {
   const [error, setError]           = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [hasFeature, setHasFeature] = useState<boolean | null>(null);
+  const [country, setCountry]       = useState('GB');
 
   useEffect(() => {
     const success = params.get('success');
@@ -61,7 +72,7 @@ function PaymentsSettingsContent() {
   async function handleOnboard() {
     setWorking(true); setError('');
     try {
-      const res = await createConnectOnboarding();
+      const res = await createConnectOnboarding(country);
       if (res.onboardingUrl) {
         window.location.href = res.onboardingUrl;
       } else if (res.complete) {
@@ -81,6 +92,18 @@ function PaymentsSettingsContent() {
       setSuccessMsg('✅ Estado sincronizado correctamente.');
     } catch (e: any) {
       setError(e.message ?? 'Error al sincronizar');
+    } finally { setWorking(false); }
+  }
+
+  async function handleDisconnect() {
+    if (!confirm('¿Seguro que quieres desconectar esta cuenta de Stripe? Se eliminará el vínculo en el CRM (y la cuenta en Stripe si es posible) y tendrás que volver a conectar desde cero. Útil si el país es incorrecto.')) return;
+    setWorking(true); setError('');
+    try {
+      await disconnectConnectAccount();
+      setAccount(null);
+      setSuccessMsg('✅ Cuenta desconectada. Ahora puedes conectar una nueva con el país correcto.');
+    } catch (e: any) {
+      setError(e.message ?? 'Error al desconectar');
     } finally { setWorking(false); }
   }
 
@@ -208,6 +231,27 @@ function PaymentsSettingsContent() {
           </div>
         )}
 
+        {!isConnected && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>
+              País de tu negocio
+            </label>
+            <select
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              className="form-input"
+              style={{ maxWidth: 300 }}
+            >
+              {CONNECT_COUNTRIES.map(([code, name]) => (
+                <option key={code} value={code}>{name} ({code})</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 11, color: '#b45309', marginTop: 6 }}>
+              ⚠️ El país NO se puede cambiar después de crear la cuenta. Elige el correcto antes de conectar.
+            </div>
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {!isConnected ? (
             <button className="btn btn-primary" disabled={working} onClick={handleOnboard}>
@@ -222,6 +266,17 @@ function PaymentsSettingsContent() {
           {isConnected && (
             <button className="btn btn-secondary" disabled={working} onClick={handleSync}>
               {working ? 'Sincronizando...' : '🔄 Sincronizar estado'}
+            </button>
+          )}
+
+          {isConnected && (
+            <button
+              className="btn btn-secondary"
+              disabled={working}
+              onClick={handleDisconnect}
+              style={{ color: '#dc2626', borderColor: '#fca5a5' }}
+            >
+              🗑 Desconectar
             </button>
           )}
 

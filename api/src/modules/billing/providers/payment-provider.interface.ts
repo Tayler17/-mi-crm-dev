@@ -69,6 +69,9 @@ export interface PaymentProvider {
   /** Refresh the onboarding link for an incomplete Connect account */
   createConnectOnboardingLink?(accountId: string, returnUrl: string, refreshUrl: string): Promise<{ url: string }>;
 
+  /** Delete a Connect account on the provider (best-effort cleanup on disconnect) */
+  deleteConnectAccount?(accountId: string): Promise<{ deleted: boolean }>;
+
   /** Create a payout/transfer to a connected account */
   createTransfer?(params: { accountId: string; amount: number; currency: string; description?: string }): Promise<{ transferId: string }>;
 }

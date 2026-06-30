@@ -253,10 +253,15 @@ export class BillingService {
     return row ?? null;
   }
 
-  async createConnectAccount(tenantId: string) {
+  async createConnectAccount(tenantId: string, country?: string) {
     const existing = await this.getConnectAccount(tenantId);
     const provider = await this.getProvider(tenantId);
     if (!provider.createConnectAccount) throw new BadRequestException('Provider does not support Connect');
+
+    // Country is fixed at account creation and CANNOT be changed in Stripe later, so
+    // it must be set correctly the first time. Default to GB (the platform's country).
+    const cc = (country || 'GB').toUpperCase();
+    if (!/^[A-Z]{2}$/.test(cc)) throw new BadRequestException('País inválido (usa código ISO de 2 letras, ej. GB).');
 
     const tenant = await this.getTenant(tenantId);
 
@@ -275,7 +280,7 @@ export class BillingService {
       return { accountId: existing.account_id, onboardingUrl: null, isNew: false, complete: true };
     }
 
-    const result = await provider.createConnectAccount(tenantId, tenant?.billing_email || undefined);
+    const result = await provider.createConnectAccount(tenantId, tenant?.billing_email || undefined, cc);
 
     await this.db.query(
       `INSERT INTO payment_accounts (tenant_id, provider, account_id)
@@ -285,6 +290,25 @@ export class BillingService {
     );
 
     return { ...result, isNew: true };
+  }
+
+  /** Disconnect: delete the account on Stripe (best-effort) and remove the local link
+   *  so a fresh account can be created (e.g. to fix a wrong country). */
+  async disconnectConnectAccount(tenantId: string) {
+    const row = await this.getConnectAccount(tenantId);
+    if (!row?.account_id) throw new BadRequestException('No hay cuenta Connect para este tenant');
+
+    const provider = await this.getProvider(tenantId);
+    if (provider.deleteConnectAccount) {
+      // Best-effort: if Stripe refuses (e.g. account has a balance), still unlink locally.
+      try { await provider.deleteConnectAccount(row.account_id); } catch { /* ignore */ }
+    }
+
+    await this.db.query(
+      `DELETE FROM payment_accounts WHERE tenant_id=$1 AND provider='stripe'`,
+      [tenantId],
+    );
+    return { disconnected: true };
   }
 
   async syncConnectAccount(tenantId: string) {

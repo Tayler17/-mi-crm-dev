@@ -1372,10 +1372,13 @@ export interface ConnectAccount {
 export const getConnectAccount  = () =>
   apiGet<ConnectAccount | null>('/billing/connect/account');
 
-export const createConnectOnboarding = () =>
+export const createConnectOnboarding = (country?: string) =>
   apiPost<{ accountId: string; onboardingUrl: string | null; isNew: boolean; complete?: boolean }>(
-    '/billing/connect/onboard', {},
+    '/billing/connect/onboard', country ? { country } : {},
   );
+
+export const disconnectConnectAccount = () =>
+  apiDelete('/billing/connect/account');
 
 export const syncConnectAccount = () =>
   apiPost<{ chargesEnabled: boolean; payoutsEnabled: boolean; detailsSubmitted: boolean }>(

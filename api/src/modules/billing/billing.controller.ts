@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Req, Headers, HttpCode,
+  Controller, Get, Post, Delete, Req, Headers, HttpCode,
   UseGuards, Body, Query,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -61,8 +61,14 @@ export class BillingController {
 
   @Post('connect/onboard')
   @UseGuards(JwtAuthGuard)
-  createConnectAccount(@TenantId() tenantId: string) {
-    return this.billing.createConnectAccount(tenantId);
+  createConnectAccount(@TenantId() tenantId: string, @Body() dto: { country?: string }) {
+    return this.billing.createConnectAccount(tenantId, dto?.country);
+  }
+
+  @Delete('connect/account')
+  @UseGuards(JwtAuthGuard)
+  disconnectConnectAccount(@TenantId() tenantId: string) {
+    return this.billing.disconnectConnectAccount(tenantId);
   }
 
   @Post('connect/sync')
