@@ -67,6 +67,12 @@ export class CallBotMediaStreamService {
     // it never fires on a healthy turn. Armed only by a completed caller turn.
     const SILENCE_MS = 7000;
     let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+    // Greeting watchdog: Deepgram intermittently applies Settings but never speaks the
+    // greeting → the caller hears dead air on pickup. If no bot output arrives shortly
+    // after SettingsApplied, we speak the greeting ourselves via InjectAgentMessage.
+    const GREETING_MS = 3000;
+    let greetingTimer: ReturnType<typeof setTimeout> | null = null;
+    let greetingText = '';
 
     const sendToTwilio = (obj: any) => {
       if (twilioWs.readyState === WebSocket.OPEN) twilioWs.send(JSON.stringify(obj));
@@ -74,6 +80,9 @@ export class CallBotMediaStreamService {
 
     const clearSilence = () => {
       if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+    };
+    const clearGreeting = () => {
+      if (greetingTimer) { clearTimeout(greetingTimer); greetingTimer = null; }
     };
     const armSilence = () => {
       clearSilence();
@@ -107,6 +116,7 @@ export class CallBotMediaStreamService {
       if (closed) return;
       closed = true;
       clearSilence();
+      clearGreeting();
       if (keepAlive) { clearInterval(keepAlive); keepAlive = null; }
       try { agentWs?.close(); } catch { /* ignore */ }
       try { twilioWs.close(); } catch { /* ignore */ }
@@ -116,6 +126,7 @@ export class CallBotMediaStreamService {
      *  `settings` is built BEFORE opening so we can send it synchronously on open
      *  (no async gap during which Twilio audio could race ahead of Settings). */
     const openAgent = async (settings: any) => {
+      greetingText = settings.agent?.greeting ?? '';
       const dgKey = (await this.platformSettings.get('deepgram.api_key').catch(() => '')) as string;
       if (!dgKey) { this.logger.error('[voice-agent] no Deepgram key configured'); cleanup(); return; }
 
@@ -136,6 +147,7 @@ export class CallBotMediaStreamService {
         // Binary frames = TTS audio (mulaw 8k) → forward to Twilio in small frames.
         if (isBinary) {
           clearSilence(); // bot is speaking → not stalled
+          clearGreeting(); // bot audio flowing → greeting is happening
           const buf = data as Buffer;
           for (let i = 0; i < buf.length; i += 640) {
             sendToTwilio({ event: 'media', streamSid, media: { payload: buf.subarray(i, i + 640).toString('base64') } });
@@ -147,15 +159,35 @@ export class CallBotMediaStreamService {
         // TEMP diagnostic: see every non-audio event Deepgram sends.
         if (msg.type && msg.type !== 'ConversationText') this.logger.log(`[voice-agent] evt ${msg.type}`);
         switch (msg.type) {
+          case 'SettingsApplied':
+            // Greeting watchdog: if the agent doesn't speak the greeting shortly after
+            // settings apply (Deepgram sometimes doesn't), speak it ourselves so the
+            // caller never gets dead air on pickup. Cleared as soon as any bot output
+            // or caller speech appears, so a normal greeting (~0.3s) never doubles.
+            clearGreeting();
+            greetingTimer = setTimeout(() => {
+              greetingTimer = null;
+              if (closed || !greetingText) return;
+              if (agentWs?.readyState !== WebSocket.OPEN) return;
+              try {
+                agentWs.send(JSON.stringify({ type: 'InjectAgentMessage', content: greetingText }));
+                this.logger.log(`[voice-agent] greeting not spoken → injected call=${callSid}`);
+              } catch (e: any) {
+                this.logger.warn(`[voice-agent] greeting inject failed: ${e.message}`);
+              }
+            }, GREETING_MS);
+            break;
           case 'UserStartedSpeaking':
             // Barge-in: stop whatever the bot is playing.
             sendToTwilio({ event: 'clear', streamSid });
             clearSilence(); // caller is talking → not waiting on the bot
+            clearGreeting(); // caller spoke → greeting window is over
             break;
           case 'ConversationText': {
             const content = msg.content || '';
             this.logger.log(`[voice-agent] ${msg.role}: ${content.slice(0, 70)}`);
             if (content) this.twilio.appendCallTranscript(callSid, msg.role === 'user' ? 'user' : 'bot', content);
+            clearGreeting(); // any transcript means the call is under way → greeting window over
             // Silence watchdog: caller finished a turn → start waiting for the bot;
             // the bot's own text (or audio/function below) clears it.
             if (msg.role === 'user') armSilence(); else clearSilence();
@@ -178,6 +210,7 @@ export class CallBotMediaStreamService {
           }
           case 'AgentAudioDone':
             clearSilence(); // bot finished speaking → now waiting on the caller, not stalled
+            clearGreeting(); // bot spoke → greeting handled
             // Transfer takes priority over hangup: execute it once the heads-up plays.
             if (pendingTransfer && !closed) {
               setTimeout(executeTransfer, 800);
