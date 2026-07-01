@@ -1005,8 +1005,8 @@ ${addTagInstruction}
       ? 'IDIOMA: Responde SIEMPRE en español.'
       : 'LANGUAGE: Always reply in English.';
     const voiceRule = isEs
-      ? 'ESTILO DE VOZ: Es una llamada. Responde en 1-2 frases cortas y deja hablar al cliente; no des monólogos.'
-      : 'VOICE STYLE: This is a phone call. Reply in 1-2 short sentences and let the caller speak; no monologues.';
+      ? 'ESTILO DE VOZ: Es una llamada. Responde en 1-2 frases cortas y deja hablar al cliente; no des monólogos. NO uses markdown, asteriscos ni listas numeradas: di las cosas de corrido y en lenguaje natural (ej. "necesito tu nombre, teléfono y dirección"), nunca "1. … 2. …".'
+      : 'VOICE STYLE: This is a phone call. Reply in 1-2 short sentences and let the caller speak; no monologues. Do NOT use markdown, asterisks or numbered lists: say things naturally in one flowing sentence (e.g. "I need your name, phone and address"), never "1. … 2. …".';
     const apptRule = !dentallyConnected ? '' : (isEs
       ? 'CITAS: Para disponibilidad lo único obligatorio es la FECHA; si no la dieron, pregúntala (nunca asumas hoy). El profesional es OPCIONAL. En cuanto elijan horario, agenda con dentally_book_appointment. No pidas datos personales por teléfono salvo que la herramienta los exija.'
       : 'APPOINTMENTS: The only required field for availability is the DATE; if not given, ask for it (never assume today). The practitioner is OPTIONAL. As soon as they pick a time, book with dentally_book_appointment. Do not ask for personal data over the phone unless the tool requires it.');

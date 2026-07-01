@@ -61,9 +61,37 @@ export class CallBotMediaStreamService {
     // Set when the agent calls transfer_to_human / transfer_to_department; executed
     // after the agent's "putting you through" line plays (or a fallback timeout).
     let pendingTransfer: { kind: 'human' | 'department'; department?: string } | null = null;
+    // Silence watchdog: if the caller finishes a turn and the bot produces NOTHING
+    // (no audio, text or function) within this window, nudge once with "still there?".
+    // Pure safety net for abnormal stalls — normal replies (1-2s) clear it first, so
+    // it never fires on a healthy turn. Armed only by a completed caller turn.
+    const SILENCE_MS = 7000;
+    let silenceTimer: ReturnType<typeof setTimeout> | null = null;
 
     const sendToTwilio = (obj: any) => {
       if (twilioWs.readyState === WebSocket.OPEN) twilioWs.send(JSON.stringify(obj));
+    };
+
+    const clearSilence = () => {
+      if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+    };
+    const armSilence = () => {
+      clearSilence();
+      silenceTimer = setTimeout(() => {
+        silenceTimer = null;
+        // Don't nudge if the call is ending/transferring or the agent socket is gone.
+        if (closed || pendingHangup || pendingTransfer) return;
+        if (agentWs?.readyState !== WebSocket.OPEN) return;
+        const nudge = bot?.language?.startsWith('en') ? 'Are you still there?' : '¿Sigues ahí?';
+        try {
+          // Guarded: if Deepgram rejects the format it only emits a Warning (logged
+          // below in the message handler) — it can never tear down the call.
+          agentWs.send(JSON.stringify({ type: 'InjectAgentMessage', content: nudge }));
+          this.logger.log(`[voice-agent] silence ${SILENCE_MS}ms → nudge call=${callSid}`);
+        } catch (e: any) {
+          this.logger.warn(`[voice-agent] nudge failed: ${e.message}`);
+        }
+      }, SILENCE_MS);
     };
 
     // Run the pending transfer exactly once, then tear down the bridge.
@@ -78,6 +106,7 @@ export class CallBotMediaStreamService {
     const cleanup = () => {
       if (closed) return;
       closed = true;
+      clearSilence();
       if (keepAlive) { clearInterval(keepAlive); keepAlive = null; }
       try { agentWs?.close(); } catch { /* ignore */ }
       try { twilioWs.close(); } catch { /* ignore */ }
@@ -106,6 +135,7 @@ export class CallBotMediaStreamService {
       agentWs.on('message', async (data: RawData, isBinary: boolean) => {
         // Binary frames = TTS audio (mulaw 8k) → forward to Twilio in small frames.
         if (isBinary) {
+          clearSilence(); // bot is speaking → not stalled
           const buf = data as Buffer;
           for (let i = 0; i < buf.length; i += 640) {
             sendToTwilio({ event: 'media', streamSid, media: { payload: buf.subarray(i, i + 640).toString('base64') } });
@@ -120,11 +150,15 @@ export class CallBotMediaStreamService {
           case 'UserStartedSpeaking':
             // Barge-in: stop whatever the bot is playing.
             sendToTwilio({ event: 'clear', streamSid });
+            clearSilence(); // caller is talking → not waiting on the bot
             break;
           case 'ConversationText': {
             const content = msg.content || '';
             this.logger.log(`[voice-agent] ${msg.role}: ${content.slice(0, 70)}`);
             if (content) this.twilio.appendCallTranscript(callSid, msg.role === 'user' ? 'user' : 'bot', content);
+            // Silence watchdog: caller finished a turn → start waiting for the bot;
+            // the bot's own text (or audio/function below) clears it.
+            if (msg.role === 'user') armSilence(); else clearSilence();
             // The LLM almost never calls end_call on its own, so we close the call by
             // watching the transcript and hanging up on the NEXT AgentAudioDone (so the
             // farewell finishes playing). Two triggers:
@@ -143,6 +177,7 @@ export class CallBotMediaStreamService {
             break;
           }
           case 'AgentAudioDone':
+            clearSilence(); // bot finished speaking → now waiting on the caller, not stalled
             // Transfer takes priority over hangup: execute it once the heads-up plays.
             if (pendingTransfer && !closed) {
               setTimeout(executeTransfer, 800);
@@ -152,6 +187,7 @@ export class CallBotMediaStreamService {
             }
             break;
           case 'FunctionCallRequest': {
+            clearSilence(); // bot is acting on a tool → not stalled
             const fns = Array.isArray(msg.functions) ? msg.functions : [];
             for (const fn of fns) {
               if (fn.client_side === false) continue; // server-side function: nothing to do
