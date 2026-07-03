@@ -822,7 +822,7 @@ export class AiChatbotEngineService {
       const LANG_NAMES: Record<string, string> = { es: 'español', en: 'English', pt: 'português', fr: 'français', de: 'Deutsch', it: 'italiano' };
       const langCode = String(bot.visual_config?.language || bot.language || 'es').slice(0, 2).toLowerCase();
       const langName = LANG_NAMES[langCode] ?? 'español';
-      const languageRule = `IDIOMA (REGLA MÁXIMA, ignora el idioma de estas instrucciones internas): Detecta el idioma del ÚLTIMO mensaje del cliente y responde SIEMPRE en ESE mismo idioma. Si el cliente escribe en inglés, responde TODO en inglés; si escribe en español, responde TODO en español. Solo si el mensaje del cliente es ambiguo o vacío, usa ${langName}. JAMÁS mezcles dos idiomas en una misma respuesta.`;
+      const languageRule = `IDIOMA (REGLA MÁXIMA, ignora el idioma de estas instrucciones internas): Detecta el idioma del ÚLTIMO mensaje del cliente y responde SIEMPRE en ESE mismo idioma. Si el cliente escribe en inglés, responde TODO en inglés; si escribe en español, responde TODO en español. Solo si el mensaje del cliente es ambiguo o vacío, usa ${langName}. JAMÁS mezcles dos idiomas en una misma respuesta. Si una herramienta te devuelve texto en otro idioma (por ejemplo horarios de disponibilidad o confirmaciones de cita como "Available times..." o "Your appointment is booked..."), TRADÚCELO al idioma del cliente antes de responder; NUNCA copies la salida de una herramienta en un idioma distinto al del cliente.`;
 
       const systemPrompt = [
         `IDENTIDAD: Tu nombre es "${bot.name}". Cuando alguien pregunte de qué equipo eres o quién eres, responde siempre que eres "${bot.name}".`,
