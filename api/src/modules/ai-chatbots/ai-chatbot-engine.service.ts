@@ -332,7 +332,7 @@ export class AiChatbotEngineService {
     // 7. Build message history — only include messages from AFTER this bot's session
     // started so that messages from a previous bot don't bleed into this bot's context.
     const memoryConvs = Math.min(parseInt(bot.memory_conversations ?? '5', 10) || 0, 50);
-    const msgPerConv  = 20;
+    const msgPerConv  = 40;
 
     // When a session was recreated (e.g. after a reconnect or queue-return), use the
     // previous session's start time so the bot retains context from before the break.
@@ -839,11 +839,14 @@ export class AiChatbotEngineService {
       const langName = LANG_NAMES[langCode] ?? 'español';
       const languageRule = `IDIOMA (REGLA MÁXIMA, ignora el idioma de estas instrucciones internas): Detecta el idioma del ÚLTIMO mensaje del cliente y responde SIEMPRE en ESE mismo idioma. Si el cliente escribe en inglés, responde TODO en inglés; si escribe en español, responde TODO en español. Solo si el mensaje del cliente es ambiguo o vacío, usa ${langName}. JAMÁS mezcles dos idiomas en una misma respuesta.`;
 
+      const styleRule = 'ESTILO: Escribe en texto natural y conversacional para chat. NO uses markdown (nada de ** o ##) ni listas numeradas largas. Pide solo 1 o 2 datos a la vez, no vuelques listas grandes de campos. Presta MUCHA atención a todo lo que el cliente ya dijo antes en la conversación: reconoce lo que ya te dio y pide ÚNICAMENTE lo que falta. NUNCA vuelvas a preguntar un dato que el cliente ya te proporcionó.';
+
       const systemPrompt = [
         `IDENTIDAD: Tu nombre es "${bot.name}". Cuando alguien pregunte de qué equipo eres o quién eres, responde siempre que eres "${bot.name}".`,
         languageRule,
         currentDate,
         noGreet,
+        styleRule,
         bot.system_prompt ?? '',
         crmInstructions,
         ragContext,
