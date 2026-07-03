@@ -37,7 +37,7 @@ interface AiResult {
   createPaymentLink?: { amount: number; currency: string; description: string };
   dentallyListPractitioners?: boolean;
   dentallyCheckAvailability?: { date: string; practitionerName?: string; durationMinutes?: number };
-  dentallyBook?: { date: string; time: string; practitionerName?: string; durationMinutes?: number; reason?: string; dateOfBirth?: string; gender?: string; title?: string };
+  dentallyBook?: { date: string; time: string; practitionerName?: string; durationMinutes?: number; reason?: string; name?: string; phone?: string; email?: string; dateOfBirth?: string; gender?: string; title?: string };
   dentallyGetAppointments?: boolean;
 }
 
@@ -921,7 +921,7 @@ export class AiChatbotEngineService {
     if (dentallyConnected) {
       tools.push({ type: 'function', function: { name: 'dentally_list_practitioners', description: 'List the clinic professionals/doctors available for appointments.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'Optional short message to the customer' } } } } });
       tools.push({ type: 'function', function: { name: 'dentally_check_availability', description: 'Check open appointment slots. If the requested day has no slots, it AUTOMATICALLY returns the soonest available day, so never ask the customer to try dates one by one. For "the soonest/earliest available" requests, pass today as the date. Use when the customer asks about availability or times.', parameters: { type: 'object', properties: { date: { type: 'string', description: 'Day to check, format YYYY-MM-DD' }, practitioner_name: { type: 'string', description: 'Optional professional name' }, duration: { type: 'number', description: 'Minutes (default 30)' } }, required: ['date'] } } });
-      tools.push({ type: 'function', function: { name: 'dentally_book_appointment', description: 'Book an appointment once the customer has chosen a day and time. If the customer is NOT a registered patient, first ask for date_of_birth (YYYY-MM-DD) and gender (male/female), then call this.', parameters: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD' }, time: { type: 'string', description: 'HH:MM (24h), must be one of the available slots' }, practitioner_name: { type: 'string' }, duration: { type: 'number' }, reason: { type: 'string' }, date_of_birth: { type: 'string', description: 'Patient DOB YYYY-MM-DD (only if a new patient)' }, gender: { type: 'string', enum: ['male', 'female'] }, title: { type: 'string', description: 'Mr/Mrs/Ms/Dr (only if a new patient)' } }, required: ['date', 'time'] } } });
+      tools.push({ type: 'function', function: { name: 'dentally_book_appointment', description: "Book an appointment once the customer has chosen a day and time. ALWAYS pass the patient's own name (and phone/email if the customer gave them) — these identify the patient in the clinic system, do NOT rely on the caller's phone number. If the customer is NOT a registered patient, also ask for date_of_birth (YYYY-MM-DD) and gender (male/female) before calling this.", parameters: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD' }, time: { type: 'string', description: 'HH:MM (24h), must be one of the available slots' }, name: { type: 'string', description: "Patient's full name as given by the customer" }, phone: { type: 'string', description: "Patient's phone number as given by the customer (may differ from the caller's number)" }, email: { type: 'string', description: "Patient's email if given" }, practitioner_name: { type: 'string' }, duration: { type: 'number' }, reason: { type: 'string' }, date_of_birth: { type: 'string', description: 'Patient DOB YYYY-MM-DD (only if a new patient)' }, gender: { type: 'string', enum: ['male', 'female'] }, title: { type: 'string', description: 'Mr/Mrs/Ms/Dr (only if a new patient)' } }, required: ['date', 'time'] } } });
       tools.push({ type: 'function', function: { name: 'dentally_get_appointments', description: "Look up the customer's own existing/upcoming appointments. Use when they ask \"what/when is my appointment\", \"which doctor do I have\", \"do I have an appointment\". Read the real result; never guess.", parameters: { type: 'object', properties: { message: { type: 'string' } } } } });
     }
     body.tools = tools;
@@ -945,7 +945,7 @@ export class AiChatbotEngineService {
           case 'create_payment_link':   return { reply: args.message ?? '', createPaymentLink: { amount: args.amount, currency: args.currency ?? 'USD', description: args.description } };
           case 'dentally_list_practitioners': return { reply: args.message ?? '', dentallyListPractitioners: true };
           case 'dentally_check_availability': return { reply: args.message ?? '', dentallyCheckAvailability: { date: args.date, practitionerName: args.practitioner_name, durationMinutes: args.duration } };
-          case 'dentally_book_appointment':   return { reply: args.message ?? '', dentallyBook: { date: args.date, time: args.time, practitionerName: args.practitioner_name, durationMinutes: args.duration, reason: args.reason, dateOfBirth: args.date_of_birth, gender: args.gender, title: args.title } };
+          case 'dentally_book_appointment':   return { reply: args.message ?? '', dentallyBook: { date: args.date, time: args.time, practitionerName: args.practitioner_name, durationMinutes: args.duration, reason: args.reason, name: args.name, phone: args.phone, email: args.email, dateOfBirth: args.date_of_birth, gender: args.gender, title: args.title } };
           case 'dentally_get_appointments':   return { reply: args.message ?? '', dentallyGetAppointments: true };
         }
       } catch { /* fall through */ }
@@ -1009,7 +1009,7 @@ export class AiChatbotEngineService {
           case 'create_payment_link':   return { reply: i.message ?? '', createPaymentLink: { amount: i.amount, currency: i.currency ?? 'USD', description: i.description } };
           case 'dentally_list_practitioners': return { reply: i.message ?? '', dentallyListPractitioners: true };
           case 'dentally_check_availability': return { reply: i.message ?? '', dentallyCheckAvailability: { date: i.date, practitionerName: i.practitioner_name, durationMinutes: i.duration } };
-          case 'dentally_book_appointment':   return { reply: i.message ?? '', dentallyBook: { date: i.date, time: i.time, practitionerName: i.practitioner_name, durationMinutes: i.duration, reason: i.reason, dateOfBirth: i.date_of_birth, gender: i.gender, title: i.title } };
+          case 'dentally_book_appointment':   return { reply: i.message ?? '', dentallyBook: { date: i.date, time: i.time, practitionerName: i.practitioner_name, durationMinutes: i.duration, reason: i.reason, name: i.name, phone: i.phone, email: i.email, dateOfBirth: i.date_of_birth, gender: i.gender, title: i.title } };
           case 'dentally_get_appointments':   return { reply: i.message ?? '', dentallyGetAppointments: true };
         }
       }
@@ -1076,7 +1076,7 @@ export class AiChatbotEngineService {
         case 'create_payment_link':   return { reply: args?.message ?? '', createPaymentLink: { amount: args?.amount, currency: args?.currency ?? 'USD', description: args?.description } };
         case 'dentally_list_practitioners': return { reply: args?.message ?? '', dentallyListPractitioners: true };
         case 'dentally_check_availability': return { reply: args?.message ?? '', dentallyCheckAvailability: { date: args?.date, practitionerName: args?.practitioner_name, durationMinutes: args?.duration } };
-        case 'dentally_book_appointment':   return { reply: args?.message ?? '', dentallyBook: { date: args?.date, time: args?.time, practitionerName: args?.practitioner_name, durationMinutes: args?.duration, reason: args?.reason, dateOfBirth: args?.date_of_birth, gender: args?.gender, title: args?.title } };
+        case 'dentally_book_appointment':   return { reply: args?.message ?? '', dentallyBook: { date: args?.date, time: args?.time, practitionerName: args?.practitioner_name, durationMinutes: args?.duration, reason: args?.reason, name: args?.name, phone: args?.phone, email: args?.email, dateOfBirth: args?.date_of_birth, gender: args?.gender, title: args?.title } };
         case 'dentally_get_appointments':   return { reply: args?.message ?? '', dentallyGetAppointments: true };
       }
     }

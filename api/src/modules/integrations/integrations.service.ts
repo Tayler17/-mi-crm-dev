@@ -254,7 +254,7 @@ export class IntegrationsService implements OnModuleInit {
    */
   async bookAppointment(
     tenantId: string, provider: string,
-    input: { contactId: string; practitionerId: string; start: string; finish?: string; reason?: string; patientData?: { dateOfBirth?: string; gender?: string; title?: string } },
+    input: { contactId: string; practitionerId: string; start: string; finish?: string; reason?: string; patientData?: { name?: string; phone?: string; email?: string; dateOfBirth?: string; gender?: string; title?: string } },
     lang: 'es' | 'en' = 'es',
   ) {
     const { connector, config } = await this.getConnected(tenantId, provider);
@@ -425,7 +425,7 @@ export class IntegrationsService implements OnModuleInit {
   /** Bot: book a chosen time for the conversation's contact (matches a real slot). */
   async botBook(
     tenantId: string, provider: string,
-    opts: { contactId: string; date: string; time: string; practitionerName?: string; durationMinutes?: number; reason?: string; dateOfBirth?: string; gender?: string; title?: string },
+    opts: { contactId: string; date: string; time: string; practitionerName?: string; durationMinutes?: number; reason?: string; name?: string; phone?: string; email?: string; dateOfBirth?: string; gender?: string; title?: string },
     lang: 'es' | 'en' = 'es',
   ): Promise<string> {
     const en = lang === 'en';
@@ -477,7 +477,7 @@ export class IntegrationsService implements OnModuleInit {
         start: slot.start,
         finish: slot.finish,
         reason: opts.reason,
-        patientData: { dateOfBirth: opts.dateOfBirth, gender: opts.gender, title: opts.title },
+        patientData: { name: opts.name, phone: opts.phone, email: opts.email, dateOfBirth: opts.dateOfBirth, gender: opts.gender, title: opts.title },
       }, lang);
       return en
         ? `Done! Your appointment with ${bookPracName} is booked for ${when} at ${spokenWant}.`
@@ -543,17 +543,25 @@ export class IntegrationsService implements OnModuleInit {
     tenantId: string,
     provider: string,
     contactId: string,
-    patientData?: { dateOfBirth?: string; gender?: string; title?: string },
+    patientData?: { name?: string; phone?: string; email?: string; dateOfBirth?: string; gender?: string; title?: string },
     lang: 'es' | 'en' = 'es',
   ): Promise<string> {
     const { connector, config } = await this.getConnected(tenantId, provider);
 
-    const [map] = await this.db.query(
-      `SELECT external_id FROM integration_contact_map
-       WHERE tenant_id::text=$1 AND provider=$2 AND contact_id::text=$3`,
-      [tenantId, provider, contactId],
-    );
-    if (map?.external_id) return map.external_id;
+    // When the caller gives their own identity in the call/chat (name/phone/email), the
+    // patient must be resolved from THAT — not from the contact→patient map, which ties
+    // the inbound number to whoever booked last (wrong for shared/test numbers, or a new
+    // patient calling from someone else's phone).
+    const providedIdentity = !!(patientData?.name || patientData?.phone || patientData?.email);
+
+    if (!providedIdentity) {
+      const [map] = await this.db.query(
+        `SELECT external_id FROM integration_contact_map
+         WHERE tenant_id::text=$1 AND provider=$2 AND contact_id::text=$3`,
+        [tenantId, provider, contactId],
+      );
+      if (map?.external_id) return map.external_id;
+    }
 
     const [c] = await this.db.query(
       `SELECT full_name, email, phone FROM contacts WHERE id::text=$1 AND tenant_id::text=$2`,
@@ -561,10 +569,15 @@ export class IntegrationsService implements OnModuleInit {
     );
     if (!c) throw new BadRequestException('Contacto no encontrado.');
 
+    // Effective identity: prefer what was given in the call/chat, fall back to the contact.
+    const effName  = (patientData?.name  || c.full_name || '').trim();
+    const effEmail = patientData?.email || c.email || undefined;
+    const effPhone = patientData?.phone || c.phone || undefined;
+
     let ext: { externalId: string } | null = null;
     try {
-      if (connector.findPatient) {
-        ext = await connector.findPatient(config, { email: c.email || undefined, phone: c.phone || undefined });
+      if (connector.findPatient && (effEmail || effPhone)) {
+        ext = await connector.findPatient(config, { email: effEmail, phone: effPhone });
       }
     } catch (e: any) {
       throw new BadRequestException(e?.message || 'No se pudo buscar el paciente en Dentally.');
@@ -616,13 +629,13 @@ export class IntegrationsService implements OnModuleInit {
         );
       }
 
-      const parts = (c.full_name || '').trim().split(/\s+/);
+      const parts = effName.split(/\s+/).filter(Boolean);
       try {
         ext = await connector.createPatient(config, {
           firstName: parts[0] || 'Paciente',
           lastName: parts.slice(1).join(' ') || 'CRM',
-          email: c.email || undefined,
-          phone: c.phone || undefined,
+          email: effEmail,
+          phone: effPhone,
           title: fTitle,
           dateOfBirth: fDob,
           gender: fGender,
@@ -632,10 +645,15 @@ export class IntegrationsService implements OnModuleInit {
       }
     }
 
-    await this.db.query(
-      `INSERT INTO integration_contact_map (tenant_id, provider, external_id, contact_id) VALUES ($1,$2,$3,$4)`,
-      [tenantId, provider, ext.externalId, contactId],
-    ).catch(() => {});
+    // Only persist the contact→patient mapping when it's based on the contact's own
+    // identity — never when a one-off identity was provided in the call (a shared inbound
+    // number must not get permanently mapped to a specific patient).
+    if (!providedIdentity) {
+      await this.db.query(
+        `INSERT INTO integration_contact_map (tenant_id, provider, external_id, contact_id) VALUES ($1,$2,$3,$4)`,
+        [tenantId, provider, ext.externalId, contactId],
+      ).catch(() => {});
+    }
     return ext.externalId;
   }
 
