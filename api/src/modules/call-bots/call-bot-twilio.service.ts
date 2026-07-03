@@ -1002,8 +1002,8 @@ ${addTagInstruction}
     const nowDt = new Date();
     const dateRule = `FECHA Y HORA ACTUAL: ${nowDt.toISOString().slice(0, 16).replace('T', ' ')} UTC (${nowDt.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}). Usa SIEMPRE esta fecha para "hoy"/"mañana". Nunca uses fechas de años anteriores; las citas son a futuro.`;
     const langRule = isEs
-      ? 'IDIOMA: Responde SIEMPRE en español.'
-      : 'LANGUAGE: Always reply in English.';
+      ? 'IDIOMA: Detecta el idioma en que te habla el cliente y MANTENTE en ese idioma toda la llamada. NUNCA cambies de idioma por tu cuenta, ni por una palabra o frase suelta, ni a un idioma que el cliente NO está usando: si el cliente habla español, JAMÁS respondas en italiano ni en otro idioma (el español y el italiano suenan parecido, no te confundas). Solo cambia si el cliente cambia de forma CLARA y sostenida durante varias frases. Ante la duda, quédate en español.'
+      : 'LANGUAGE: Detect the language the caller is speaking and STAY in that language for the whole call. NEVER switch languages on your own, over a single word or short phrase, or to a language the caller is NOT using: if the caller speaks English, NEVER reply in Italian or any other language. Only switch if the caller clearly and continuously changes language across several sentences. When in doubt, stay in English.';
     const voiceRule = isEs
       ? 'ESTILO DE VOZ: Es una llamada. Responde en 1-2 frases cortas y deja hablar al cliente; no des monólogos. NO uses markdown, asteriscos ni listas numeradas: di las cosas de corrido y en lenguaje natural (ej. "necesito tu nombre, teléfono y dirección"), nunca "1. … 2. …".'
       : 'VOICE STYLE: This is a phone call. Reply in 1-2 short sentences and let the caller speak; no monologues. Do NOT use markdown, asterisks or numbered lists: say things naturally in one flowing sentence (e.g. "I need your name, phone and address"), never "1. … 2. …".';
