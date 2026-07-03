@@ -370,41 +370,56 @@ export class IntegrationsService implements OnModuleInit {
       : null;
     const targets = wanted ? [wanted] : all;
 
+    // Query from the requested day through a forward window: if the requested day has
+    // no slots, we offer the SOONEST available day instead of making the customer guess
+    // date by date. We do NOT skip weekends — whatever Dentally returns already reflects
+    // each practitioner's real schedule (a doctor may work weekends).
+    const WINDOW_DAYS = 14;
+    const finish = new Date(new Date(`${opts.date}T00:00:00Z`).getTime() + WINDOW_DAYS * 86400000).toISOString().slice(0, 10);
     let slots: any[];
     try {
       slots = await connector.listAvailability(config, {
         practitionerIds: targets.map((p) => p.id),
         startDate: `${opts.date}T00:00:00Z`,
-        finishDate: `${opts.date}T23:59:59Z`,
+        finishDate: `${finish}T23:59:59Z`,
         durationMinutes: opts.durationMinutes ?? 30,
       });
     } catch (e: any) {
       return en ? `I couldn't check availability: ${e?.message || 'error'}.` : `No pude consultar la disponibilidad: ${e?.message || 'error'}.`;
     }
 
+    // Unique times of a single day, earliest first, spoken naturally (no TTS artifacts).
+    const timesFor = (day: string) => [...new Set(slots.filter((s: any) => String(s.start).slice(0, 10) === day).map((s: any) => this.slotTime(s.start)))]
+      .sort().slice(0, 12).map((t) => this.speakTime(t, lang)).join(', ');
+
     const when = this.fmtApptDate(opts.date, lang);
-    if (!slots.length) {
-      if (wanted) return en
-        ? `There is no availability with ${wanted.name} on ${when}. Would you like to try another date or another professional?`
-        : `No hay horarios disponibles con ${wanted.name} el ${when}. ¿Quieres probar con otra fecha u otro profesional?`;
+    const onRequested = timesFor(opts.date);
+
+    if (!onRequested) {
+      // No slots on the requested day → offer the earliest day WITH slots in the window
+      // (per Dentally's real availability; no assumptions about which weekday is open).
+      const nextDay = [...new Set(slots.map((s: any) => String(s.start).slice(0, 10)))].sort().find((d) => d >= opts.date);
+      if (!nextDay) {
+        if (wanted) return en
+          ? `There is no availability with ${wanted.name} on ${when} or the following days. Would you like to try another professional or a later date?`
+          : `No hay horarios con ${wanted.name} el ${when} ni los días siguientes. ¿Quieres probar con otro profesional o una fecha más adelante?`;
+        return en
+          ? `There is no availability on ${when} or the following days. Would you like to try a later date?`
+          : `No hay horarios el ${when} ni los días siguientes. ¿Quieres probar una fecha más adelante?`;
+      }
+      const nextWhen = this.fmtApptDate(nextDay, lang);
+      const withWho = wanted ? (en ? ` with ${wanted.name}` : ` con ${wanted.name}`) : '';
       return en
-        ? `There is no availability on ${when}. Would you like to try another date?`
-        : `No hay horarios disponibles el ${when}. ¿Quieres probar con otra fecha?`;
+        ? `There is no availability on ${when}${withWho}. The soonest available is ${nextWhen}: ${timesFor(nextDay)}. Which one do you prefer?`
+        : `No hay horarios el ${when}${withWho}. El más próximo disponible es el ${nextWhen}: ${timesFor(nextDay)}. ¿Cuál prefieres?`;
     }
 
-    // Unique times across whichever practitioner(s) we queried, earliest first,
-    // formatted naturally for speech (no "08:00" → "cero ocho..." TTS artifacts).
-    const times = [...new Set(slots.map((s: any) => this.slotTime(s.start)))]
-      .sort()
-      .slice(0, 12)
-      .map((t) => this.speakTime(t, lang))
-      .join(', ');
     if (wanted) return en
-      ? `Available times with ${wanted.name} on ${when}: ${times}. Which one do you prefer?`
-      : `Horarios disponibles con ${wanted.name} el ${when}: ${times}. ¿Cuál prefieres?`;
+      ? `Available times with ${wanted.name} on ${when}: ${onRequested}. Which one do you prefer?`
+      : `Horarios disponibles con ${wanted.name} el ${when}: ${onRequested}. ¿Cuál prefieres?`;
     return en
-      ? `Available times on ${when}: ${times}. Which one do you prefer?`
-      : `Horarios disponibles el ${when}: ${times}. ¿Cuál prefieres?`;
+      ? `Available times on ${when}: ${onRequested}. Which one do you prefer?`
+      : `Horarios disponibles el ${when}: ${onRequested}. ¿Cuál prefieres?`;
   }
 
   /** Bot: book a chosen time for the conversation's contact (matches a real slot). */
