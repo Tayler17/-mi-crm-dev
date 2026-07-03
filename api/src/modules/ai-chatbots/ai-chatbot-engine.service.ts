@@ -805,6 +805,7 @@ export class AiChatbotEngineService {
         crmLines.push('REGLA CRÍTICA DENTALLY: cuando el cliente pida los doctores, la disponibilidad/horarios, o agendar, DEBES llamar la herramienta correspondiente (dentally_list_practitioners / dentally_check_availability / dentally_book_appointment) y usar su resultado real. NUNCA digas "aquí están los doctores", "estos son los horarios" ni inventes nombres/horarios sin llamar la herramienta. No prometas datos que no obtuviste de la herramienta. PERO no llames dentally_check_availability hasta tener una fecha concreta dada por el cliente: si falta la fecha, pregúntala primero en lugar de adivinar.');
       }
       crmLines.push('Siempre incluye un mensaje de confirmación breve y amigable para el usuario al usar cualquier herramienta.');
+      crmLines.push('NO anuncies que vas a usar una herramienta ni digas "un momento", "permíteme verificar" o "déjame revisar" antes de llamarla: llama la herramienta directamente y responde con su resultado en el mismo turno.');
       const crmInstructions = crmLines.join('\n');
 
       // If the conversation already has turns, forbid re-greeting (weaker models
@@ -815,7 +816,7 @@ export class AiChatbotEngineService {
         : '';
 
       const nowDt = new Date();
-      const currentDate = `FECHA Y HORA ACTUAL: ${nowDt.toISOString().slice(0, 16).replace('T', ' ')} UTC (${nowDt.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}). Usa SIEMPRE esta fecha para interpretar "hoy", "mañana", "el lunes", etc. Nunca uses fechas de años anteriores; las citas son siempre a futuro.`;
+      const currentDate = `FECHA Y HORA ACTUAL: ${nowDt.toISOString().slice(0, 16).replace('T', ' ')} UTC (${nowDt.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}). Usa SIEMPRE esta fecha para interpretar "hoy", "mañana", "el lunes", etc. Nunca uses fechas de años anteriores; las citas son siempre a futuro. Cuando el cliente mencione un día de la semana (lunes, martes, miércoles...), calcula la fecha exacta del PRÓXIMO día que corresponda a partir de esta fecha actual y CONFÍRMASELA al cliente ("sería el miércoles 8 de julio, ¿correcto?") antes de consultar disponibilidad o agendar.`;
 
       // Language rule (prioritized) — these instructions are in Spanish, which would
       // otherwise bias the model to answer in Spanish even for an English bot.
