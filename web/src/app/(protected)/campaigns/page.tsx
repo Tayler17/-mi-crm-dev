@@ -160,6 +160,7 @@ function CampaignModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) { setError(i.nameRequired); return; }
+    if (form.type === 'phone' && !form.botId) { setError('Selecciona un bot de llamada para la campaña.'); return; }
     setSaving(true); setError('');
     try { await onSave(form); onClose(); }
     catch (err: any) { setError(err.message || i.error); }
@@ -208,14 +209,19 @@ function CampaignModal({
               </div>
               <div>
                 <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>Canal de envío</label>
-                <select className="form-input" value={form.inboxId} onChange={(e) => {
-                  const inbox = activeInboxes.find((inb) => inb.id === e.target.value);
-                  setForm({ ...form, inboxId: e.target.value, type: inbox ? inferType(inbox.channelType) : form.type });
+                <select className="form-input" value={form.type === 'phone' ? '__phone__' : form.inboxId} onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === '__phone__') { setForm({ ...form, type: 'phone', inboxId: '' }); return; }
+                  const inbox = activeInboxes.find((inb) => inb.id === val);
+                  // Leaving the call option → default back to whatsapp; otherwise keep prior behavior.
+                  const nextType = inbox ? inferType(inbox.channelType) : (form.type === 'phone' ? 'whatsapp' : form.type);
+                  setForm({ ...form, inboxId: val, type: nextType });
                 }}>
                   <option value="">— Sin inbox específico —</option>
                   {activeInboxes.map((inb) => (
                     <option key={inb.id} value={inb.id}>{channelTypeToLabel(inb.channelType)} · {inb.name}</option>
                   ))}
+                  <option value="__phone__">📞 Llamadas (bot de voz)</option>
                 </select>
               </div>
               {form.type === 'phone' && (
