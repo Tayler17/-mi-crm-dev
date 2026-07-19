@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { WhatsappWebService } from '../connections/whatsapp-web.service';
 import { CallBotsService } from '../call-bots/call-bots.service';
+import { checkPlanLimit } from '../../common/utils/limits';
 
 /**
  * Polls every 60 s for campaigns with status = 'running'.
@@ -343,6 +344,16 @@ export class CampaignWorkerService implements OnModuleInit, OnModuleDestroy {
     let sentCount = 0;
 
     for (const r of recipients) {
+      // Respect the tenant's monthly call-minute plan limit. checkPlanLimit throws when
+      // used minutes >= max_call_minutes (and the plan doesn't allow overage). If we hit
+      // it, PAUSE the campaign (remaining recipients stay pending → resumable) and stop.
+      try {
+        await checkPlanLimit(this.db, campaign.tenant_id, 'call_minutes');
+      } catch (limitErr: any) {
+        this.logger.warn(`Phone campaign ${campaign.id}: call-minute plan limit reached — pausing. ${limitErr?.message ?? ''}`);
+        await this.db.query(`UPDATE campaigns SET status='paused', updated_at=NOW() WHERE id=$1`, [campaign.id]);
+        break;
+      }
       try {
         const [contact] = await this.db.query(
           `SELECT phone FROM contacts WHERE id = $1`, [r.contact_id],
