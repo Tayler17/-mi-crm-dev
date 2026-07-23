@@ -54,6 +54,7 @@ export default function TasksPage() {
   const [view, setView]             = useState<'list' | 'calendar'>('list');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterDue, setFilterDue]       = useState('all');
+  const [search, setSearch]             = useState('');
   const [calYear, setCalYear]           = useState(new Date().getFullYear());
   const [calMonth, setCalMonth]         = useState(new Date().getMonth());
   const [selectedDay, setSelectedDay]   = useState<string>('');
@@ -96,15 +97,17 @@ export default function TasksPage() {
   const weekEndStr = weekEnd();
 
   const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
     return tasks.filter((t) => {
       if (filterStatus !== 'all' && t.status !== filterStatus) return false;
+      if (q && !`${t.title ?? ''} ${t.description ?? ''}`.toLowerCase().includes(q)) return false;
       if (filterDue === 'overdue')  return t.dueDate && t.dueDate.slice(0, 10) < todayStr && t.status === 'pending';
       if (filterDue === 'today')    return t.dueDate && t.dueDate.slice(0, 10) === todayStr;
       if (filterDue === 'week')     return t.dueDate && t.dueDate.slice(0, 10) >= todayStr && t.dueDate.slice(0, 10) <= weekEndStr;
       if (filterDue === 'no-date')  return !t.dueDate;
       return true;
     });
-  }, [tasks, filterStatus, filterDue, todayStr, weekEndStr]);
+  }, [tasks, filterStatus, filterDue, todayStr, weekEndStr, search]);
 
   // ─── calendar data
   const calDays = useMemo(() => calendarDays(calYear, calMonth), [calYear, calMonth]);
@@ -221,6 +224,15 @@ export default function TasksPage() {
                   </button>
                 ))}
               </div>
+
+              {/* Search */}
+              <input
+                className="form-input"
+                style={{ margin: 0, height: 36, fontSize: 13, flex: '1 1 220px', minWidth: 160 }}
+                placeholder="🔍 Buscar tareas…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
 
               {/* Due date filter */}
               <select
