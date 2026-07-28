@@ -827,6 +827,17 @@ export default function InboxPage() {
     } catch { /* silent */ }
   }
 
+  // Move a conversation to the top of the list (most-recent activity first).
+  // Used when the agent replies, so the conversation being handled jumps to the top.
+  function bumpConversationToTop(convId: string) {
+    setConversations((prev) => {
+      const idx = prev.findIndex((c) => c.id === convId);
+      if (idx === -1) return prev;
+      const updated = { ...prev[idx], last_message_at: new Date().toISOString() };
+      return [updated, ...prev.filter((_, arrIdx) => arrIdx !== idx)];
+    });
+  }
+
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
     if (!activeId || !body.trim()) return;
@@ -841,6 +852,7 @@ export default function InboxPage() {
       } else if (composerTab === 'message') {
         await sendMessage(activeId, body.trim(), replyToMsg?.id);
         setBody(''); setReplyToMsg(null);
+        bumpConversationToTop(activeId); // this is the conversation being handled → move it to the top
         const [m, n] = await Promise.all([getMessages(activeId), getNotes(activeId)]);
         setMessages(m); setNotes(n);
         loadList(true); // silent — SSE already handles the optimistic update
@@ -870,6 +882,7 @@ export default function InboxPage() {
     try {
       await uploadMessageFile(activeId, pendingFile, body.trim() || undefined);
       setBody('');
+      bumpConversationToTop(activeId); // move the handled conversation to the top
       const [m, n] = await Promise.all([getMessages(activeId), getNotes(activeId)]);
       setMessages(m); setNotes(n);
       loadList(true);
