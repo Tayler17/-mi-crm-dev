@@ -29,7 +29,7 @@ export default function DemoPage() {
       }}>
         <div style={{ fontWeight: 800, fontSize: 22, color: '#6366f1' }}>AutoMarkIQ</div>
         <p style={{ color: '#ef4444', fontWeight: 600, fontSize: 16, textAlign: 'center' }}>{error}</p>
-        <a href="https://app.automarkiq.com/register" style={{
+        <a href="/register" style={{
           padding: '12px 28px', background: '#6366f1', color: '#fff',
           textDecoration: 'none', fontWeight: 700, borderRadius: 10, fontSize: 15,
         }}>Crear cuenta gratis →</a>

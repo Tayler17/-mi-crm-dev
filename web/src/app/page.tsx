@@ -176,12 +176,12 @@ export default function LandingPage() {
           <div className="land-nav-links" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             <a href="#features" className="land-nav-link">{t.nav_features}</a>
             <a href="#pricing"  className="land-nav-link">{t.nav_pricing}</a>
-            <a href="https://app.automarkiq.com/login" className="land-nav-link">{t.nav_login}</a>
+            <a href="/login" className="land-nav-link">{t.nav_login}</a>
           </div>
           {/* LangPicker — always visible */}
           <LangPicker lang={lang} setLang={setLang} />
           {/* CTA — hidden on mobile (inside hamburger menu) */}
-          <a href="https://app.automarkiq.com/register" className="land-nav-cta land-nav-cta-desktop" style={{
+          <a href="/register" className="land-nav-cta land-nav-cta-desktop" style={{
             background: '#6366f1', color: '#fff',
             textDecoration: 'none', fontWeight: 700,
             borderRadius: 8, transition: 'opacity 0.15s', whiteSpace: 'nowrap',
@@ -207,8 +207,8 @@ export default function LandingPage() {
         <div className="land-mobile-menu" onClick={() => setMobileMenu(false)}>
           <a href="#features" className="land-mobile-link" onClick={() => setMobileMenu(false)}>{t.nav_features}</a>
           <a href="#pricing"  className="land-mobile-link" onClick={() => setMobileMenu(false)}>{t.nav_pricing}</a>
-          <a href="https://app.automarkiq.com/login"    className="land-mobile-link">{t.nav_login}</a>
-          <a href="https://app.automarkiq.com/register" className="land-mobile-cta">{t.nav_cta}</a>
+          <a href="/login"    className="land-mobile-link">{t.nav_login}</a>
+          <a href="/register" className="land-mobile-cta">{t.nav_cta}</a>
         </div>
       )}
       {/* ── HERO ── */}
@@ -246,12 +246,12 @@ export default function LandingPage() {
         </p>
 
         <div className="land-hero-btns" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
-          <a href="https://app.automarkiq.com/register" style={{
+          <a href="/register" style={{
             padding: '15px 36px', background: '#6366f1', color: '#fff',
             textDecoration: 'none', fontWeight: 700, fontSize: 16,
             borderRadius: 10, boxShadow: '0 4px 24px rgba(99,102,241,0.38)',
           }}>{t.hero_btn_start}</a>
-          <a href="https://app.automarkiq.com/demo" style={{
+          <a href="/demo" style={{
             padding: '15px 36px', background: '#fff', color: '#6366f1',
             textDecoration: 'none', fontWeight: 700, fontSize: 16,
             borderRadius: 10, border: '1.5px solid #c7d2fe',
@@ -474,7 +474,7 @@ export default function LandingPage() {
                       </li>
                     ))}
                   </ul>
-                  <a href="https://app.automarkiq.com/register" style={{
+                  <a href="/register" style={{
                     display: 'block', textAlign: 'center',
                     padding: '13px 24px',
                     background: pop ? '#fff' : '#6366f1',
@@ -527,7 +527,7 @@ export default function LandingPage() {
           {t.cta_h2a}<br />{t.cta_h2b}
         </h2>
         <p style={{ fontSize: 18, color: 'rgba(255,255,255,0.75)', marginBottom: 48 }}>{t.cta_p}</p>
-        <a href="https://app.automarkiq.com/register" style={{
+        <a href="/register" style={{
           display: 'inline-block', padding: '16px 44px',
           background: '#fff', color: '#6366f1',
           textDecoration: 'none', fontWeight: 800, fontSize: 16,
@@ -546,7 +546,7 @@ export default function LandingPage() {
             <div style={{ fontSize: 13 }}>{t.footer_tag}</div>
           </div>
           <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
-            {[['#features', t.nav_features],['#pricing', t.nav_pricing],['https://app.automarkiq.com/login', t.nav_login],['https://app.automarkiq.com/register', t.nav_cta]].map(([href,label]) => (
+            {[['#features', t.nav_features],['#pricing', t.nav_pricing],['/login', t.nav_login],['/register', t.nav_cta]].map(([href,label]) => (
               <a key={href} href={href} style={{ color: '#94a3b8', textDecoration: 'none', fontSize: 14, transition: 'color 0.15s' }}
                 onMouseEnter={e => (e.currentTarget.style.color='#fff')}
                 onMouseLeave={e => (e.currentTarget.style.color='#94a3b8')}>
