@@ -3,8 +3,22 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationsService } from '../notifications/notifications.service';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import { spawn } from 'child_process';
+
+/** Transcode an audio file to mp3 so it plays on every device/browser (ogg/opus fails
+ *  on Safari/iOS). Returns the output path, or throws on ffmpeg failure. */
+function transcodeToMp3(inputPath: string): Promise<string> {
+  const outPath = inputPath.replace(/\.[^.]+$/, '') + '.mp3';
+  return new Promise((resolve, reject) => {
+    const ff = spawn('ffmpeg', ['-y', '-i', inputPath, '-vn', '-acodec', 'libmp3lame', '-q:a', '4', outPath]);
+    let err = '';
+    ff.stderr?.on('data', (d) => (err += d.toString()));
+    ff.on('error', reject);
+    ff.on('close', (code) => (code === 0 ? resolve(outPath) : reject(new Error('ffmpeg ' + err.slice(-160)))));
+  });
+}
 
 @Injectable()
 export class WebhooksService {
@@ -91,8 +105,17 @@ export class WebhooksService {
     const ext = extMap[mime] || (mime.split('/')[1] ? `.${mime.split('/')[1].split(';')[0]}` : '.bin');
     const uploadsDir = join(process.cwd(), 'uploads', 'messages');
     if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
-    const filename = `wa-${Date.now()}${ext}`;
+    let filename = `wa-${Date.now()}${ext}`;
     writeFileSync(join(uploadsDir, filename), media.buffer);
+    // Incoming voice notes are ogg/opus → transcode to mp3 so they play on iOS/Safari
+    // (the native <audio> element can't decode ogg/opus there).
+    if (msg.type === 'audio' && !/\.mp3$/i.test(filename)) {
+      try {
+        const outPath = await transcodeToMp3(join(uploadsDir, filename));
+        try { unlinkSync(join(uploadsDir, filename)); } catch {}
+        filename = outPath.split(/[\\/]/).pop()!;
+      } catch (e: any) { this.logger.warn(`WA audio transcode failed: ${e.message}`); }
+    }
     const fileUrl  = `/uploads/messages/${filename}`;
     const origName = String(mediaObj?.filename ?? filename).replace(/\|/g, ' ');
     const caption  = String(mediaObj?.caption ?? '').replace(/\|/g, ' ').trim();
