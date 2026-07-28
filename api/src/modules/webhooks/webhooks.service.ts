@@ -336,7 +336,7 @@ export class WebhooksService {
     if (isNew) this.events.emit('conversation.created', convPayload);
     this.events.emit('conversation.message_received', {
       ...convPayload,
-      message: { body, direction: 'inbound', is_private: false },
+      message: { body, direction: 'inbound', is_private: false, content_type: contentType },
     });
 
     this.logger.log(`[${channel}] msg from ${contactName} → conv ${conversationId}`);
