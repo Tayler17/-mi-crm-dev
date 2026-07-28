@@ -1,0 +1,109 @@
+# ── STAGING stack ─────────────────────────────────────────────────────────────
+# Isolated from production (separate containers, network, DB and volumes).
+# Tracks the `staging` git branch. Run from /opt/crm-staging with:
+#   docker compose -f docker-compose.staging.yml -p crm-staging up -d --build
+#
+# Before the first run, create a .env file next to this one with:
+#   STAGING_HOST=<your VPS public IP>        # e.g. STAGING_HOST=203.0.113.10
+#   PLATFORM_AI_API_KEY=<openai key>         # optional, only if you test bots here
+#   POSTGRES_PASSWORD=<a strong password>    # optional (defaults to a staging value)
+#
+# Exposed ports: web 3001, api 4001. Postgres and Redis are NOT published (internal
+# only) — access the DB via `docker compose ... exec postgres psql`.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: crm_staging_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-crm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm_staging_secret}
+      POSTGRES_DB: crm_staging
+    volumes:
+      - staging_postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    networks:
+      - crm_staging_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crm} -d crm_staging"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: crm_staging_redis
+    # No published port — internal only (security lesson from the prod Redis incident).
+    networks:
+      - crm_staging_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./api
+    image: crm-staging-api
+    container_name: crm_staging_api
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: "postgres://${POSTGRES_USER:-crm}:${POSTGRES_PASSWORD:-crm_staging_secret}@postgres:5432/crm_staging"
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-staging_jwt_secret_change_me}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-staging_refresh_secret_change_me}
+      FRONTEND_URL: http://${STAGING_HOST:-localhost}:3001
+      API_PUBLIC_URL: http://${STAGING_HOST:-localhost}:4001
+      # WhatsApp Web off in staging so it never competes with prod for a WA session.
+      WHATSAPP_WEB_ENABLED: "false"
+      PLATFORM_AI_PROVIDER: openai
+      PLATFORM_AI_API_KEY: ${PLATFORM_AI_API_KEY:-}
+      PLATFORM_AI_MODEL: ${PLATFORM_AI_MODEL:-gpt-4o}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      LOG_LEVEL: "debug"
+    ports:
+      - "4001:4000"
+    command: npm run start:dev
+    volumes:
+      - ./api:/app
+      - /app/node_modules
+      - staging_uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - crm_staging_network
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+
+  web:
+    build:
+      context: ./web
+      args:
+        # NEXT_PUBLIC_* is baked at BUILD time, so this must be the public staging api URL.
+        NEXT_PUBLIC_API_URL: http://${STAGING_HOST:-localhost}:4001
+        NEXT_PUBLIC_SENTRY_DSN: ""
+        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}
+    image: crm-staging-web
+    container_name: crm_staging_web
+    environment:
+      NEXT_PUBLIC_API_URL: http://${STAGING_HOST:-localhost}:4001
+    ports:
+      - "3001:3000"
+    networks:
+      - crm_staging_network
+    restart: unless-stopped
+
+volumes:
+  staging_postgres_data:
+  staging_uploads_data:
+
+networks:
+  crm_staging_network:
+    driver: bridge
