@@ -400,7 +400,10 @@ export class MessagesController {
       const localPath = join(process.cwd(), fileUrl.replace(/^\/+/, ''));
       if (!existsSync(localPath)) { console.warn(`[messages] WA media upload: file not found ${localPath}`); return null; }
       const buf = readFileSync(localPath);
-      const ext = ((origName || fileUrl).split('.').pop() ?? '').toLowerCase();
+      // Use the ACTUAL stored file's extension for the MIME type — voice notes are
+      // transcoded to .mp3 server-side, so origName (e.g. "voz-x.ogg") would report the
+      // wrong type and Meta would reject the upload.
+      const ext = (fileUrl.split('.').pop() ?? '').toLowerCase();
       const mimeMap: Record<string, string> = {
         jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp',
         mp4: 'video/mp4', '3gp': 'video/3gpp',
@@ -408,9 +411,10 @@ export class MessagesController {
         pdf: 'application/pdf',
       };
       const mime = mimeMap[ext] ?? 'application/octet-stream';
+      const uploadName = fileUrl.split('/').pop() || origName || `file.${ext || 'bin'}`;
       const form = new (globalThis as any).FormData();
       form.append('messaging_product', 'whatsapp');
-      form.append('file', new (globalThis as any).Blob([buf], { type: mime }), origName || `file.${ext || 'bin'}`);
+      form.append('file', new (globalThis as any).Blob([buf], { type: mime }), uploadName);
       const res = await (globalThis as any).fetch(`https://graph.facebook.com/v19.0/${phoneId}/media`, {
         method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form,
         signal: AbortSignal.timeout(20000),
