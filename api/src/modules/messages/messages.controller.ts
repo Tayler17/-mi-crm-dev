@@ -2,7 +2,7 @@ import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, Request, 
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync } from 'fs';
 import { spawn } from 'child_process';
 import { unlink } from 'fs/promises';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -393,6 +393,37 @@ export class MessagesController {
 
   // ── Channel delivery ──────────────────────────────────────────────────────
 
+  /** Upload a local file (from /uploads/...) to the WhatsApp Cloud API media store and
+   *  return the media ID — required before sending an image/audio/video/document. */
+  private async uploadWhatsAppApiMedia(phoneId: string, token: string, fileUrl: string, origName?: string): Promise<string | null> {
+    try {
+      const localPath = join(process.cwd(), fileUrl.replace(/^\/+/, ''));
+      if (!existsSync(localPath)) { console.warn(`[messages] WA media upload: file not found ${localPath}`); return null; }
+      const buf = readFileSync(localPath);
+      const ext = ((origName || fileUrl).split('.').pop() ?? '').toLowerCase();
+      const mimeMap: Record<string, string> = {
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp',
+        mp4: 'video/mp4', '3gp': 'video/3gpp',
+        ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', mp3: 'audio/mpeg', m4a: 'audio/mp4', amr: 'audio/amr', aac: 'audio/aac',
+        pdf: 'application/pdf',
+      };
+      const mime = mimeMap[ext] ?? 'application/octet-stream';
+      const form = new (globalThis as any).FormData();
+      form.append('messaging_product', 'whatsapp');
+      form.append('file', new (globalThis as any).Blob([buf], { type: mime }), origName || `file.${ext || 'bin'}`);
+      const res = await (globalThis as any).fetch(`https://graph.facebook.com/v19.0/${phoneId}/media`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form,
+        signal: AbortSignal.timeout(20000),
+      });
+      const data: any = await res.json();
+      if (!data?.id) { console.warn(`[messages] WA media upload failed: ${JSON.stringify(data?.error ?? data)}`); return null; }
+      return data.id;
+    } catch (e: any) {
+      console.warn(`[messages] WA media upload error: ${e.message}`);
+      return null;
+    }
+  }
+
   private async deliverOutbound(conversationId: string, tenantId: string, text: string, contentType = 'text', messageId?: string, replyToMessageId?: string) {
     if (!text) return;
     // Defensive: any body that points at an uploaded file ("/uploads/...") is a
@@ -486,16 +517,30 @@ export class MessagesController {
           const token   = creds.accessToken;
           const toPhone = conv.external_id;
           if (!phoneId || !token || !toPhone) return;
+
+          // Media messages: upload the file to Meta first, then send a media message.
+          // Anything else falls back to plain text.
+          let payload: any;
+          if (contentType === 'image' || contentType === 'audio' || contentType === 'video' || contentType === 'file') {
+            const [fileUrl, origName, fileCaption] = text.split('|');
+            const mediaId = await this.uploadWhatsAppApiMedia(phoneId, token, fileUrl, origName);
+            if (mediaId) {
+              const cap = fileCaption ? { caption: fileCaption } : {};
+              if (contentType === 'image')      payload = { type: 'image', image: { id: mediaId, ...cap } };
+              else if (contentType === 'video') payload = { type: 'video', video: { id: mediaId, ...cap } };
+              else if (contentType === 'audio') payload = { type: 'audio', audio: { id: mediaId } };
+              else                              payload = { type: 'document', document: { id: mediaId, filename: origName || 'archivo', ...cap } };
+            }
+          }
+          if (!payload) payload = { type: 'text', text: { body: text } };
+
           await (globalThis as any).fetch(
             `https://graph.facebook.com/v19.0/${phoneId}/messages`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-              body: JSON.stringify({
-                messaging_product: 'whatsapp', to: toPhone,
-                type: 'text', text: { body: text },
-              }),
-              signal: AbortSignal.timeout(8000),
+              body: JSON.stringify({ messaging_product: 'whatsapp', to: toPhone, ...payload }),
+              signal: AbortSignal.timeout(15000),
             },
           ).catch(() => {});
           break;
