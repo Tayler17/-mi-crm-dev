@@ -3,6 +3,8 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationsService } from '../notifications/notifications.service';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 
 @Injectable()
 export class WebhooksService {
@@ -40,19 +42,96 @@ export class WebhooksService {
           if (!value?.messages) continue;
           for (const msg of value.messages) {
             const waId  = msg.from;
-            const text  = msg.text?.body ?? msg.type ?? '(media)';
             const name  = value.contacts?.find((c: any) => c.wa_id === waId)?.profile?.name ?? waId;
+            const { body, contentType } = await this.extractWhatsAppContent(msg, conn.credentials?.accessToken ?? '');
             await this.upsertMessage({
               tenantId: conn.tenant_id, connectionId,
               inboxId: conn.inbox_id, channel: 'whatsapp',
               externalId: waId, contactName: name, contactPhone: waId,
-              messageExtId: msg.id, body: text,
+              messageExtId: msg.id, body, contentType,
             });
           }
         }
       }
     } catch (err) {
       this.logger.error(`WhatsApp webhook error [${connectionId}]: ${err}`);
+    }
+  }
+
+  /** Build body + content_type for a WhatsApp Cloud API message.
+   *  Media (image/audio/video/document/sticker) arrives as a media ID that must be
+   *  downloaded via the Graph API; we store it under uploads/messages and format the
+   *  body as `fileUrl|origName|caption` so the inbox renders it like the WhatsApp Web channel. */
+  private async extractWhatsAppContent(msg: any, token: string): Promise<{ body: string; contentType: string }> {
+    const MEDIA_TYPES = ['image', 'audio', 'video', 'document', 'sticker'];
+    if (!MEDIA_TYPES.includes(msg.type)) {
+      const text = msg.text?.body
+        ?? msg.button?.text
+        ?? msg.interactive?.list_reply?.title
+        ?? msg.interactive?.button_reply?.title
+        ?? msg.type
+        ?? '(mensaje)';
+      return { body: text, contentType: 'text' };
+    }
+
+    const mediaObj = msg[msg.type];
+    const media = mediaObj?.id ? await this.downloadWhatsAppMedia(mediaObj.id, token) : null;
+    if (!media?.buffer?.length) {
+      const labels: Record<string, string> = { image: '[Imagen]', audio: '[Audio]', video: '[Video]', document: '[Documento]', sticker: '[Sticker]' };
+      return { body: labels[msg.type] ?? `[${msg.type}]`, contentType: 'text' };
+    }
+
+    const mime = mediaObj?.mime_type ?? media.mime ?? '';
+    const extMap: Record<string, string> = {
+      'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp',
+      'video/mp4': '.mp4', 'video/3gpp': '.3gp',
+      'audio/ogg; codecs=opus': '.ogg', 'audio/ogg': '.ogg', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/amr': '.amr',
+      'application/pdf': '.pdf',
+    };
+    const ext = extMap[mime] || (mime.split('/')[1] ? `.${mime.split('/')[1].split(';')[0]}` : '.bin');
+    const uploadsDir = join(process.cwd(), 'uploads', 'messages');
+    if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
+    const filename = `wa-${Date.now()}${ext}`;
+    writeFileSync(join(uploadsDir, filename), media.buffer);
+    const fileUrl  = `/uploads/messages/${filename}`;
+    const origName = String(mediaObj?.filename ?? filename).replace(/\|/g, ' ');
+    const caption  = String(mediaObj?.caption ?? '').replace(/\|/g, ' ').trim();
+    const body = caption ? `${fileUrl}|${origName}|${caption}` : `${fileUrl}|${origName}`;
+
+    const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic'];
+    let contentType: string;
+    if (msg.type === 'image' || msg.type === 'sticker') contentType = 'image';
+    else if (msg.type === 'document' && imageExts.includes(ext.toLowerCase())) contentType = 'image';
+    else if (msg.type === 'audio') contentType = 'audio';
+    else if (msg.type === 'video') contentType = 'video';
+    else contentType = 'file';
+
+    return { body, contentType };
+  }
+
+  /** Download WhatsApp Cloud API media: resolve the media ID to a URL, then fetch the
+   *  binary (both calls require the Bearer token). Returns null on any failure. */
+  private async downloadWhatsAppMedia(mediaId: string, token: string): Promise<{ buffer: Buffer; mime: string } | null> {
+    if (!token) return null;
+    try {
+      const metaRes = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const meta: any = await metaRes.json();
+      if (!meta?.url) {
+        this.logger.warn(`WA media ${mediaId}: no url (${JSON.stringify(meta?.error ?? meta)})`);
+        return null;
+      }
+      const binRes = await fetch(meta.url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!binRes.ok) {
+        this.logger.warn(`WA media ${mediaId}: download HTTP ${binRes.status}`);
+        return null;
+      }
+      const buffer = Buffer.from(await binRes.arrayBuffer());
+      return { buffer, mime: meta.mime_type ?? '' };
+    } catch (e: any) {
+      this.logger.warn(`WA media download failed (${mediaId}): ${e.message}`);
+      return null;
     }
   }
 
@@ -150,9 +229,9 @@ export class WebhooksService {
   private async upsertMessage(opts: {
     tenantId: string; connectionId: string; inboxId: string | null;
     channel: string; externalId: string; contactName: string; contactPhone: string;
-    messageExtId: string; body: string;
+    messageExtId: string; body: string; contentType?: string;
   }) {
-    const { tenantId, connectionId, inboxId, channel, externalId, contactName, contactPhone, messageExtId, body } = opts;
+    const { tenantId, connectionId, inboxId, channel, externalId, contactName, contactPhone, messageExtId, body, contentType = 'text' } = opts;
 
     // 1. Find or create contact
     const [existing] = await this.db.query(
@@ -211,8 +290,8 @@ export class WebhooksService {
     await this.db.query(
       `INSERT INTO messages
          (tenant_id, conversation_id, body, content_type, direction, sender_type, is_private, external_id, created_at, updated_at)
-       VALUES ($1,$2,$3,'text','inbound','contact',false,$4,NOW(),NOW())`,
-      [tenantId, conversationId, body, messageExtId],
+       VALUES ($1,$2,$3,$4,'inbound','contact',false,$5,NOW(),NOW())`,
+      [tenantId, conversationId, body, contentType, messageExtId],
     );
     await this.db.query(
       `UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1`,
@@ -225,7 +304,7 @@ export class WebhooksService {
       type: 'message_created',
       payload: {
         conversationId,
-        message: { conversationId, body, direction: 'inbound', senderType: 'contact', contentType: 'text', isPrivate: false, createdAt: new Date().toISOString() },
+        message: { conversationId, body, direction: 'inbound', senderType: 'contact', contentType, isPrivate: false, createdAt: new Date().toISOString() },
       },
     });
 
