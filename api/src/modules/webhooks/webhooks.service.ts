@@ -280,10 +280,13 @@ export class WebhooksService {
       contactId = newContact.id;
     }
 
-    // 2. Find or create open conversation — keyed by connectionId + externalId (sender)
+    // 2. Find or REOPEN the contact's conversation so the whole history stays in ONE chat.
+    // Look at the latest conversation regardless of status: if it was resolved, reopen it
+    // and bump session_count (each reopen still counts as a conversation for reporting).
+    // Only create a brand-new conversation when the contact has none at all.
     const [existingConv] = await this.db.query(
-      `SELECT id FROM conversations
-       WHERE tenant_id=$1 AND contact_id=$2 AND connection_id=$3 AND status != 'resolved'
+      `SELECT id, status FROM conversations
+       WHERE tenant_id=$1 AND contact_id=$2 AND connection_id=$3
        ORDER BY created_at DESC LIMIT 1`,
       [tenantId, contactId, connectionId],
     );
@@ -291,6 +294,12 @@ export class WebhooksService {
     let isNew = false;
     if (existingConv) {
       conversationId = existingConv.id;
+      if (existingConv.status === 'resolved') {
+        await this.db.query(
+          `UPDATE conversations SET status='open', session_count=session_count+1, updated_at=NOW() WHERE id=$1`,
+          [conversationId],
+        );
+      }
     } else {
       const [newConv] = await this.db.query(
         `INSERT INTO conversations

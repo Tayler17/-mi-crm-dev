@@ -18,6 +18,11 @@ export class MessagesService implements OnModuleInit {
         ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ,
         ADD COLUMN IF NOT EXISTS reply_to_message_id UUID
     `).catch(() => {});
+    // Q2: track how many times a conversation has been reopened. Each reopen counts as a
+    // separate "session" for reporting, while the chat history stays unified in one record.
+    await this.repo.query(
+      `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS session_count integer NOT NULL DEFAULT 1`,
+    ).catch(() => {});
   }
 
   /** Fetch a message scoped to tenant + conversation (for edit/delete). */
