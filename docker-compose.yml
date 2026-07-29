@@ -4,12 +4,14 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     container_name: crm_postgres
+    # restart so the DB comes back on VPS reboot (api/web have this; without it a reboot
+    # left them running but DB-less → "Failed to fetch"). No published port: internal only
+    # (the api reaches it over crm_network; exposing 5432 to the internet is a security risk).
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-crm}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm_secret}
       POSTGRES_DB: ${POSTGRES_DB:-crm_dev}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d
@@ -24,8 +26,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: crm_redis
-    ports:
-      - "6379:6379"
+    # restart so Redis comes back on VPS reboot. No published port: internal only
+    # (was hijacked on 2026-07-27 via SLAVEOF when exposed — keep it off the internet).
+    restart: unless-stopped
     networks:
       - crm_network
     healthcheck:
