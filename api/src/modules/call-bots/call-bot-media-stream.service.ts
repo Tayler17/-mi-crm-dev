@@ -73,6 +73,9 @@ export class CallBotMediaStreamService {
     const GREETING_MS = 3000;
     let greetingTimer: ReturnType<typeof setTimeout> | null = null;
     let greetingText = '';
+    // Hard cap on total call length: hang up when the call exceeds the bot's
+    // max_call_duration so a stalled call never runs up to Twilio's 4h maximum (real cost).
+    let maxDurationTimer: ReturnType<typeof setTimeout> | null = null;
 
     const sendToTwilio = (obj: any) => {
       if (twilioWs.readyState === WebSocket.OPEN) twilioWs.send(JSON.stringify(obj));
@@ -117,6 +120,7 @@ export class CallBotMediaStreamService {
       closed = true;
       clearSilence();
       clearGreeting();
+      if (maxDurationTimer) { clearTimeout(maxDurationTimer); maxDurationTimer = null; }
       if (keepAlive) { clearInterval(keepAlive); keepAlive = null; }
       try { agentWs?.close(); } catch { /* ignore */ }
       try { twilioWs.close(); } catch { /* ignore */ }
@@ -284,6 +288,15 @@ export class CallBotMediaStreamService {
           try { bot = await this.twilio.getBot(botId); }
           catch (e: any) { this.logger.error(`[voice-agent] bot load failed: ${e.message}`); }
           if (!bot) { cleanup(); return; }
+          // Hard cap on total call length so a stalled call never bills to Twilio's 4h
+          // maximum. Uses the bot's configured max_call_duration (fallback 600s = 10 min).
+          const maxSecs = Number(bot.max_call_duration) > 0 ? Number(bot.max_call_duration) : 600;
+          maxDurationTimer = setTimeout(() => {
+            maxDurationTimer = null;
+            if (closed) return;
+            this.logger.log(`[voice-agent] max duration ${maxSecs}s reached → hangup call=${callSid}`);
+            this.twilio.hangupCall(callSid).finally(() => cleanup());
+          }, maxSecs * 1000);
           // Build Settings BEFORE opening the agent socket (avoids the audio-before-
           // Settings race that intermittently closed the connection).
           let settings: any;
