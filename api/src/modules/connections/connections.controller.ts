@@ -17,6 +17,13 @@ export class ConnectionsController {
     return this.svc.findAll(tenantId);
   }
 
+  // WhatsApp Cloud API message templates (from Meta) — placed before :id so the literal
+  // path segment isn't captured by the :id param.
+  @Get('whatsapp/templates')
+  listWhatsappTemplates(@TenantId() tenantId: string) {
+    return this.svc.listWhatsappTemplates(tenantId);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @TenantId() tenantId: string) {
     return this.svc.findOne(id, tenantId);

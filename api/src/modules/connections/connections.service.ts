@@ -41,6 +41,46 @@ export class ConnectionsService {
     }));
   }
 
+  /** List the tenant's WhatsApp message templates from Meta (Cloud API).
+   *  Reads the WABA ID + access token from the tenant's WhatsApp API connection and
+   *  calls Meta's message_templates endpoint. Returns name/category/language/status. */
+  async listWhatsappTemplates(tenantId: string) {
+    const [conn] = await this.db.query(
+      `SELECT credentials FROM channel_connections
+       WHERE tenant_id=$1 AND channel_type='whatsapp'
+       ORDER BY (status='connected') DESC, updated_at DESC
+       LIMIT 1`,
+      [tenantId],
+    );
+    const creds  = conn?.credentials ?? {};
+    const wabaId = creds.wabaId;
+    const token  = creds.accessToken;
+    if (!wabaId || !token) {
+      return { ok: false, error: 'No hay una conexión de WhatsApp API con WABA ID y Access Token.', templates: [] };
+    }
+    try {
+      const res = await (globalThis as any).fetch(
+        `https://graph.facebook.com/v21.0/${wabaId}/message_templates?limit=200&access_token=${encodeURIComponent(token)}`,
+      );
+      const data: any = await res.json();
+      if (data?.error) {
+        return { ok: false, error: `Meta API: ${data.error.message}`, templates: [] };
+      }
+      const templates = (data?.data ?? []).map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        category: t.category,             // MARKETING | UTILITY | AUTHENTICATION
+        language: t.language,
+        status: t.status,                 // APPROVED | PENDING | REJECTED | ...
+        components: t.components ?? [],    // header/body/footer/buttons (with {{n}} vars)
+      }));
+      return { ok: true, templates };
+    } catch (e: any) {
+      this.logger.warn(`[wa-templates] fetch failed for tenant ${tenantId}: ${e.message}`);
+      return { ok: false, error: e.message, templates: [] };
+    }
+  }
+
   async findOne(id: string, tenantId: string) {
     const c = await this.repo.findOne({ where: { id, tenantId } });
     if (!c) throw new NotFoundException('Connection not found');
