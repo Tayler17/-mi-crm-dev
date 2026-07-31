@@ -79,6 +79,23 @@ export class WebhooksService {
   private async extractWhatsAppContent(msg: any, token: string): Promise<{ body: string; contentType: string }> {
     const MEDIA_TYPES = ['image', 'audio', 'video', 'document', 'sticker'];
     if (!MEDIA_TYPES.includes(msg.type)) {
+      // Shared contact card(s): the details arrive in msg.contacts, not as text.
+      if (msg.type === 'contacts' && Array.isArray(msg.contacts) && msg.contacts.length) {
+        const parts = msg.contacts.map((c: any) => {
+          const nm = c?.name?.formatted_name
+            || [c?.name?.first_name, c?.name?.last_name].filter(Boolean).join(' ').trim()
+            || 'Contacto';
+          const phone = c?.phones?.[0]?.phone || c?.phones?.[0]?.wa_id || '';
+          return (phone ? `${nm} — ${phone}` : nm).replace(/\|/g, ' ');
+        });
+        return { body: `👤 Contacto compartido: ${parts.join('; ')}`, contentType: 'text' };
+      }
+      // Emoji reaction to one of our messages (msg.reaction = { message_id, emoji }).
+      // An empty emoji means the reaction was removed.
+      if (msg.type === 'reaction') {
+        const emoji = msg.reaction?.emoji;
+        return { body: emoji ? `Reaccionó con ${emoji}` : 'Quitó su reacción', contentType: 'text' };
+      }
       const text = msg.text?.body
         ?? msg.button?.text
         ?? msg.interactive?.list_reply?.title
