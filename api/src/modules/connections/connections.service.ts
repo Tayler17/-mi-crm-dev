@@ -81,6 +81,57 @@ export class ConnectionsService {
     }
   }
 
+  /** Send a WhatsApp message template (Cloud API) to a number. Reads the phone number ID
+   *  + token from the tenant's WhatsApp API connection. bodyParams fills the {{n}} body
+   *  variables in order. Returns the Meta message id on success. */
+  async sendWhatsappTemplate(
+    tenantId: string,
+    dto: { to?: string; name?: string; language?: string; bodyParams?: string[] },
+  ) {
+    const [conn] = await this.db.query(
+      `SELECT credentials FROM channel_connections
+       WHERE tenant_id=$1 AND channel_type='whatsapp'
+       ORDER BY (status='connected') DESC, updated_at DESC
+       LIMIT 1`,
+      [tenantId],
+    );
+    const creds   = conn?.credentials ?? {};
+    const phoneId = creds.phoneNumberId;
+    const token   = creds.accessToken;
+    if (!phoneId || !token) {
+      return { ok: false, error: 'No hay una conexión de WhatsApp API con Phone Number ID y Access Token.' };
+    }
+    const to = String(dto.to ?? '').replace(/[^\d]/g, '');
+    if (!to) return { ok: false, error: 'Número de destino inválido.' };
+    if (!dto.name || !dto.language) return { ok: false, error: 'Falta el nombre o el idioma de la plantilla.' };
+
+    const components: any[] = [];
+    const bodyParams = (dto.bodyParams ?? []).filter((v) => v != null && String(v).trim() !== '');
+    if (bodyParams.length) {
+      components.push({ type: 'body', parameters: bodyParams.map((v) => ({ type: 'text', text: String(v) })) });
+    }
+    const template: any = { name: dto.name, language: { code: dto.language } };
+    if (components.length) template.components = components;
+
+    try {
+      const res = await (globalThis as any).fetch(
+        `https://graph.facebook.com/v21.0/${phoneId}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'template', template }),
+          signal: AbortSignal.timeout(15000),
+        },
+      );
+      const data: any = await res.json();
+      if (data?.error) return { ok: false, error: `Meta API: ${data.error.message}` };
+      return { ok: true, messageId: data?.messages?.[0]?.id };
+    } catch (e: any) {
+      this.logger.warn(`[wa-templates] send failed for tenant ${tenantId}: ${e.message}`);
+      return { ok: false, error: e.message };
+    }
+  }
+
   async findOne(id: string, tenantId: string) {
     const c = await this.repo.findOne({ where: { id, tenantId } });
     if (!c) throw new NotFoundException('Connection not found');

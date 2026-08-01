@@ -1183,6 +1183,20 @@ export const getConnectionQr = (id: string) => apiGet<{ qr: string | null; statu
 export const startConnectionQr = (id: string) => apiPost<{ qr: string | null; status: string }>(`/connections/${id}/qr`, {});
 export const disconnectConnectionQr = (id: string) => apiDelete(`/connections/${id}/qr`);
 
+// ── WhatsApp message templates (Cloud API) ──────────────────────────────────────
+export interface WhatsappTemplate {
+  id: string;
+  name: string;
+  category: string;           // MARKETING | UTILITY | AUTHENTICATION
+  language: string;
+  status: string;             // APPROVED | PENDING | REJECTED | ...
+  components: { type: string; text?: string; format?: string; buttons?: unknown[] }[];
+}
+export const getWhatsappTemplates = () =>
+  apiGet<{ ok: boolean; error?: string; templates: WhatsappTemplate[] }>('/connections/whatsapp/templates');
+export const sendWhatsappTemplate = (data: { to: string; name: string; language: string; bodyParams?: string[] }) =>
+  apiPost<{ ok: boolean; error?: string; messageId?: string }>('/connections/whatsapp/send-template', data);
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 export interface TenantSettings {

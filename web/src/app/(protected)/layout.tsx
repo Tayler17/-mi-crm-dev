@@ -119,6 +119,7 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   { group: '⚙️ CONFIGURACIÓN', href: '/custom-fields',    label: 'Campos Custom',        icon: '🗃', minRole: 'admin' },
   { group: '⚙️ CONFIGURACIÓN', href: '/outbound-webhooks',label: 'Webhooks',             icon: '🔗', minRole: 'admin' },
   { group: '⚙️ CONFIGURACIÓN', href: '/templates',        label: 'Plantillas',           icon: '🗂', minRole: 'admin' },
+  { group: '⚙️ CONFIGURACIÓN', href: '/whatsapp-templates',label: 'Plantillas WhatsApp',  icon: '📑', minRole: 'admin' },
   { group: '⚙️ CONFIGURACIÓN', href: '/quick-responses',  label: 'Quick Responses',      icon: '💬' },
   { group: '⚙️ CONFIGURACIÓN', href: '/tags',             label: 'Tags',                 icon: '🏷' },
   { group: '⚙️ CONFIGURACIÓN', href: '/appointments',     label: 'Schedules',            icon: '📅' },

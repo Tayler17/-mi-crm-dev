@@ -24,6 +24,12 @@ export class ConnectionsController {
     return this.svc.listWhatsappTemplates(tenantId);
   }
 
+  // Send a WhatsApp message template to a number (literal path, before :id).
+  @Post('whatsapp/send-template')
+  sendWhatsappTemplate(@Body() dto: any, @TenantId() tenantId: string) {
+    return this.svc.sendWhatsappTemplate(tenantId, dto);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @TenantId() tenantId: string) {
     return this.svc.findOne(id, tenantId);
