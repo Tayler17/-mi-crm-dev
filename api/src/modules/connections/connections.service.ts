@@ -4,6 +4,7 @@ import { Repository, DataSource } from 'typeorm';
 import { Connection } from './connection.entity';
 import * as nodemailer from 'nodemailer';
 import { SmsService } from './sms.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ConnectionsService {
@@ -13,6 +14,7 @@ export class ConnectionsService {
     @InjectRepository(Connection) private readonly repo: Repository<Connection>,
     @InjectDataSource() private readonly db: DataSource,
     private readonly smsSvc: SmsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async findAll(tenantId: string) {
@@ -86,7 +88,7 @@ export class ConnectionsService {
    *  variables in order. Returns the Meta message id on success. */
   async sendWhatsappTemplate(
     tenantId: string,
-    dto: { to?: string; name?: string; language?: string; bodyParams?: string[] },
+    dto: { to?: string; name?: string; language?: string; bodyParams?: string[]; conversationId?: string; renderedBody?: string },
   ) {
     const [conn] = await this.db.query(
       `SELECT credentials FROM channel_connections
@@ -125,10 +127,52 @@ export class ConnectionsService {
       );
       const data: any = await res.json();
       if (data?.error) return { ok: false, error: `Meta API: ${data.error.message}` };
-      return { ok: true, messageId: data?.messages?.[0]?.id };
+      const messageId = data?.messages?.[0]?.id;
+
+      // If sent from a conversation (inbox), record it as an outbound message so it shows
+      // in the chat, and reopen the conversation if it was resolved (re-engagement).
+      if (dto.conversationId) {
+        await this.recordTemplateMessage(tenantId, dto.conversationId, dto.renderedBody || `[Plantilla: ${dto.name}]`, messageId);
+      }
+      return { ok: true, messageId };
     } catch (e: any) {
       this.logger.warn(`[wa-templates] send failed for tenant ${tenantId}: ${e.message}`);
       return { ok: false, error: e.message };
+    }
+  }
+
+  /** Persist a sent template as an outbound message in the conversation + push it to the
+   *  inbox in real time. Reopens the conversation if it was resolved. Best-effort. */
+  private async recordTemplateMessage(tenantId: string, conversationId: string, body: string, messageId?: string) {
+    try {
+      const [conv] = await this.db.query(
+        `SELECT id FROM conversations WHERE id=$1 AND tenant_id=$2 LIMIT 1`,
+        [conversationId, tenantId],
+      );
+      if (!conv) return;
+      await this.db.query(
+        `INSERT INTO messages
+           (tenant_id, conversation_id, body, content_type, direction, sender_type, is_private, external_id, created_at, updated_at)
+         VALUES ($1,$2,$3,'text','outbound','agent',false,$4,NOW(),NOW())`,
+        [tenantId, conversationId, body, messageId ?? null],
+      );
+      await this.db.query(
+        `UPDATE conversations
+           SET status = CASE WHEN status='resolved' THEN 'open' ELSE status END,
+               last_message_at = NOW(), updated_at = NOW()
+         WHERE id=$1`,
+        [conversationId],
+      );
+      this.notifications.emit({
+        tenantId,
+        type: 'message_created',
+        payload: {
+          conversationId,
+          message: { conversationId, body, direction: 'outbound', senderType: 'agent', contentType: 'text', isPrivate: false, createdAt: new Date().toISOString() },
+        },
+      });
+    } catch (e: any) {
+      this.logger.warn(`[wa-templates] could not record template message: ${e.message}`);
     }
   }
 

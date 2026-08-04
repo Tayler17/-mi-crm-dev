@@ -16,6 +16,7 @@ import {
   getConversationTags, addConversationTag, removeConversationTag,
   getConvBotSession, updateConvBotSession,
   getContactTimeline, requestCsat,
+  getWhatsappTemplates, sendWhatsappTemplate, type WhatsappTemplate,
   API_URL,
   type Conversation, type Message, type Contact, type Inbox,
   type CannedResponse, type Tag, type Agent, type Team, type Queue,
@@ -29,6 +30,19 @@ import {
 function isTouchDevice(): boolean {
   if (typeof window === 'undefined') return false;
   return window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window;
+}
+
+// ── WhatsApp template helpers ──
+function tplBodyText(t: WhatsappTemplate): string {
+  return (t.components ?? []).find((c) => String(c.type).toUpperCase() === 'BODY')?.text ?? '';
+}
+function tplVarCount(text: string): number {
+  let max = 0;
+  for (const m of text.matchAll(/\{\{\s*(\d+)\s*\}\}/g)) max = Math.max(max, Number(m[1]));
+  return max;
+}
+function tplFill(text: string, vals: string[]): string {
+  return text.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, n) => vals[Number(n) - 1]?.trim() || `{{${n}}}`);
 }
 
 function exportConversationPdf(conv: Conversation, contact: { fullName?: string; email?: string } | null, msgs: Message[], i: typeof APP['es']) {
@@ -462,6 +476,7 @@ function PeekPreview({ conversationId, onOpen }: { conversationId: string; onOpe
 export default function InboxPage() {
   const { lang } = useLangCtx();
   const i = APP[lang];
+  const en = lang === 'en';
 
   // Current user role (for admin-only actions)
   const currentUserRole = (() => {
@@ -513,6 +528,16 @@ export default function InboxPage() {
   const [composerTab, setComposerTab] = useState<'message' | 'note'>('message');
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
+
+  // WhatsApp template picker (send a template from the inbox — for outside the 24h window)
+  const [showTpl, setShowTpl] = useState(false);
+  const [tplList, setTplList] = useState<WhatsappTemplate[]>([]);
+  const [tplLoading, setTplLoading] = useState(false);
+  const [tplError, setTplError] = useState('');
+  const [tplSel, setTplSel] = useState<WhatsappTemplate | null>(null);
+  const [tplVars, setTplVars] = useState<string[]>([]);
+  const [tplSending, setTplSending] = useState(false);
+  const [tplResult, setTplResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
   // in-conversation search (client-side, over the already-loaded messages)
   const [convSearchOpen, setConvSearchOpen] = useState(false);
@@ -888,6 +913,46 @@ export default function InboxPage() {
       loadList(true);
     } catch (err: unknown) { alert(err instanceof Error ? err.message : i.inbxErrUpload); }
     finally { setSending(false); setPendingFile(null); }
+  }
+
+  // ── WhatsApp templates (send from inbox, e.g. outside the 24h window) ──
+  function openTemplates() {
+    setShowTpl(true); setTplSel(null); setTplResult(null); setTplError('');
+    setTplLoading(true);
+    getWhatsappTemplates()
+      .then((r) => {
+        if (!r.ok) setTplError(r.error || 'No se pudieron cargar las plantillas.');
+        setTplList((r.templates ?? []).filter((t) => t.status.toUpperCase() === 'APPROVED'));
+      })
+      .catch((e) => setTplError(e.message))
+      .finally(() => setTplLoading(false));
+  }
+  function pickTemplate(t: WhatsappTemplate) {
+    setTplSel(t);
+    setTplVars(Array(tplVarCount(tplBodyText(t))).fill(''));
+    setTplResult(null);
+  }
+  async function sendTemplate() {
+    if (!tplSel || !activeId) return;
+    const to = listConv?.contact?.phone || '';
+    if (!to) { setTplResult({ ok: false, msg: en ? 'No phone for this contact' : 'El contacto no tiene teléfono' }); return; }
+    setTplSending(true); setTplResult(null);
+    try {
+      const rendered = tplFill(tplBodyText(tplSel), tplVars);
+      const r = await sendWhatsappTemplate({
+        to, name: tplSel.name, language: tplSel.language, bodyParams: tplVars,
+        conversationId: activeId, renderedBody: rendered,
+      });
+      if (r.ok) {
+        setShowTpl(false); setTplSel(null);
+        const m = await getMessages(activeId); setMessages(m);
+        bumpConversationToTop(activeId); loadList(true);
+      } else {
+        setTplResult({ ok: false, msg: r.error || (en ? 'Send failed' : 'Falló el envío') });
+      }
+    } catch (err: unknown) {
+      setTplResult({ ok: false, msg: err instanceof Error ? err.message : 'Error' });
+    } finally { setTplSending(false); }
   }
 
   function startEditMsg(m: Message) {
@@ -2044,6 +2109,18 @@ export default function InboxPage() {
                     }}
                   >✨</button>
                 )}
+                {composerTab === 'message' && conv?.channelType === 'whatsapp' && (
+                  <button
+                    type="button"
+                    title={en ? 'Send WhatsApp template' : 'Enviar plantilla de WhatsApp'}
+                    onClick={openTemplates}
+                    style={{
+                      padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)',
+                      background: 'none', color: 'var(--text-muted)',
+                      cursor: 'pointer', fontSize: 14, flexShrink: 0, alignSelf: 'flex-end',
+                    }}
+                  >📑</button>
+                )}
                 <textarea
                   ref={textareaRef}
                   className="form-input"
@@ -2612,6 +2689,80 @@ export default function InboxPage() {
           onInsert={(text) => { setBody(text); textareaRef.current?.focus(); }}
           onClose={() => setShowAiPrompts(false)}
         />
+      )}
+
+      {/* WhatsApp template picker */}
+      {showTpl && (
+        <div className="modal-overlay" onClick={() => setShowTpl(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <div className="modal-header">
+              <h2 className="modal-title">{en ? 'Send WhatsApp template' : 'Enviar plantilla de WhatsApp'}</h2>
+              <button type="button" className="modal-close" onClick={() => setShowTpl(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+                {en ? 'To' : 'Para'}: <strong>{listConv?.contact?.phone || '—'}</strong>
+                {' · '}{en ? 'Use templates to message outside the 24h window.' : 'Úsalas para escribir fuera de la ventana de 24h.'}
+              </div>
+
+              {tplLoading && <div className="loading">{en ? 'Loading…' : 'Cargando…'}</div>}
+              {!tplLoading && tplError && <div className="error-msg">{tplError}</div>}
+              {!tplLoading && !tplError && tplList.length === 0 && (
+                <div className="empty" style={{ padding: '24px 12px' }}>
+                  {en ? 'No approved templates.' : 'No hay plantillas aprobadas.'}
+                </div>
+              )}
+
+              {!tplSel && tplList.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {tplList.map((t) => (
+                    <button key={t.id} type="button" onClick={() => pickTemplate(t)}
+                      style={{ textAlign: 'left', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, background: 'none', cursor: 'pointer' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                        <strong style={{ fontSize: 13 }}>{t.name}</strong>
+                        <span style={{ display: 'flex', gap: 4 }}>
+                          <span className="badge badge-medium">{t.category}</span>
+                          <span className="badge badge-low">{t.language}</span>
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{tplBodyText(t)}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {tplSel && (
+                <div>
+                  <button type="button" onClick={() => setTplSel(null)}
+                    style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: 12, padding: 0, marginBottom: 10 }}>
+                    ← {en ? 'Back to list' : 'Volver a la lista'}
+                  </button>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{tplSel.name}</div>
+                  {tplVars.map((v, idx) => (
+                    <div className="form-group" key={idx}>
+                      <label className="form-label">{`Variable {{${idx + 1}}}`}</label>
+                      <input className="form-input" value={v}
+                        onChange={(e) => setTplVars((prev) => prev.map((x, i2) => (i2 === idx ? e.target.value : x)))} />
+                    </div>
+                  ))}
+                  <label className="form-label">{en ? 'Preview' : 'Vista previa'}</label>
+                  <div style={{ fontSize: 13, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 12px', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                    {tplFill(tplBodyText(tplSel), tplVars)}
+                  </div>
+                  {tplResult && !tplResult.ok && <div className="error-msg" style={{ marginTop: 8 }}>{tplResult.msg}</div>}
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowTpl(false)}>{en ? 'Close' : 'Cerrar'}</button>
+              {tplSel && (
+                <button type="button" className="btn btn-primary" disabled={tplSending} onClick={sendTemplate}>
+                  {tplSending ? (en ? 'Sending…' : 'Enviando…') : (en ? 'Send' : 'Enviar')}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Mention toast */}

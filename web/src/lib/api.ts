@@ -1194,7 +1194,7 @@ export interface WhatsappTemplate {
 }
 export const getWhatsappTemplates = () =>
   apiGet<{ ok: boolean; error?: string; templates: WhatsappTemplate[] }>('/connections/whatsapp/templates');
-export const sendWhatsappTemplate = (data: { to: string; name: string; language: string; bodyParams?: string[] }) =>
+export const sendWhatsappTemplate = (data: { to: string; name: string; language: string; bodyParams?: string[]; conversationId?: string; renderedBody?: string }) =>
   apiPost<{ ok: boolean; error?: string; messageId?: string }>('/connections/whatsapp/send-template', data);
 
 // ── Settings ──────────────────────────────────────────────────────────────────
