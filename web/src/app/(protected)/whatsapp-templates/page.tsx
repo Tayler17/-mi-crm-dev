@@ -114,8 +114,9 @@ export default function WhatsappTemplatesPage() {
     if (!confirm(en ? `Delete template "${t.name}"? This removes it from Meta.` : `¿Eliminar la plantilla "${t.name}"? Se borra de Meta.`)) return;
     setDeletingName(t.name);
     try {
-      await deleteWhatsappTemplate(t.name);
-      load();
+      const r = await deleteWhatsappTemplate(t.name);
+      if (r.ok) load();
+      else alert(r.error || (en ? 'Could not delete template' : 'No se pudo eliminar la plantilla'));
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Error');
     } finally { setDeletingName(''); }
