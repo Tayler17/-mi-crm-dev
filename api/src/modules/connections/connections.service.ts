@@ -176,6 +176,86 @@ export class ConnectionsService {
     }
   }
 
+  /** Read the tenant's WhatsApp API credentials (WABA ID + token). */
+  private async getWhatsappCreds(tenantId: string): Promise<{ wabaId?: string; token?: string }> {
+    const [conn] = await this.db.query(
+      `SELECT credentials FROM channel_connections
+       WHERE tenant_id=$1 AND channel_type='whatsapp'
+       ORDER BY (status='connected') DESC, updated_at DESC LIMIT 1`,
+      [tenantId],
+    );
+    const creds = conn?.credentials ?? {};
+    return { wabaId: creds.wabaId, token: creds.accessToken };
+  }
+
+  /** Create a WhatsApp message template in the tenant's WABA (submitted to Meta for
+   *  review). If the body has {{n}} variables, Meta requires an example value per variable. */
+  async createWhatsappTemplate(
+    tenantId: string,
+    dto: { name?: string; category?: string; language?: string; bodyText?: string; examples?: string[] },
+  ) {
+    const { wabaId, token } = await this.getWhatsappCreds(tenantId);
+    if (!wabaId || !token) return { ok: false, error: 'No hay una conexión de WhatsApp API con WABA ID y Access Token.' };
+
+    const name = String(dto.name ?? '').trim().toLowerCase();
+    const category = String(dto.category ?? '').trim().toUpperCase();
+    const language = String(dto.language ?? '').trim();
+    const bodyText = String(dto.bodyText ?? '').trim();
+    if (!/^[a-z0-9_]{1,512}$/.test(name)) return { ok: false, error: 'Nombre inválido: solo minúsculas, números y guion bajo (_).' };
+    if (!['UTILITY', 'MARKETING', 'AUTHENTICATION'].includes(category)) return { ok: false, error: 'Categoría inválida.' };
+    if (!language) return { ok: false, error: 'Falta el idioma.' };
+    if (!bodyText) return { ok: false, error: 'Falta el texto del cuerpo.' };
+
+    // Count {{n}} variables; Meta needs an example value for each.
+    let varMax = 0;
+    for (const m of bodyText.matchAll(/\{\{\s*(\d+)\s*\}\}/g)) varMax = Math.max(varMax, Number(m[1]));
+    const bodyComponent: any = { type: 'BODY', text: bodyText };
+    if (varMax > 0) {
+      const examples = (dto.examples ?? []).map((e) => String(e ?? '').trim());
+      if (examples.length < varMax || examples.slice(0, varMax).some((e) => !e)) {
+        return { ok: false, error: `Faltan ejemplos para las ${varMax} variable(s) del cuerpo.` };
+      }
+      bodyComponent.example = { body_text: [examples.slice(0, varMax)] };
+    }
+
+    try {
+      const res = await (globalThis as any).fetch(
+        `https://graph.facebook.com/v21.0/${wabaId}/message_templates`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ name, category, language, components: [bodyComponent] }),
+          signal: AbortSignal.timeout(15000),
+        },
+      );
+      const data: any = await res.json();
+      if (data?.error) return { ok: false, error: `Meta API: ${data.error.message}` };
+      return { ok: true, id: data?.id, status: data?.status };
+    } catch (e: any) {
+      this.logger.warn(`[wa-templates] create failed for tenant ${tenantId}: ${e.message}`);
+      return { ok: false, error: e.message };
+    }
+  }
+
+  /** Delete a WhatsApp message template by name (removes all its languages). */
+  async deleteWhatsappTemplate(tenantId: string, name: string) {
+    const { wabaId, token } = await this.getWhatsappCreds(tenantId);
+    if (!wabaId || !token) return { ok: false, error: 'No hay una conexión de WhatsApp API con WABA ID y Access Token.' };
+    if (!name) return { ok: false, error: 'Falta el nombre de la plantilla.' };
+    try {
+      const res = await (globalThis as any).fetch(
+        `https://graph.facebook.com/v21.0/${wabaId}/message_templates?name=${encodeURIComponent(name)}`,
+        { method: 'DELETE', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) },
+      );
+      const data: any = await res.json();
+      if (data?.error) return { ok: false, error: `Meta API: ${data.error.message}` };
+      return { ok: true };
+    } catch (e: any) {
+      this.logger.warn(`[wa-templates] delete failed for tenant ${tenantId}: ${e.message}`);
+      return { ok: false, error: e.message };
+    }
+  }
+
   async findOne(id: string, tenantId: string) {
     const c = await this.repo.findOne({ where: { id, tenantId } });
     if (!c) throw new NotFoundException('Connection not found');

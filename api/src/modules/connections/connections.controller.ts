@@ -30,6 +30,18 @@ export class ConnectionsController {
     return this.svc.sendWhatsappTemplate(tenantId, dto);
   }
 
+  // Create a WhatsApp message template (submitted to Meta for review).
+  @Post('whatsapp/templates')
+  createWhatsappTemplate(@Body() dto: any, @TenantId() tenantId: string) {
+    return this.svc.createWhatsappTemplate(tenantId, dto);
+  }
+
+  // Delete a WhatsApp message template by name.
+  @Delete('whatsapp/templates/:name')
+  deleteWhatsappTemplate(@Param('name') name: string, @TenantId() tenantId: string) {
+    return this.svc.deleteWhatsappTemplate(tenantId, name);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @TenantId() tenantId: string) {
     return this.svc.findOne(id, tenantId);

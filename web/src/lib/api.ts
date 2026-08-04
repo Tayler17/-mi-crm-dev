@@ -1196,6 +1196,10 @@ export const getWhatsappTemplates = () =>
   apiGet<{ ok: boolean; error?: string; templates: WhatsappTemplate[] }>('/connections/whatsapp/templates');
 export const sendWhatsappTemplate = (data: { to: string; name: string; language: string; bodyParams?: string[]; conversationId?: string; renderedBody?: string }) =>
   apiPost<{ ok: boolean; error?: string; messageId?: string }>('/connections/whatsapp/send-template', data);
+export const createWhatsappTemplate = (data: { name: string; category: string; language: string; bodyText: string; examples?: string[] }) =>
+  apiPost<{ ok: boolean; error?: string; id?: string; status?: string }>('/connections/whatsapp/templates', data);
+export const deleteWhatsappTemplate = (name: string) =>
+  apiDelete(`/connections/whatsapp/templates/${encodeURIComponent(name)}`);
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
