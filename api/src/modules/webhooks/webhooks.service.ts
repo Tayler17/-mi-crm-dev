@@ -53,6 +53,15 @@ export class WebhooksService {
       for (const entry of body?.entry ?? []) {
         for (const change of entry?.changes ?? []) {
           const value = change?.value;
+
+          // Incoming/finished WhatsApp calls (Business Calling API) arrive under the
+          // 'calls' field, not 'messages'. Log them so the agent sees the call happened.
+          if (change?.field === 'calls' && Array.isArray(value?.calls)) {
+            for (const call of value.calls) {
+              await this.logWhatsAppCall(conn, connectionId, call, value);
+            }
+          }
+
           if (!value?.messages) continue;
           for (const msg of value.messages) {
             const waId  = msg.from;
@@ -72,6 +81,44 @@ export class WebhooksService {
     }
   }
 
+  /** Log a WhatsApp call (Business Calling API) as an inbound entry so the agent sees it
+   *  in the inbox. We don't answer calls here — just record the event once, on terminate
+   *  (which carries the final outcome/duration). skipAutomation=true so the bot doesn't
+   *  try to "reply" to a call log. */
+  private async logWhatsAppCall(conn: any, connectionId: string, call: any, value: any): Promise<void> {
+    try {
+      const event = call?.event; // 'connect' | 'terminate' | ...
+      // Only one entry per call: log on terminate (or if no event field is present).
+      if (event && event !== 'terminate') return;
+
+      const businessInitiated = call?.direction === 'BUSINESS_INITIATED';
+      const customerPhone = String((businessInitiated ? call?.to : call?.from) ?? '').replace(/[^\d]/g, '');
+      if (!customerPhone) return;
+
+      const name = value?.contacts?.find((c: any) => c.wa_id === customerPhone)?.profile?.name ?? customerPhone;
+
+      const dur = Number(call?.duration ?? 0);
+      let body: string;
+      if (dur > 0) {
+        const m = Math.floor(dur / 60), s = dur % 60;
+        const dirLabel = businessInitiated ? 'saliente' : 'entrante';
+        body = `📞 Llamada de WhatsApp ${dirLabel} — ${m > 0 ? `${m}m ` : ''}${s}s`;
+      } else {
+        body = businessInitiated ? '📞 Llamada de WhatsApp saliente (sin respuesta)' : '📞 Llamada de WhatsApp perdida';
+      }
+
+      await this.upsertMessage({
+        tenantId: conn.tenant_id, connectionId,
+        inboxId: conn.inbox_id, channel: 'whatsapp',
+        externalId: customerPhone, contactName: name, contactPhone: customerPhone,
+        messageExtId: `call-${call?.id ?? Date.now()}`, body, contentType: 'text',
+        skipAutomation: true,
+      });
+    } catch (err) {
+      this.logger.error(`WhatsApp call log error [${connectionId}]: ${err}`);
+    }
+  }
+
   /** Build body + content_type for a WhatsApp Cloud API message.
    *  Media (image/audio/video/document/sticker) arrives as a media ID that must be
    *  downloaded via the Graph API; we store it under uploads/messages and format the
@@ -79,6 +126,23 @@ export class WebhooksService {
   private async extractWhatsAppContent(msg: any, token: string): Promise<{ body: string; contentType: string }> {
     const MEDIA_TYPES = ['image', 'audio', 'video', 'document', 'sticker'];
     if (!MEDIA_TYPES.includes(msg.type)) {
+      // Shared contact card(s): the details arrive in msg.contacts, not as text.
+      if (msg.type === 'contacts' && Array.isArray(msg.contacts) && msg.contacts.length) {
+        const parts = msg.contacts.map((c: any) => {
+          const nm = c?.name?.formatted_name
+            || [c?.name?.first_name, c?.name?.last_name].filter(Boolean).join(' ').trim()
+            || 'Contacto';
+          const phone = c?.phones?.[0]?.phone || c?.phones?.[0]?.wa_id || '';
+          return (phone ? `${nm} — ${phone}` : nm).replace(/\|/g, ' ');
+        });
+        return { body: `👤 Contacto compartido: ${parts.join('; ')}`, contentType: 'text' };
+      }
+      // Emoji reaction to one of our messages (msg.reaction = { message_id, emoji }).
+      // An empty emoji means the reaction was removed.
+      if (msg.type === 'reaction') {
+        const emoji = msg.reaction?.emoji;
+        return { body: emoji ? `Reaccionó con ${emoji}` : 'Quitó su reacción', contentType: 'text' };
+      }
       const text = msg.text?.body
         ?? msg.button?.text
         ?? msg.interactive?.list_reply?.title
@@ -252,9 +316,9 @@ export class WebhooksService {
   private async upsertMessage(opts: {
     tenantId: string; connectionId: string; inboxId: string | null;
     channel: string; externalId: string; contactName: string; contactPhone: string;
-    messageExtId: string; body: string; contentType?: string;
+    messageExtId: string; body: string; contentType?: string; skipAutomation?: boolean;
   }) {
-    const { tenantId, connectionId, inboxId, channel, externalId, contactName, contactPhone, messageExtId, body, contentType = 'text' } = opts;
+    const { tenantId, connectionId, inboxId, channel, externalId, contactName, contactPhone, messageExtId, body, contentType = 'text', skipAutomation = false } = opts;
 
     // 1. Find or create contact
     const [existing] = await this.db.query(
@@ -340,13 +404,16 @@ export class WebhooksService {
       },
     });
 
-    // 5b. Internal events for AI chatbots / automations
-    const convPayload = { tenantId, conversationId, conversation: { id: conversationId, contact_id: contactId, inbox_id: inboxId, channel } };
-    if (isNew) this.events.emit('conversation.created', convPayload);
-    this.events.emit('conversation.message_received', {
-      ...convPayload,
-      message: { body, direction: 'inbound', is_private: false, content_type: contentType },
-    });
+    // 5b. Internal events for AI chatbots / automations. Skipped for call logs so the
+    // bot doesn't try to "reply" to a "📞 Llamada perdida" entry.
+    if (!skipAutomation) {
+      const convPayload = { tenantId, conversationId, conversation: { id: conversationId, contact_id: contactId, inbox_id: inboxId, channel } };
+      if (isNew) this.events.emit('conversation.created', convPayload);
+      this.events.emit('conversation.message_received', {
+        ...convPayload,
+        message: { body, direction: 'inbound', is_private: false, content_type: contentType },
+      });
+    }
 
     this.logger.log(`[${channel}] msg from ${contactName} → conv ${conversationId}`);
   }
