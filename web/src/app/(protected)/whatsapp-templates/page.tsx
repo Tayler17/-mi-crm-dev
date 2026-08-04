@@ -45,6 +45,7 @@ export default function WhatsappTemplatesPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
   const [deletingName, setDeletingName] = useState('');
+  const [confirmDel, setConfirmDel] = useState('');
 
   const cVarCount = varCount(cBody);
 
@@ -111,7 +112,7 @@ export default function WhatsappTemplatesPage() {
     } finally { setCreating(false); }
   }
   async function handleDelete(t: WhatsappTemplate) {
-    if (!confirm(en ? `Delete template "${t.name}"? This removes it from Meta.` : `¿Eliminar la plantilla "${t.name}"? Se borra de Meta.`)) return;
+    setConfirmDel('');
     setDeletingName(t.name);
     try {
       const r = await deleteWhatsappTemplate(t.name);
@@ -197,13 +198,16 @@ export default function WhatsappTemplatesPage() {
                       >
                         {en ? 'Send' : 'Enviar'}
                       </button>
-                      <button
-                        className="btn btn-danger"
-                        disabled={deletingName === t.name}
-                        onClick={() => handleDelete(t)}
-                      >
-                        {deletingName === t.name ? (en ? 'Deleting…' : 'Eliminando…') : (en ? 'Delete' : 'Eliminar')}
-                      </button>
+                      {deletingName === t.name ? (
+                        <button className="btn btn-danger" disabled>{en ? 'Deleting…' : 'Eliminando…'}</button>
+                      ) : confirmDel === t.name ? (
+                        <>
+                          <button className="btn btn-danger" onClick={() => handleDelete(t)}>{en ? 'Confirm delete' : 'Confirmar'}</button>
+                          <button className="btn btn-secondary" onClick={() => setConfirmDel('')}>{en ? 'Cancel' : 'Cancelar'}</button>
+                        </>
+                      ) : (
+                        <button className="btn btn-danger" onClick={() => setConfirmDel(t.name)}>{en ? 'Delete' : 'Eliminar'}</button>
+                      )}
                     </div>
                   </div>
                 </div>
