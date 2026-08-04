@@ -1873,6 +1873,7 @@ export default function InboxPage() {
                           <span title={m.status} style={{ fontSize: 12, lineHeight: 1 }}>
                             {m.status === 'read'      ? <span style={{ color: '#3b82f6' }}>✓✓</span>
                            : m.status === 'delivered' ? <span style={{ color: 'var(--text-muted)' }}>✓✓</span>
+                           : m.status === 'failed'    ? <span style={{ color: '#ef4444' }}>⚠</span>
                            :                            <span style={{ color: 'var(--text-muted)', opacity: 0.6 }}>✓</span>}
                           </span>
                         )}

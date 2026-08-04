@@ -538,15 +538,23 @@ export class MessagesController {
           }
           if (!payload) payload = { type: 'text', text: { body: text } };
 
-          await (globalThis as any).fetch(
-            `https://graph.facebook.com/v19.0/${phoneId}/messages`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-              body: JSON.stringify({ messaging_product: 'whatsapp', to: toPhone, ...payload }),
-              signal: AbortSignal.timeout(15000),
-            },
-          ).catch(() => {});
+          try {
+            const waRes = await (globalThis as any).fetch(
+              `https://graph.facebook.com/v19.0/${phoneId}/messages`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ messaging_product: 'whatsapp', to: toPhone, ...payload }),
+                signal: AbortSignal.timeout(15000),
+              },
+            );
+            // Capture Meta's message id so delivery/read status webhooks can match it.
+            const waData: any = await waRes.json().catch(() => null);
+            const wamid = waData?.messages?.[0]?.id;
+            if (wamid && messageId) {
+              await this.db.query(`UPDATE messages SET external_id=$1 WHERE id=$2`, [wamid, messageId]).catch(() => {});
+            }
+          } catch { /* network/timeout — message already stored, delivery status just won't track */ }
           break;
         }
 

@@ -62,6 +62,11 @@ export class WebhooksService {
             }
           }
 
+          // Delivery/read receipts for our outbound messages arrive under 'statuses'.
+          if (Array.isArray(value?.statuses)) {
+            for (const st of value.statuses) await this.updateMessageStatus(conn, st);
+          }
+
           if (!value?.messages) continue;
           for (const msg of value.messages) {
             const waId  = msg.from;
@@ -119,6 +124,34 @@ export class WebhooksService {
     }
   }
 
+  /** Update an outbound message's delivery status from a Cloud API status webhook
+   *  (sent → delivered → read; or failed). Never downgrades. Pushes the change via SSE. */
+  private async updateMessageStatus(conn: any, st: any): Promise<void> {
+    try {
+      const wamid = st?.id;
+      const status = String(st?.status ?? '').toLowerCase();
+      const rank: Record<string, number> = { failed: 1, sent: 2, delivered: 3, read: 4 };
+      if (!wamid || !(status in rank)) return;
+      const rows = await this.db.query(
+        `UPDATE messages SET status=$1, updated_at=NOW()
+         WHERE external_id=$2 AND tenant_id=$3 AND direction='outbound'
+           AND COALESCE(CASE status
+                 WHEN 'read' THEN 4 WHEN 'delivered' THEN 3 WHEN 'sent' THEN 2 WHEN 'failed' THEN 1 ELSE 0 END, 0) < $4
+         RETURNING id, conversation_id`,
+        [status, wamid, conn.tenant_id, rank[status]],
+      );
+      for (const r of rows ?? []) {
+        this.notifications.emit({
+          tenantId: conn.tenant_id,
+          type: 'message_status_updated',
+          payload: { conversationId: r.conversation_id, messageId: r.id, status },
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`WA status update error: ${err}`);
+    }
+  }
+
   /** Build body + content_type for a WhatsApp Cloud API message.
    *  Media (image/audio/video/document/sticker) arrives as a media ID that must be
    *  downloaded via the Graph API; we store it under uploads/messages and format the
@@ -142,6 +175,13 @@ export class WebhooksService {
       if (msg.type === 'reaction') {
         const emoji = msg.reaction?.emoji;
         return { body: emoji ? `Reaccionó con ${emoji}` : 'Quitó su reacción', contentType: 'text' };
+      }
+      // Shared location → store a readable label + a Google Maps link (clickable in inbox).
+      if (msg.type === 'location' && msg.location) {
+        const { latitude, longitude, name, address } = msg.location;
+        const label = [name, address].filter(Boolean).join(' — ').replace(/\|/g, ' ').trim();
+        const maps = `https://www.google.com/maps?q=${latitude},${longitude}`;
+        return { body: `📍 Ubicación${label ? ': ' + label : ''} ${maps}`, contentType: 'text' };
       }
       const text = msg.text?.body
         ?? msg.button?.text
