@@ -1192,14 +1192,20 @@ export interface WhatsappTemplate {
   status: string;             // APPROVED | PENDING | REJECTED | ...
   components: { type: string; text?: string; format?: string; buttons?: unknown[] }[];
 }
-export const getWhatsappTemplates = () =>
-  apiGet<{ ok: boolean; error?: string; templates: WhatsappTemplate[] }>('/connections/whatsapp/templates');
-export const sendWhatsappTemplate = (data: { to: string; name: string; language: string; bodyParams?: string[]; conversationId?: string; renderedBody?: string }) =>
+export const getWhatsappTemplates = (params?: { connectionId?: string; conversationId?: string }) => {
+  const qs = new URLSearchParams();
+  if (params?.connectionId) qs.set('connectionId', params.connectionId);
+  if (params?.conversationId) qs.set('conversationId', params.conversationId);
+  const q = qs.toString();
+  return apiGet<{ ok: boolean; error?: string; templates: WhatsappTemplate[] }>(`/connections/whatsapp/templates${q ? `?${q}` : ''}`);
+};
+export const sendWhatsappTemplate = (data: { to: string; name: string; language: string; bodyParams?: string[]; conversationId?: string; connectionId?: string; renderedBody?: string }) =>
   apiPost<{ ok: boolean; error?: string; messageId?: string }>('/connections/whatsapp/send-template', data);
-export const createWhatsappTemplate = (data: { name: string; category: string; language: string; bodyText: string; examples?: string[] }) =>
+export const createWhatsappTemplate = (data: { name: string; category: string; language: string; bodyText: string; examples?: string[]; connectionId?: string }) =>
   apiPost<{ ok: boolean; error?: string; id?: string; status?: string }>('/connections/whatsapp/templates', data);
-export const deleteWhatsappTemplate = async (name: string): Promise<{ ok: boolean; error?: string }> => {
-  const res = await fetch(`${API_URL}/connections/whatsapp/templates/${encodeURIComponent(name)}`, {
+export const deleteWhatsappTemplate = async (name: string, connectionId?: string): Promise<{ ok: boolean; error?: string }> => {
+  const q = connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : '';
+  const res = await fetch(`${API_URL}/connections/whatsapp/templates/${encodeURIComponent(name)}${q}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });

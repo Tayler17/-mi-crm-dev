@@ -43,20 +43,45 @@ export class ConnectionsService {
     }));
   }
 
+  /** Resolve the WhatsApp connection credentials to use, in priority order:
+   *  1) the given conversation's connection, 2) an explicit connectionId,
+   *  3) the tenant's most-recent connected WhatsApp connection (fallback).
+   *  A tenant can have several WhatsApp numbers, so template ops must target the right one. */
+  private async getWhatsappCredsFor(
+    tenantId: string,
+    opts?: { connectionId?: string; conversationId?: string },
+  ): Promise<{ wabaId?: string; token?: string; phoneId?: string }> {
+    let connId = opts?.connectionId;
+    if (!connId && opts?.conversationId) {
+      const [conv] = await this.db.query(
+        `SELECT connection_id FROM conversations WHERE id=$1 AND tenant_id=$2 LIMIT 1`,
+        [opts.conversationId, tenantId],
+      );
+      connId = conv?.connection_id ?? undefined;
+    }
+    let conn: any;
+    if (connId) {
+      [conn] = await this.db.query(
+        `SELECT credentials FROM channel_connections WHERE id=$1 AND tenant_id=$2 AND channel_type='whatsapp' LIMIT 1`,
+        [connId, tenantId],
+      );
+    }
+    if (!conn) {
+      [conn] = await this.db.query(
+        `SELECT credentials FROM channel_connections
+         WHERE tenant_id=$1 AND channel_type='whatsapp'
+         ORDER BY (status='connected') DESC, updated_at DESC LIMIT 1`,
+        [tenantId],
+      );
+    }
+    const creds = conn?.credentials ?? {};
+    return { wabaId: creds.wabaId, token: creds.accessToken, phoneId: creds.phoneNumberId };
+  }
+
   /** List the tenant's WhatsApp message templates from Meta (Cloud API).
-   *  Reads the WABA ID + access token from the tenant's WhatsApp API connection and
-   *  calls Meta's message_templates endpoint. Returns name/category/language/status. */
-  async listWhatsappTemplates(tenantId: string) {
-    const [conn] = await this.db.query(
-      `SELECT credentials FROM channel_connections
-       WHERE tenant_id=$1 AND channel_type='whatsapp'
-       ORDER BY (status='connected') DESC, updated_at DESC
-       LIMIT 1`,
-      [tenantId],
-    );
-    const creds  = conn?.credentials ?? {};
-    const wabaId = creds.wabaId;
-    const token  = creds.accessToken;
+   *  Uses the connection of the given conversation/connectionId (or the most-recent). */
+  async listWhatsappTemplates(tenantId: string, opts?: { connectionId?: string; conversationId?: string }) {
+    const { wabaId, token } = await this.getWhatsappCredsFor(tenantId, opts);
     if (!wabaId || !token) {
       return { ok: false, error: 'No hay una conexión de WhatsApp API con WABA ID y Access Token.', templates: [] };
     }
@@ -88,18 +113,11 @@ export class ConnectionsService {
    *  variables in order. Returns the Meta message id on success. */
   async sendWhatsappTemplate(
     tenantId: string,
-    dto: { to?: string; name?: string; language?: string; bodyParams?: string[]; conversationId?: string; renderedBody?: string },
+    dto: { to?: string; name?: string; language?: string; bodyParams?: string[]; conversationId?: string; connectionId?: string; renderedBody?: string },
   ) {
-    const [conn] = await this.db.query(
-      `SELECT credentials FROM channel_connections
-       WHERE tenant_id=$1 AND channel_type='whatsapp'
-       ORDER BY (status='connected') DESC, updated_at DESC
-       LIMIT 1`,
-      [tenantId],
-    );
-    const creds   = conn?.credentials ?? {};
-    const phoneId = creds.phoneNumberId;
-    const token   = creds.accessToken;
+    // Use the conversation's connection (inbox) or the explicit connectionId, so the
+    // template is sent from the SAME number whose WABA it belongs to (not "the most recent").
+    const { phoneId, token } = await this.getWhatsappCredsFor(tenantId, { conversationId: dto.conversationId, connectionId: dto.connectionId });
     if (!phoneId || !token) {
       return { ok: false, error: 'No hay una conexión de WhatsApp API con Phone Number ID y Access Token.' };
     }
@@ -176,25 +194,13 @@ export class ConnectionsService {
     }
   }
 
-  /** Read the tenant's WhatsApp API credentials (WABA ID + token). */
-  private async getWhatsappCreds(tenantId: string): Promise<{ wabaId?: string; token?: string }> {
-    const [conn] = await this.db.query(
-      `SELECT credentials FROM channel_connections
-       WHERE tenant_id=$1 AND channel_type='whatsapp'
-       ORDER BY (status='connected') DESC, updated_at DESC LIMIT 1`,
-      [tenantId],
-    );
-    const creds = conn?.credentials ?? {};
-    return { wabaId: creds.wabaId, token: creds.accessToken };
-  }
-
   /** Create a WhatsApp message template in the tenant's WABA (submitted to Meta for
    *  review). If the body has {{n}} variables, Meta requires an example value per variable. */
   async createWhatsappTemplate(
     tenantId: string,
-    dto: { name?: string; category?: string; language?: string; bodyText?: string; examples?: string[] },
+    dto: { name?: string; category?: string; language?: string; bodyText?: string; examples?: string[]; connectionId?: string },
   ) {
-    const { wabaId, token } = await this.getWhatsappCreds(tenantId);
+    const { wabaId, token } = await this.getWhatsappCredsFor(tenantId, { connectionId: dto.connectionId });
     if (!wabaId || !token) return { ok: false, error: 'No hay una conexión de WhatsApp API con WABA ID y Access Token.' };
 
     const name = String(dto.name ?? '').trim().toLowerCase();
@@ -238,8 +244,8 @@ export class ConnectionsService {
   }
 
   /** Delete a WhatsApp message template by name (removes all its languages). */
-  async deleteWhatsappTemplate(tenantId: string, name: string) {
-    const { wabaId, token } = await this.getWhatsappCreds(tenantId);
+  async deleteWhatsappTemplate(tenantId: string, name: string, connectionId?: string) {
+    const { wabaId, token } = await this.getWhatsappCredsFor(tenantId, { connectionId });
     if (!wabaId || !token) return { ok: false, error: 'No hay una conexión de WhatsApp API con WABA ID y Access Token.' };
     if (!name) return { ok: false, error: 'Falta el nombre de la plantilla.' };
     try {

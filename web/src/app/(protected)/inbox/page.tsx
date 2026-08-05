@@ -919,7 +919,7 @@ export default function InboxPage() {
   function openTemplates() {
     setShowTpl(true); setTplSel(null); setTplResult(null); setTplError('');
     setTplLoading(true);
-    getWhatsappTemplates()
+    getWhatsappTemplates(activeId ? { conversationId: activeId } : undefined)
       .then((r) => {
         if (!r.ok) setTplError(r.error || 'No se pudieron cargar las plantillas.');
         setTplList((r.templates ?? []).filter((t) => t.status.toUpperCase() === 'APPROVED'));

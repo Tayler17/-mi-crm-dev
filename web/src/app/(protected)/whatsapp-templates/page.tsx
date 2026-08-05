@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { getWhatsappTemplates, sendWhatsappTemplate, createWhatsappTemplate, deleteWhatsappTemplate, type WhatsappTemplate } from '@/lib/api';
+import { getWhatsappTemplates, sendWhatsappTemplate, createWhatsappTemplate, deleteWhatsappTemplate, getConnections, type WhatsappTemplate, type ChannelConnection } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
 
 /** Pull the BODY component's text from a template's components. */
@@ -29,6 +29,10 @@ export default function WhatsappTemplatesPage() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
 
+  // WhatsApp connection selector (a tenant can have several numbers/WABAs)
+  const [conns, setConns] = useState<ChannelConnection[]>([]);
+  const [connId, setConnId] = useState('');
+
   const [sendFor, setSendFor] = useState<WhatsappTemplate | null>(null);
   const [to, setTo] = useState('');
   const [vars, setVars] = useState<string[]>([]);
@@ -52,7 +56,7 @@ export default function WhatsappTemplatesPage() {
   function load() {
     setLoading(true);
     setError('');
-    getWhatsappTemplates()
+    getWhatsappTemplates(connId ? { connectionId: connId } : undefined)
       .then((r) => {
         if (!r.ok) setError(r.error || (en ? 'Could not load templates.' : 'No se pudieron cargar las plantillas.'));
         setTemplates(r.templates ?? []);
@@ -60,7 +64,18 @@ export default function WhatsappTemplatesPage() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }
-  useEffect(() => { load(); }, []);
+  // Load the tenant's connected WhatsApp connections for the selector.
+  useEffect(() => {
+    getConnections()
+      .then((list) => {
+        const wa = list.filter((c) => c.channelType === 'whatsapp' && c.status === 'connected');
+        setConns(wa);
+        if (wa.length && !connId) setConnId(wa[0].id);
+      })
+      .catch(() => {});
+  }, []);
+  // (Re)load templates whenever the selected connection changes.
+  useEffect(() => { load(); }, [connId]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -81,7 +96,7 @@ export default function WhatsappTemplatesPage() {
     setSending(true);
     setSendResult(null);
     try {
-      const r = await sendWhatsappTemplate({ to: to.trim(), name: sendFor.name, language: sendFor.language, bodyParams: vars });
+      const r = await sendWhatsappTemplate({ to: to.trim(), name: sendFor.name, language: sendFor.language, bodyParams: vars, connectionId: connId || undefined });
       setSendResult(
         r.ok
           ? { ok: true, msg: en ? `Sent ✓ (id: ${r.messageId ?? '—'})` : `Enviada ✓ (id: ${r.messageId ?? '—'})` }
@@ -103,7 +118,7 @@ export default function WhatsappTemplatesPage() {
     try {
       const r = await createWhatsappTemplate({
         name: cName.trim(), category: cCategory, language: cLanguage.trim(), bodyText: cBody.trim(),
-        examples: cExamples.slice(0, cVarCount),
+        examples: cExamples.slice(0, cVarCount), connectionId: connId || undefined,
       });
       if (r.ok) { setShowCreate(false); load(); }
       else setCreateError(r.error || (en ? 'Could not create template' : 'No se pudo crear la plantilla'));
@@ -115,7 +130,7 @@ export default function WhatsappTemplatesPage() {
     setConfirmDel('');
     setDeletingName(t.name);
     try {
-      const r = await deleteWhatsappTemplate(t.name);
+      const r = await deleteWhatsappTemplate(t.name, connId || undefined);
       if (r.ok) load();
       else alert(r.error || (en ? 'Could not delete template' : 'No se pudo eliminar la plantilla'));
     } catch (err: unknown) {
@@ -133,7 +148,12 @@ export default function WhatsappTemplatesPage() {
     <div className="main">
       <div className="page-header">
         <h1 className="page-title">{en ? 'WhatsApp Templates' : 'Plantillas de WhatsApp'}</h1>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {conns.length > 1 && (
+            <select className="form-input" style={{ width: 'auto' }} value={connId} onChange={(e) => setConnId(e.target.value)} title={en ? 'WhatsApp number' : 'Número de WhatsApp'}>
+              {conns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          )}
           <button className="btn btn-secondary" onClick={load}>{en ? 'Refresh' : 'Actualizar'}</button>
           <button className="btn btn-primary" onClick={openCreate}>{en ? '+ New template' : '+ Nueva plantilla'}</button>
         </div>

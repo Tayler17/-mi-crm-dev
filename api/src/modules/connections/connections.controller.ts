@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ConnectionsService } from './connections.service';
 import { WhatsappWebService } from './whatsapp-web.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -20,8 +20,12 @@ export class ConnectionsController {
   // WhatsApp Cloud API message templates (from Meta) — placed before :id so the literal
   // path segment isn't captured by the :id param.
   @Get('whatsapp/templates')
-  listWhatsappTemplates(@TenantId() tenantId: string) {
-    return this.svc.listWhatsappTemplates(tenantId);
+  listWhatsappTemplates(
+    @TenantId() tenantId: string,
+    @Query('connectionId') connectionId?: string,
+    @Query('conversationId') conversationId?: string,
+  ) {
+    return this.svc.listWhatsappTemplates(tenantId, { connectionId, conversationId });
   }
 
   // Send a WhatsApp message template to a number (literal path, before :id).
@@ -38,8 +42,8 @@ export class ConnectionsController {
 
   // Delete a WhatsApp message template by name.
   @Delete('whatsapp/templates/:name')
-  deleteWhatsappTemplate(@Param('name') name: string, @TenantId() tenantId: string) {
-    return this.svc.deleteWhatsappTemplate(tenantId, name);
+  deleteWhatsappTemplate(@Param('name') name: string, @TenantId() tenantId: string, @Query('connectionId') connectionId?: string) {
+    return this.svc.deleteWhatsappTemplate(tenantId, name, connectionId);
   }
 
   @Get(':id')
