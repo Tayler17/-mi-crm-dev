@@ -140,4 +140,157 @@ export const CRM_TOOLS: ToolDef[] = [
       return { ok: true, contacts: c?.n ?? 0, open_conversations: o?.n ?? 0, open_deals: d?.n ?? 0 };
     },
   },
+  {
+    name: 'update_contact',
+    description: 'Actualizar datos de un contacto (nombre, teléfono, email). Usa search_contacts primero para el contact_id.',
+    parameters: {
+      type: 'object',
+      properties: {
+        contact_id: { type: 'string', description: 'ID del contacto' },
+        full_name: { type: 'string' }, phone: { type: 'string' }, email: { type: 'string' },
+      },
+      required: ['contact_id'],
+    },
+    handler: async (ctx, args) => {
+      const sets: string[] = []; const params: any[] = [];
+      if (String(args.full_name ?? '').trim()) { params.push(args.full_name.trim()); sets.push(`full_name=$${params.length}`); }
+      if (String(args.phone ?? '').trim()) { params.push(args.phone.trim()); sets.push(`phone=$${params.length}`); }
+      if (String(args.email ?? '').trim()) { params.push(args.email.trim()); sets.push(`email=$${params.length}`); }
+      if (!sets.length) return { ok: false, error: 'Nada que actualizar' };
+      params.push(args.contact_id, ctx.tenantId);
+      const r = await ctx.db.query(
+        `UPDATE contacts SET ${sets.join(',')}, updated_at=NOW() WHERE id=$${params.length - 1} AND tenant_id=$${params.length} RETURNING id, full_name, phone, email`,
+        params,
+      );
+      if (!r.length) return { ok: false, error: 'Contacto no encontrado' };
+      return { ok: true, contact: r[0] };
+    },
+  },
+  {
+    name: 'list_pipeline_stages',
+    description: 'Listar las etapas del pipeline (para saber a qué etapa crear o mover un deal).',
+    parameters: { type: 'object', properties: {}, required: [] },
+    handler: async (ctx) => {
+      const rows = await ctx.db.query(
+        `SELECT ps.name FROM pipeline_stages ps JOIN pipelines p ON p.id = ps.pipeline_id
+         WHERE p.tenant_id=$1 ORDER BY ps.position`,
+        [ctx.tenantId],
+      );
+      return { ok: true, stages: rows.map((r: any) => r.name) };
+    },
+  },
+  {
+    name: 'list_deals',
+    description: 'Listar deals abiertos (opcionalmente filtrando por nombre de etapa). Hasta 20.',
+    parameters: { type: 'object', properties: { stage: { type: 'string', description: 'Filtrar por etapa (opcional)' } }, required: [] },
+    handler: async (ctx, args) => {
+      const params: any[] = [ctx.tenantId];
+      let where = `d.tenant_id=$1 AND d.status='open'`;
+      if (String(args.stage ?? '').trim()) { params.push(`%${args.stage.trim()}%`); where += ` AND ps.name ILIKE $${params.length}`; }
+      const rows = await ctx.db.query(
+        `SELECT d.id, d.title, d.value, d.currency, ps.name AS stage, ct.full_name AS contact
+         FROM deals d
+         LEFT JOIN pipeline_stages ps ON ps.id = d.stage_id
+         LEFT JOIN contacts ct ON ct.id = d.contact_id
+         WHERE ${where} ORDER BY d.updated_at DESC LIMIT 20`,
+        params,
+      );
+      return { ok: true, count: rows.length, deals: rows };
+    },
+  },
+  {
+    name: 'create_deal',
+    description: 'Crear un deal para un contacto. Usa search_contacts para el contact_id y list_pipeline_stages para la etapa.',
+    parameters: {
+      type: 'object',
+      properties: {
+        contact_id: { type: 'string', description: 'ID del contacto (de search_contacts)' },
+        title: { type: 'string' },
+        value: { type: 'number' },
+        currency: { type: 'string', description: 'USD/GBP/EUR' },
+        stage: { type: 'string', description: 'Nombre de la etapa' },
+        notes: { type: 'string' },
+      },
+      required: ['contact_id', 'title'],
+    },
+    handler: async (ctx, args) => {
+      const [c] = await ctx.db.query(`SELECT id FROM contacts WHERE id=$1 AND tenant_id=$2`, [args.contact_id, ctx.tenantId]);
+      if (!c) return { ok: false, error: 'Contacto no encontrado' };
+      let stageId: any = null;
+      if (String(args.stage ?? '').trim()) {
+        const [s] = await ctx.db.query(
+          `SELECT ps.id FROM pipeline_stages ps JOIN pipelines p ON p.id = ps.pipeline_id WHERE p.tenant_id=$1 AND ps.name ILIKE $2 LIMIT 1`,
+          [ctx.tenantId, args.stage.trim()],
+        );
+        stageId = s?.id ?? null;
+      }
+      const [row] = await ctx.db.query(
+        `INSERT INTO deals (tenant_id, contact_id, title, value, currency, stage_id, notes, status, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'open',NOW(),NOW()) RETURNING id, title`,
+        [ctx.tenantId, args.contact_id, String(args.title), args.value ?? 0, args.currency ?? 'USD', stageId, args.notes ?? null],
+      );
+      return { ok: true, deal: row };
+    },
+  },
+  {
+    name: 'move_deal',
+    description: 'Mover un deal a otra etapa del pipeline.',
+    parameters: {
+      type: 'object',
+      properties: { deal_id: { type: 'string' }, stage: { type: 'string', description: 'Etapa destino' } },
+      required: ['deal_id', 'stage'],
+    },
+    handler: async (ctx, args) => {
+      const [s] = await ctx.db.query(
+        `SELECT ps.id FROM pipeline_stages ps JOIN pipelines p ON p.id = ps.pipeline_id WHERE p.tenant_id=$1 AND ps.name ILIKE $2 LIMIT 1`,
+        [ctx.tenantId, String(args.stage ?? '').trim()],
+      );
+      if (!s) return { ok: false, error: `La etapa "${args.stage}" no existe` };
+      const r = await ctx.db.query(`UPDATE deals SET stage_id=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3 RETURNING id`, [s.id, args.deal_id, ctx.tenantId]);
+      if (!r.length) return { ok: false, error: 'Deal no encontrado' };
+      return { ok: true, moved: true };
+    },
+  },
+  {
+    name: 'create_task',
+    description: 'Crear una tarea (opcionalmente ligada a un contacto).',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        description: { type: 'string' },
+        due_date: { type: 'string', description: 'Fecha ISO YYYY-MM-DD (opcional)' },
+        priority: { type: 'string', description: 'low/medium/high' },
+        contact_id: { type: 'string', description: 'ID del contacto (opcional)' },
+      },
+      required: ['title'],
+    },
+    handler: async (ctx, args) => {
+      let contactId = args.contact_id ?? null;
+      if (contactId) {
+        const [c] = await ctx.db.query(`SELECT id FROM contacts WHERE id=$1 AND tenant_id=$2`, [contactId, ctx.tenantId]);
+        if (!c) contactId = null;
+      }
+      const [row] = await ctx.db.query(
+        `INSERT INTO tasks (tenant_id, contact_id, title, description, due_date, priority, status, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5::timestamptz,$6,'pending',NOW(),NOW()) RETURNING id, title`,
+        [ctx.tenantId, contactId, String(args.title), args.description ?? null, args.due_date ?? null, args.priority ?? 'medium'],
+      );
+      return { ok: true, task: row };
+    },
+  },
+  {
+    name: 'list_tasks',
+    description: 'Listar tareas pendientes (hasta 20).',
+    parameters: { type: 'object', properties: {}, required: [] },
+    handler: async (ctx) => {
+      const rows = await ctx.db.query(
+        `SELECT t.id, t.title, t.due_date, t.priority, ct.full_name AS contact
+         FROM tasks t LEFT JOIN contacts ct ON ct.id = t.contact_id
+         WHERE t.tenant_id=$1 AND t.status='pending' ORDER BY t.due_date ASC NULLS LAST LIMIT 20`,
+        [ctx.tenantId],
+      );
+      return { ok: true, count: rows.length, tasks: rows };
+    },
+  },
 ];
