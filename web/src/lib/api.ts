@@ -1183,6 +1183,11 @@ export const getConnectionQr = (id: string) => apiGet<{ qr: string | null; statu
 export const startConnectionQr = (id: string) => apiPost<{ qr: string | null; status: string }>(`/connections/${id}/qr`, {});
 export const disconnectConnectionQr = (id: string) => apiDelete(`/connections/${id}/qr`);
 
+// ── Business AI Assistant (internal agent over the CRM tool registry) ───────────
+export interface AiAgentAction { tool: string; args: unknown; result: unknown }
+export const aiAgentChat = (messages: { role: 'user' | 'assistant'; content: string }[]) =>
+  apiPost<{ ok: boolean; error?: string; reply: string; actions: AiAgentAction[] }>('/ai-agent/chat', { messages });
+
 // ── WhatsApp message templates (Cloud API) ──────────────────────────────────────
 export interface WhatsappTemplate {
   id: string;
