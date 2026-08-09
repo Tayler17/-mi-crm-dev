@@ -2093,19 +2093,7 @@ export default function InboxPage() {
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                 {/* Hidden file input */}
                 <input ref={fileInputRef} type="file" accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt" style={{ display: 'none' }} onChange={handleFileUpload} />
-                {composerTab === 'message' && (
-                  <button
-                    type="button"
-                    title={i.inbxAttach}
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={sending || recording}
-                    style={{
-                      padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)',
-                      background: 'none', color: 'var(--text-muted)',
-                      cursor: 'pointer', fontSize: 14, flexShrink: 0, alignSelf: 'flex-end',
-                    }}
-                  >📎</button>
-                )}
+                {/* Mic — kept outside for quick access */}
                 {composerTab === 'message' && (
                   <button
                     type="button"
@@ -2119,6 +2107,7 @@ export default function InboxPage() {
                     }}
                   >🎤</button>
                 )}
+                {/* Quick responses — kept outside */}
                 <button
                   type="button"
                   title="Quick Responses"
@@ -2131,25 +2120,12 @@ export default function InboxPage() {
                     cursor: 'pointer', fontSize: 14, flexShrink: 0, alignSelf: 'flex-end',
                   }}
                 >💬</button>
+                {/* "+" menu — groups Attach, AI and WhatsApp actions to keep the composer clean */}
                 {composerTab === 'message' && (
-                  <button
-                    type="button"
-                    title={i.inbxAiTitle}
-                    onClick={() => setShowAiPrompts(true)}
-                    style={{
-                      padding: '6px 10px', borderRadius: 6, border: '1px solid',
-                      borderColor: showAiPrompts ? '#8b5cf6' : 'var(--border)',
-                      background: showAiPrompts ? '#8b5cf6' : 'none',
-                      color: showAiPrompts ? '#fff' : 'var(--text-muted)',
-                      cursor: 'pointer', fontSize: 14, flexShrink: 0, alignSelf: 'flex-end',
-                    }}
-                  >✨</button>
-                )}
-                {composerTab === 'message' && conv?.channelType === 'whatsapp' && (
                   <div style={{ position: 'relative', flexShrink: 0, alignSelf: 'flex-end' }}>
                     <button
                       type="button"
-                      title={en ? 'WhatsApp actions' : 'Acciones de WhatsApp'}
+                      title={en ? 'More' : 'Más'}
                       onClick={() => setShowWaMenu((v) => !v)}
                       style={{
                         padding: '6px 10px', borderRadius: 6, border: '1px solid',
@@ -2160,15 +2136,27 @@ export default function InboxPage() {
                       }}
                     >➕</button>
                     {showWaMenu && (
-                      <div style={{ position: 'absolute', bottom: '115%', left: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,.18)', zIndex: 50, minWidth: 170, overflow: 'hidden' }}>
-                        <button type="button" onClick={() => { setShowWaMenu(false); openTemplates(); }}
+                      <div style={{ position: 'absolute', bottom: '115%', left: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,.18)', zIndex: 50, minWidth: 180, overflow: 'hidden' }}>
+                        <button type="button" onClick={() => { setShowWaMenu(false); fileInputRef.current?.click(); }}
                           style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>
-                          📑 {en ? 'Template' : 'Plantilla'}
+                          📎 {i.inbxAttach}
                         </button>
-                        <button type="button" onClick={() => { setShowWaMenu(false); openButtons(); }}
+                        <button type="button" onClick={() => { setShowWaMenu(false); setShowAiPrompts(true); }}
                           style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>
-                          🔘 {en ? 'Buttons' : 'Botones'}
+                          ✨ {i.inbxAiTitle}
                         </button>
+                        {conv?.channelType === 'whatsapp' && (
+                          <>
+                            <button type="button" onClick={() => { setShowWaMenu(false); openTemplates(); }}
+                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', borderTop: '1px solid var(--border)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>
+                              📑 {en ? 'Template' : 'Plantilla'}
+                            </button>
+                            <button type="button" onClick={() => { setShowWaMenu(false); openButtons(); }}
+                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', borderTop: '1px solid var(--border)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>
+                              🔘 {en ? 'Buttons' : 'Botones'}
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
