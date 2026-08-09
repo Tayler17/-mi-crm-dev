@@ -539,6 +539,8 @@ export default function InboxPage() {
   const [tplSending, setTplSending] = useState(false);
   const [tplResult, setTplResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
+  // WhatsApp actions menu (groups Template/Buttons/… to keep the composer uncluttered)
+  const [showWaMenu, setShowWaMenu] = useState(false);
   // WhatsApp interactive message builder (reply buttons)
   const [showBtns, setShowBtns] = useState(false);
   const [btnBody, setBtnBody] = useState('');
@@ -2144,28 +2146,32 @@ export default function InboxPage() {
                   >✨</button>
                 )}
                 {composerTab === 'message' && conv?.channelType === 'whatsapp' && (
-                  <button
-                    type="button"
-                    title={en ? 'Send WhatsApp template' : 'Enviar plantilla de WhatsApp'}
-                    onClick={openTemplates}
-                    style={{
-                      padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)',
-                      background: 'none', color: 'var(--text-muted)',
-                      cursor: 'pointer', fontSize: 14, flexShrink: 0, alignSelf: 'flex-end',
-                    }}
-                  >📑</button>
-                )}
-                {composerTab === 'message' && conv?.channelType === 'whatsapp' && (
-                  <button
-                    type="button"
-                    title={en ? 'Send buttons' : 'Enviar botones'}
-                    onClick={openButtons}
-                    style={{
-                      padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)',
-                      background: 'none', color: 'var(--text-muted)',
-                      cursor: 'pointer', fontSize: 14, flexShrink: 0, alignSelf: 'flex-end',
-                    }}
-                  >🔘</button>
+                  <div style={{ position: 'relative', flexShrink: 0, alignSelf: 'flex-end' }}>
+                    <button
+                      type="button"
+                      title={en ? 'WhatsApp actions' : 'Acciones de WhatsApp'}
+                      onClick={() => setShowWaMenu((v) => !v)}
+                      style={{
+                        padding: '6px 10px', borderRadius: 6, border: '1px solid',
+                        borderColor: showWaMenu ? 'var(--primary)' : 'var(--border)',
+                        background: showWaMenu ? 'var(--primary)' : 'none',
+                        color: showWaMenu ? '#fff' : 'var(--text-muted)',
+                        cursor: 'pointer', fontSize: 14,
+                      }}
+                    >➕</button>
+                    {showWaMenu && (
+                      <div style={{ position: 'absolute', bottom: '115%', left: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,.18)', zIndex: 50, minWidth: 170, overflow: 'hidden' }}>
+                        <button type="button" onClick={() => { setShowWaMenu(false); openTemplates(); }}
+                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>
+                          📑 {en ? 'Template' : 'Plantilla'}
+                        </button>
+                        <button type="button" onClick={() => { setShowWaMenu(false); openButtons(); }}
+                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>
+                          🔘 {en ? 'Buttons' : 'Botones'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
                 <textarea
                   ref={textareaRef}
