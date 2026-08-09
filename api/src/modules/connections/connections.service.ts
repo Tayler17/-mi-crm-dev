@@ -194,6 +194,73 @@ export class ConnectionsService {
     }
   }
 
+  /** Send an interactive WhatsApp message (reply buttons or a list) via the conversation's
+   *  connection, and record it in the chat. Buttons: up to 3 titles. */
+  async sendWhatsappInteractive(
+    tenantId: string,
+    dto: {
+      to?: string; conversationId?: string; connectionId?: string;
+      kind?: 'button' | 'list'; bodyText?: string;
+      buttons?: string[];
+      listButton?: string; rows?: { title?: string; description?: string }[];
+    },
+  ) {
+    const { phoneId, token } = await this.getWhatsappCredsFor(tenantId, { conversationId: dto.conversationId, connectionId: dto.connectionId });
+    if (!phoneId || !token) return { ok: false, error: 'No hay una conexión de WhatsApp API con Phone Number ID y Access Token.' };
+
+    const to = String(dto.to ?? '').replace(/[^\d]/g, '');
+    if (!to) return { ok: false, error: 'Número de destino inválido.' };
+    const bodyText = String(dto.bodyText ?? '').trim();
+    if (!bodyText) return { ok: false, error: 'Falta el texto del mensaje.' };
+
+    let interactive: any;
+    let optionsHint: string;
+    if (dto.kind === 'list') {
+      const rows = (dto.rows ?? [])
+        .map((r, i) => ({ id: `row_${i + 1}`, title: String(r.title ?? '').trim().slice(0, 24), description: String(r.description ?? '').trim().slice(0, 72) }))
+        .filter((r) => r.title);
+      if (!rows.length) return { ok: false, error: 'Agrega al menos una opción a la lista.' };
+      if (rows.length > 10) return { ok: false, error: 'Máximo 10 opciones en una lista.' };
+      interactive = {
+        type: 'list',
+        body: { text: bodyText },
+        action: { button: String(dto.listButton ?? 'Ver opciones').trim().slice(0, 20) || 'Ver opciones', sections: [{ title: 'Opciones', rows }] },
+      };
+      optionsHint = `[Lista: ${rows.map((r) => r.title).join(' · ')}]`;
+    } else {
+      const titles = (dto.buttons ?? []).map((b) => String(b ?? '').trim()).filter(Boolean).slice(0, 3);
+      if (!titles.length) return { ok: false, error: 'Agrega al menos un botón.' };
+      interactive = {
+        type: 'button',
+        body: { text: bodyText },
+        action: { buttons: titles.map((t, i) => ({ type: 'reply', reply: { id: `btn_${i + 1}`, title: t.slice(0, 20) } })) },
+      };
+      optionsHint = `[Botones: ${titles.join(' · ')}]`;
+    }
+
+    try {
+      const res = await (globalThis as any).fetch(
+        `https://graph.facebook.com/v21.0/${phoneId}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'interactive', interactive }),
+          signal: AbortSignal.timeout(15000),
+        },
+      );
+      const data: any = await res.json();
+      if (data?.error) return { ok: false, error: `Meta API: ${data.error.message}` };
+      const messageId = data?.messages?.[0]?.id;
+      if (dto.conversationId) {
+        await this.recordTemplateMessage(tenantId, dto.conversationId, `${bodyText}\n\n${optionsHint}`, messageId);
+      }
+      return { ok: true, messageId };
+    } catch (e: any) {
+      this.logger.warn(`[wa-interactive] send failed for tenant ${tenantId}: ${e.message}`);
+      return { ok: false, error: e.message };
+    }
+  }
+
   /** Create a WhatsApp message template in the tenant's WABA (submitted to Meta for
    *  review). If the body has {{n}} variables, Meta requires an example value per variable. */
   async createWhatsappTemplate(

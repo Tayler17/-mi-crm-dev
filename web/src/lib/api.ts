@@ -1203,6 +1203,8 @@ export const sendWhatsappTemplate = (data: { to: string; name: string; language:
   apiPost<{ ok: boolean; error?: string; messageId?: string }>('/connections/whatsapp/send-template', data);
 export const createWhatsappTemplate = (data: { name: string; category: string; language: string; bodyText: string; examples?: string[]; connectionId?: string }) =>
   apiPost<{ ok: boolean; error?: string; id?: string; status?: string }>('/connections/whatsapp/templates', data);
+export const sendWhatsappInteractive = (data: { to: string; conversationId?: string; connectionId?: string; kind: 'button' | 'list'; bodyText: string; buttons?: string[]; listButton?: string; rows?: { title?: string; description?: string }[] }) =>
+  apiPost<{ ok: boolean; error?: string; messageId?: string }>('/connections/whatsapp/send-interactive', data);
 export const deleteWhatsappTemplate = async (name: string, connectionId?: string): Promise<{ ok: boolean; error?: string }> => {
   const q = connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : '';
   const res = await fetch(`${API_URL}/connections/whatsapp/templates/${encodeURIComponent(name)}${q}`, {

@@ -40,6 +40,12 @@ export class ConnectionsController {
     return this.svc.createWhatsappTemplate(tenantId, dto);
   }
 
+  // Send an interactive WhatsApp message (reply buttons or list).
+  @Post('whatsapp/send-interactive')
+  sendWhatsappInteractive(@Body() dto: any, @TenantId() tenantId: string) {
+    return this.svc.sendWhatsappInteractive(tenantId, dto);
+  }
+
   // Delete a WhatsApp message template by name.
   @Delete('whatsapp/templates/:name')
   deleteWhatsappTemplate(@Param('name') name: string, @TenantId() tenantId: string, @Query('connectionId') connectionId?: string) {

@@ -16,7 +16,7 @@ import {
   getConversationTags, addConversationTag, removeConversationTag,
   getConvBotSession, updateConvBotSession,
   getContactTimeline, requestCsat,
-  getWhatsappTemplates, sendWhatsappTemplate, type WhatsappTemplate,
+  getWhatsappTemplates, sendWhatsappTemplate, sendWhatsappInteractive, type WhatsappTemplate,
   API_URL,
   type Conversation, type Message, type Contact, type Inbox,
   type CannedResponse, type Tag, type Agent, type Team, type Queue,
@@ -539,6 +539,13 @@ export default function InboxPage() {
   const [tplSending, setTplSending] = useState(false);
   const [tplResult, setTplResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
+  // WhatsApp interactive message builder (reply buttons)
+  const [showBtns, setShowBtns] = useState(false);
+  const [btnBody, setBtnBody] = useState('');
+  const [btnTitles, setBtnTitles] = useState<string[]>(['', '', '']);
+  const [btnSending, setBtnSending] = useState(false);
+  const [btnResult, setBtnResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
   // in-conversation search (client-side, over the already-loaded messages)
   const [convSearchOpen, setConvSearchOpen] = useState(false);
   const [convSearch, setConvSearch] = useState('');
@@ -953,6 +960,32 @@ export default function InboxPage() {
     } catch (err: unknown) {
       setTplResult({ ok: false, msg: err instanceof Error ? err.message : 'Error' });
     } finally { setTplSending(false); }
+  }
+
+  // ── WhatsApp interactive buttons ──
+  function openButtons() {
+    setShowBtns(true); setBtnBody(''); setBtnTitles(['', '', '']); setBtnResult(null);
+  }
+  async function sendButtons() {
+    if (!activeId) return;
+    const to = listConv?.contact?.phone || '';
+    const titles = btnTitles.map((t) => t.trim()).filter(Boolean);
+    if (!to) { setBtnResult({ ok: false, msg: en ? 'No phone for this contact' : 'El contacto no tiene teléfono' }); return; }
+    if (!btnBody.trim()) { setBtnResult({ ok: false, msg: en ? 'Enter a message' : 'Escribe un mensaje' }); return; }
+    if (!titles.length) { setBtnResult({ ok: false, msg: en ? 'Add at least one button' : 'Agrega al menos un botón' }); return; }
+    setBtnSending(true); setBtnResult(null);
+    try {
+      const r = await sendWhatsappInteractive({ to, conversationId: activeId, kind: 'button', bodyText: btnBody.trim(), buttons: titles });
+      if (r.ok) {
+        setShowBtns(false);
+        const m = await getMessages(activeId); setMessages(m);
+        bumpConversationToTop(activeId); loadList(true);
+      } else {
+        setBtnResult({ ok: false, msg: r.error || (en ? 'Send failed' : 'Falló el envío') });
+      }
+    } catch (err: unknown) {
+      setBtnResult({ ok: false, msg: err instanceof Error ? err.message : 'Error' });
+    } finally { setBtnSending(false); }
   }
 
   function startEditMsg(m: Message) {
@@ -2122,6 +2155,18 @@ export default function InboxPage() {
                     }}
                   >📑</button>
                 )}
+                {composerTab === 'message' && conv?.channelType === 'whatsapp' && (
+                  <button
+                    type="button"
+                    title={en ? 'Send buttons' : 'Enviar botones'}
+                    onClick={openButtons}
+                    style={{
+                      padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)',
+                      background: 'none', color: 'var(--text-muted)',
+                      cursor: 'pointer', fontSize: 14, flexShrink: 0, alignSelf: 'flex-end',
+                    }}
+                  >🔘</button>
+                )}
                 <textarea
                   ref={textareaRef}
                   className="form-input"
@@ -2761,6 +2806,48 @@ export default function InboxPage() {
                   {tplSending ? (en ? 'Sending…' : 'Enviando…') : (en ? 'Send' : 'Enviar')}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp interactive buttons builder */}
+      {showBtns && (
+        <div className="modal-overlay" onClick={() => setShowBtns(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <div className="modal-header">
+              <h2 className="modal-title">{en ? 'Send buttons' : 'Enviar botones'}</h2>
+              <button type="button" className="modal-close" onClick={() => setShowBtns(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+                {en ? 'To' : 'Para'}: <strong>{listConv?.contact?.phone || '—'}</strong>
+                {' · '}{en ? 'Up to 3 reply buttons.' : 'Hasta 3 botones de respuesta.'}
+              </div>
+              <div className="form-group">
+                <label className="form-label">{en ? 'Message' : 'Mensaje'}</label>
+                <textarea className="form-input" style={{ minHeight: 70, resize: 'vertical' }} value={btnBody}
+                  placeholder={en ? 'How can we help you?' : '¿En qué podemos ayudarte?'}
+                  onChange={(e) => setBtnBody(e.target.value)} />
+              </div>
+              {[0, 1, 2].map((idx) => (
+                <div className="form-group" key={idx}>
+                  <label className="form-label">{en ? `Button ${idx + 1}` : `Botón ${idx + 1}`}{idx > 0 ? (en ? ' (optional)' : ' (opcional)') : ''}</label>
+                  <input className="form-input" maxLength={20} value={btnTitles[idx]}
+                    placeholder={idx === 0 ? (en ? 'e.g. Track order' : 'ej. Ver tracking') : ''}
+                    onChange={(e) => setBtnTitles((prev) => prev.map((x, i2) => (i2 === idx ? e.target.value : x)))} />
+                </div>
+              ))}
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                {en ? 'Max 20 characters per button.' : 'Máximo 20 caracteres por botón.'}
+              </div>
+              {btnResult && !btnResult.ok && <div className="error-msg" style={{ marginTop: 8 }}>{btnResult.msg}</div>}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowBtns(false)}>{en ? 'Close' : 'Cerrar'}</button>
+              <button type="button" className="btn btn-primary" disabled={btnSending || !btnBody.trim() || !btnTitles.some((t) => t.trim())} onClick={sendButtons}>
+                {btnSending ? (en ? 'Sending…' : 'Enviando…') : (en ? 'Send' : 'Enviar')}
+              </button>
             </div>
           </div>
         </div>
