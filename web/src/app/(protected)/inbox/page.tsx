@@ -548,6 +548,14 @@ export default function InboxPage() {
   const [btnSending, setBtnSending] = useState(false);
   const [btnResult, setBtnResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
+  // WhatsApp interactive list builder (up to 10 rows)
+  const [showList, setShowList] = useState(false);
+  const [listBody, setListBody] = useState('');
+  const [listButton, setListButton] = useState('');
+  const [listRows, setListRows] = useState<{ title: string; description: string }[]>([{ title: '', description: '' }]);
+  const [listSending, setListSending] = useState(false);
+  const [listResult, setListResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
   // in-conversation search (client-side, over the already-loaded messages)
   const [convSearchOpen, setConvSearchOpen] = useState(false);
   const [convSearch, setConvSearch] = useState('');
@@ -988,6 +996,32 @@ export default function InboxPage() {
     } catch (err: unknown) {
       setBtnResult({ ok: false, msg: err instanceof Error ? err.message : 'Error' });
     } finally { setBtnSending(false); }
+  }
+
+  // ── WhatsApp interactive list ──
+  function openList() {
+    setShowList(true); setListBody(''); setListButton(''); setListRows([{ title: '', description: '' }]); setListResult(null);
+  }
+  async function sendList() {
+    if (!activeId) return;
+    const to = listConv?.contact?.phone || '';
+    const rows = listRows.map((r) => ({ title: r.title.trim(), description: r.description.trim() })).filter((r) => r.title);
+    if (!to) { setListResult({ ok: false, msg: en ? 'No phone for this contact' : 'El contacto no tiene teléfono' }); return; }
+    if (!listBody.trim()) { setListResult({ ok: false, msg: en ? 'Enter a message' : 'Escribe un mensaje' }); return; }
+    if (!rows.length) { setListResult({ ok: false, msg: en ? 'Add at least one option' : 'Agrega al menos una opción' }); return; }
+    setListSending(true); setListResult(null);
+    try {
+      const r = await sendWhatsappInteractive({ to, conversationId: activeId, kind: 'list', bodyText: listBody.trim(), listButton: listButton.trim() || undefined, rows });
+      if (r.ok) {
+        setShowList(false);
+        const m = await getMessages(activeId); setMessages(m);
+        bumpConversationToTop(activeId); loadList(true);
+      } else {
+        setListResult({ ok: false, msg: r.error || (en ? 'Send failed' : 'Falló el envío') });
+      }
+    } catch (err: unknown) {
+      setListResult({ ok: false, msg: err instanceof Error ? err.message : 'Error' });
+    } finally { setListSending(false); }
   }
 
   function startEditMsg(m: Message) {
@@ -2155,6 +2189,10 @@ export default function InboxPage() {
                               style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', borderTop: '1px solid var(--border)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>
                               🔘 {en ? 'Buttons' : 'Botones'}
                             </button>
+                            <button type="button" onClick={() => { setShowWaMenu(false); openList(); }}
+                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', borderTop: '1px solid var(--border)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>
+                              📋 {en ? 'List' : 'Lista'}
+                            </button>
                           </>
                         )}
                       </div>
@@ -2841,6 +2879,66 @@ export default function InboxPage() {
               <button type="button" className="btn btn-secondary" onClick={() => setShowBtns(false)}>{en ? 'Close' : 'Cerrar'}</button>
               <button type="button" className="btn btn-primary" disabled={btnSending || !btnBody.trim() || !btnTitles.some((t) => t.trim())} onClick={sendButtons}>
                 {btnSending ? (en ? 'Sending…' : 'Enviando…') : (en ? 'Send' : 'Enviar')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp interactive list builder */}
+      {showList && (
+        <div className="modal-overlay" onClick={() => setShowList(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <div className="modal-header">
+              <h2 className="modal-title">{en ? 'Send list' : 'Enviar lista'}</h2>
+              <button type="button" className="modal-close" onClick={() => setShowList(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+                {en ? 'To' : 'Para'}: <strong>{listConv?.contact?.phone || '—'}</strong>
+                {' · '}{en ? 'Up to 10 options.' : 'Hasta 10 opciones.'}
+              </div>
+              <div className="form-group">
+                <label className="form-label">{en ? 'Message' : 'Mensaje'}</label>
+                <textarea className="form-input" style={{ minHeight: 60, resize: 'vertical' }} value={listBody}
+                  placeholder={en ? 'Choose an option:' : 'Elige una opción:'}
+                  onChange={(e) => setListBody(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">{en ? 'List button label' : 'Texto del botón de la lista'}</label>
+                <input className="form-input" maxLength={20} value={listButton}
+                  placeholder={en ? 'e.g. View options' : 'ej. Ver opciones'}
+                  onChange={(e) => setListButton(e.target.value)} />
+              </div>
+              <label className="form-label">{en ? 'Options' : 'Opciones'}</label>
+              {listRows.map((row, idx) => (
+                <div key={idx} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                    <input className="form-input" style={{ flex: 1 }} maxLength={24} value={row.title}
+                      placeholder={en ? `Option ${idx + 1} title` : `Título opción ${idx + 1}`}
+                      onChange={(e) => setListRows((prev) => prev.map((r, i2) => (i2 === idx ? { ...r, title: e.target.value } : r)))} />
+                    {listRows.length > 1 && (
+                      <button type="button" onClick={() => setListRows((prev) => prev.filter((_, i2) => i2 !== idx))}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: 16 }}>✕</button>
+                    )}
+                  </div>
+                  <input className="form-input" maxLength={72} value={row.description}
+                    placeholder={en ? 'Description (optional)' : 'Descripción (opcional)'}
+                    onChange={(e) => setListRows((prev) => prev.map((r, i2) => (i2 === idx ? { ...r, description: e.target.value } : r)))} />
+                </div>
+              ))}
+              {listRows.length < 10 && (
+                <button type="button" className="btn btn-secondary" style={{ marginBottom: 8 }}
+                  onClick={() => setListRows((prev) => [...prev, { title: '', description: '' }])}>
+                  + {en ? 'Add option' : 'Agregar opción'}
+                </button>
+              )}
+              {listResult && !listResult.ok && <div className="error-msg" style={{ marginTop: 8 }}>{listResult.msg}</div>}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowList(false)}>{en ? 'Close' : 'Cerrar'}</button>
+              <button type="button" className="btn btn-primary" disabled={listSending || !listBody.trim() || !listRows.some((r) => r.title.trim())} onClick={sendList}>
+                {listSending ? (en ? 'Sending…' : 'Enviando…') : (en ? 'Send' : 'Enviar')}
               </button>
             </div>
           </div>
