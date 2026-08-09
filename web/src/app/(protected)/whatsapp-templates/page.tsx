@@ -46,6 +46,14 @@ export default function WhatsappTemplatesPage() {
   const [cLanguage, setCLanguage] = useState('es');
   const [cBody, setCBody] = useState('');
   const [cExamples, setCExamples] = useState<string[]>([]);
+  const [cHeader, setCHeader] = useState('');
+  const [cFooter, setCFooter] = useState('');
+  const [cButtonType, setCButtonType] = useState<'none' | 'quick_reply' | 'cta'>('none');
+  const [cQuick, setCQuick] = useState<string[]>(['', '', '']);
+  const [cUrlText, setCUrlText] = useState('');
+  const [cUrlUrl, setCUrlUrl] = useState('');
+  const [cCallText, setCCallText] = useState('');
+  const [cCallPhone, setCCallPhone] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
   const [deletingName, setDeletingName] = useState('');
@@ -111,6 +119,8 @@ export default function WhatsappTemplatesPage() {
 
   function openCreate() {
     setShowCreate(true); setCName(''); setCCategory('UTILITY'); setCLanguage('es'); setCBody(''); setCExamples([]); setCreateError('');
+    setCHeader(''); setCFooter(''); setCButtonType('none'); setCQuick(['', '', '']);
+    setCUrlText(''); setCUrlUrl(''); setCCallText(''); setCCallPhone('');
   }
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -119,6 +129,12 @@ export default function WhatsappTemplatesPage() {
       const r = await createWhatsappTemplate({
         name: cName.trim(), category: cCategory, language: cLanguage.trim(), bodyText: cBody.trim(),
         examples: cExamples.slice(0, cVarCount), connectionId: connId || undefined,
+        headerText: cHeader.trim() || undefined,
+        footer: cFooter.trim() || undefined,
+        buttonType: cButtonType,
+        quickReplies: cButtonType === 'quick_reply' ? cQuick : undefined,
+        urlButton: cButtonType === 'cta' ? { text: cUrlText, url: cUrlUrl } : undefined,
+        callButton: cButtonType === 'cta' ? { text: cCallText, phone: cCallPhone } : undefined,
       });
       if (r.ok) { setShowCreate(false); load(); }
       else setCreateError(r.error || (en ? 'Could not create template' : 'No se pudo crear la plantilla'));
@@ -312,6 +328,12 @@ export default function WhatsappTemplatesPage() {
                 </div>
               </div>
               <div className="form-group">
+                <label className="form-label">{en ? 'Header (optional)' : 'Encabezado (opcional)'}</label>
+                <input className="form-input" maxLength={60} value={cHeader}
+                  placeholder={en ? 'e.g. Order update' : 'ej. Actualización de tu envío'}
+                  onChange={(e) => setCHeader(e.target.value)} />
+              </div>
+              <div className="form-group">
                 <label className="form-label">{en ? 'Body' : 'Cuerpo'} {en ? '(use {{1}}, {{2}}… for variables)' : '(usa {{1}}, {{2}}… para variables)'}</label>
                 <textarea className="form-input" style={{ minHeight: 90, resize: 'vertical' }} value={cBody}
                   placeholder={en ? 'Hi {{1}}, your shipment {{2}} is on the way.' : 'Hola {{1}}, tu envío {{2}} está en camino.'}
@@ -324,6 +346,56 @@ export default function WhatsappTemplatesPage() {
                     onChange={(e) => setCExamples((prev) => { const n = [...prev]; n[idx] = e.target.value; return n; })} />
                 </div>
               ))}
+              <div className="form-group">
+                <label className="form-label">{en ? 'Footer (optional)' : 'Pie de página (opcional)'}</label>
+                <input className="form-input" maxLength={60} value={cFooter}
+                  placeholder={en ? 'e.g. Taylor Services | Dominican Shipping' : 'ej. Taylor Services | Dominican Shipping'}
+                  onChange={(e) => setCFooter(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">{en ? 'Buttons' : 'Botones'}</label>
+                <select className="form-input" value={cButtonType} onChange={(e) => setCButtonType(e.target.value as 'none' | 'quick_reply' | 'cta')}>
+                  <option value="none">{en ? 'None' : 'Ninguno'}</option>
+                  <option value="quick_reply">{en ? 'Quick reply (up to 3)' : 'Respuesta rápida (hasta 3)'}</option>
+                  <option value="cta">{en ? 'Action (URL / Call)' : 'Acción (URL / Llamar)'}</option>
+                </select>
+              </div>
+              {cButtonType === 'quick_reply' && [0, 1, 2].map((idx) => (
+                <div className="form-group" key={idx}>
+                  <label className="form-label">{en ? `Quick reply ${idx + 1}` : `Respuesta rápida ${idx + 1}`}{idx > 0 ? (en ? ' (optional)' : ' (opcional)') : ''}</label>
+                  <input className="form-input" maxLength={25} value={cQuick[idx]}
+                    placeholder={idx === 0 ? (en ? 'e.g. Track order' : 'ej. Ver tracking') : ''}
+                    onChange={(e) => setCQuick((prev) => prev.map((x, i2) => (i2 === idx ? e.target.value : x)))} />
+                </div>
+              ))}
+              {cButtonType === 'cta' && (
+                <>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">{en ? 'URL button text' : 'Texto botón URL'}</label>
+                      <input className="form-input" maxLength={25} value={cUrlText}
+                        placeholder={en ? 'e.g. Track' : 'ej. Rastrear'} onChange={(e) => setCUrlText(e.target.value)} />
+                    </div>
+                    <div className="form-group" style={{ flex: 1.4 }}>
+                      <label className="form-label">URL</label>
+                      <input className="form-input" value={cUrlUrl}
+                        placeholder="https://tscouriers.com/track" onChange={(e) => setCUrlUrl(e.target.value)} />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">{en ? 'Call button text' : 'Texto botón Llamar'}</label>
+                      <input className="form-input" maxLength={25} value={cCallText}
+                        placeholder={en ? 'e.g. Call us' : 'ej. Llámanos'} onChange={(e) => setCCallText(e.target.value)} />
+                    </div>
+                    <div className="form-group" style={{ flex: 1.4 }}>
+                      <label className="form-label">{en ? 'Phone (with country code)' : 'Teléfono (con código país)'}</label>
+                      <input className="form-input" value={cCallPhone}
+                        placeholder="+447453599665" onChange={(e) => setCCallPhone(e.target.value)} />
+                    </div>
+                  </div>
+                </>
+              )}
               <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                 {en ? 'Meta reviews new templates (UTILITY is usually fast). It will appear as PENDING, then APPROVED.'
                     : 'Meta revisa las plantillas nuevas (UTILITY suele ser rápido). Aparecerá como PENDING y luego APPROVED.'}

@@ -1201,7 +1201,14 @@ export const getWhatsappTemplates = (params?: { connectionId?: string; conversat
 };
 export const sendWhatsappTemplate = (data: { to: string; name: string; language: string; bodyParams?: string[]; conversationId?: string; connectionId?: string; renderedBody?: string }) =>
   apiPost<{ ok: boolean; error?: string; messageId?: string }>('/connections/whatsapp/send-template', data);
-export const createWhatsappTemplate = (data: { name: string; category: string; language: string; bodyText: string; examples?: string[]; connectionId?: string }) =>
+export const createWhatsappTemplate = (data: {
+  name: string; category: string; language: string; bodyText: string; examples?: string[]; connectionId?: string;
+  headerText?: string; footer?: string;
+  buttonType?: 'none' | 'quick_reply' | 'cta';
+  quickReplies?: string[];
+  urlButton?: { text?: string; url?: string };
+  callButton?: { text?: string; phone?: string };
+}) =>
   apiPost<{ ok: boolean; error?: string; id?: string; status?: string }>('/connections/whatsapp/templates', data);
 export const sendWhatsappInteractive = (data: { to: string; conversationId?: string; connectionId?: string; kind: 'button' | 'list'; bodyText: string; buttons?: string[]; listButton?: string; rows?: { title?: string; description?: string }[] }) =>
   apiPost<{ ok: boolean; error?: string; messageId?: string }>('/connections/whatsapp/send-interactive', data);

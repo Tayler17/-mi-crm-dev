@@ -265,7 +265,14 @@ export class ConnectionsService {
    *  review). If the body has {{n}} variables, Meta requires an example value per variable. */
   async createWhatsappTemplate(
     tenantId: string,
-    dto: { name?: string; category?: string; language?: string; bodyText?: string; examples?: string[]; connectionId?: string },
+    dto: {
+      name?: string; category?: string; language?: string; bodyText?: string; examples?: string[]; connectionId?: string;
+      headerText?: string; footer?: string;
+      buttonType?: 'none' | 'quick_reply' | 'cta';
+      quickReplies?: string[];
+      urlButton?: { text?: string; url?: string };
+      callButton?: { text?: string; phone?: string };
+    },
   ) {
     const { wabaId, token } = await this.getWhatsappCredsFor(tenantId, { connectionId: dto.connectionId });
     if (!wabaId || !token) return { ok: false, error: 'No hay una conexión de WhatsApp API con WABA ID y Access Token.' };
@@ -291,13 +298,34 @@ export class ConnectionsService {
       bodyComponent.example = { body_text: [examples.slice(0, varMax)] };
     }
 
+    // Optional rich components: header text, footer, and buttons (quick-reply or CTA).
+    const components: any[] = [];
+    const headerText = String(dto.headerText ?? '').trim();
+    if (headerText) components.push({ type: 'HEADER', format: 'TEXT', text: headerText.slice(0, 60) });
+    components.push(bodyComponent);
+    const footer = String(dto.footer ?? '').trim();
+    if (footer) components.push({ type: 'FOOTER', text: footer.slice(0, 60) });
+
+    if (dto.buttonType === 'quick_reply') {
+      const btns = (dto.quickReplies ?? []).map((t) => String(t ?? '').trim()).filter(Boolean).slice(0, 3)
+        .map((t) => ({ type: 'QUICK_REPLY', text: t.slice(0, 25) }));
+      if (btns.length) components.push({ type: 'BUTTONS', buttons: btns });
+    } else if (dto.buttonType === 'cta') {
+      const btns: any[] = [];
+      const u = dto.urlButton;
+      if (u?.text?.trim() && u?.url?.trim()) btns.push({ type: 'URL', text: u.text.trim().slice(0, 25), url: u.url.trim() });
+      const c = dto.callButton;
+      if (c?.text?.trim() && c?.phone?.trim()) btns.push({ type: 'PHONE_NUMBER', text: c.text.trim().slice(0, 25), phone_number: c.phone.trim() });
+      if (btns.length) components.push({ type: 'BUTTONS', buttons: btns });
+    }
+
     try {
       const res = await (globalThis as any).fetch(
         `https://graph.facebook.com/v21.0/${wabaId}/message_templates`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ name, category, language, components: [bodyComponent] }),
+          body: JSON.stringify({ name, category, language, components }),
           signal: AbortSignal.timeout(15000),
         },
       );
