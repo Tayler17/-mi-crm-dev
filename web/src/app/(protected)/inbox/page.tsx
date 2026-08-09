@@ -44,6 +44,9 @@ function tplVarCount(text: string): number {
 function tplFill(text: string, vals: string[]): string {
   return text.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, n) => vals[Number(n) - 1]?.trim() || `{{${n}}}`);
 }
+function tplHasImageHeader(t: WhatsappTemplate): boolean {
+  return (t.components ?? []).some((c) => String(c.type).toUpperCase() === 'HEADER' && String(c.format ?? '').toUpperCase() === 'IMAGE');
+}
 
 function exportConversationPdf(conv: Conversation, contact: { fullName?: string; email?: string } | null, msgs: Message[], i: typeof APP['es']) {
   const contactName = contact?.fullName || contact?.email || i.noContact;
@@ -536,6 +539,7 @@ export default function InboxPage() {
   const [tplError, setTplError] = useState('');
   const [tplSel, setTplSel] = useState<WhatsappTemplate | null>(null);
   const [tplVars, setTplVars] = useState<string[]>([]);
+  const [tplImgUrl, setTplImgUrl] = useState('');
   const [tplSending, setTplSending] = useState(false);
   const [tplResult, setTplResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -945,6 +949,7 @@ export default function InboxPage() {
   function pickTemplate(t: WhatsappTemplate) {
     setTplSel(t);
     setTplVars(Array(tplVarCount(tplBodyText(t))).fill(''));
+    setTplImgUrl('');
     setTplResult(null);
   }
   async function sendTemplate() {
@@ -957,6 +962,7 @@ export default function InboxPage() {
       const r = await sendWhatsappTemplate({
         to, name: tplSel.name, language: tplSel.language, bodyParams: tplVars,
         conversationId: activeId, renderedBody: rendered,
+        headerImageUrl: tplHasImageHeader(tplSel) ? (tplImgUrl.trim() || undefined) : undefined,
       });
       if (r.ok) {
         setShowTpl(false); setTplSel(null);
@@ -2815,6 +2821,12 @@ export default function InboxPage() {
                         onChange={(e) => setTplVars((prev) => prev.map((x, i2) => (i2 === idx ? e.target.value : x)))} />
                     </div>
                   ))}
+                  {tplHasImageHeader(tplSel) && (
+                    <div className="form-group">
+                      <label className="form-label">{en ? 'Header image URL (public HTTPS)' : 'URL de imagen del encabezado (HTTPS pública)'}</label>
+                      <input className="form-input" placeholder="https://…/image.jpg" value={tplImgUrl} onChange={(e) => setTplImgUrl(e.target.value)} />
+                    </div>
+                  )}
                   <label className="form-label">{en ? 'Preview' : 'Vista previa'}</label>
                   <div style={{ fontSize: 13, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 12px', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
                     {tplFill(tplBodyText(tplSel), tplVars)}

@@ -19,6 +19,10 @@ function varCount(text: string): number {
 function fillVars(text: string, vals: string[]): string {
   return text.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, n) => vals[Number(n) - 1]?.trim() || `{{${n}}}`);
 }
+/** Whether the template has an IMAGE header (needs an image supplied at send time). */
+function hasImageHeader(t: WhatsappTemplate): boolean {
+  return (t.components ?? []).some((c) => String(c.type).toUpperCase() === 'HEADER' && String(c.format ?? '').toUpperCase() === 'IMAGE');
+}
 
 export default function WhatsappTemplatesPage() {
   const { lang } = useLangCtx();
@@ -36,6 +40,7 @@ export default function WhatsappTemplatesPage() {
   const [sendFor, setSendFor] = useState<WhatsappTemplate | null>(null);
   const [to, setTo] = useState('');
   const [vars, setVars] = useState<string[]>([]);
+  const [sendImgUrl, setSendImgUrl] = useState('');
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -46,7 +51,11 @@ export default function WhatsappTemplatesPage() {
   const [cLanguage, setCLanguage] = useState('es');
   const [cBody, setCBody] = useState('');
   const [cExamples, setCExamples] = useState<string[]>([]);
+  const [cHeaderType, setCHeaderType] = useState<'none' | 'text' | 'image'>('none');
   const [cHeader, setCHeader] = useState('');
+  const [cHeaderImgB64, setCHeaderImgB64] = useState('');
+  const [cHeaderImgMime, setCHeaderImgMime] = useState('');
+  const [cHeaderImgName, setCHeaderImgName] = useState('');
   const [cFooter, setCFooter] = useState('');
   const [cButtonType, setCButtonType] = useState<'none' | 'quick_reply' | 'cta'>('none');
   const [cQuick, setCQuick] = useState<string[]>(['', '', '']);
@@ -95,6 +104,7 @@ export default function WhatsappTemplatesPage() {
     setSendFor(t);
     setTo('');
     setVars(Array(varCount(bodyText(t))).fill(''));
+    setSendImgUrl('');
     setSendResult(null);
   }
 
@@ -104,7 +114,7 @@ export default function WhatsappTemplatesPage() {
     setSending(true);
     setSendResult(null);
     try {
-      const r = await sendWhatsappTemplate({ to: to.trim(), name: sendFor.name, language: sendFor.language, bodyParams: vars, connectionId: connId || undefined });
+      const r = await sendWhatsappTemplate({ to: to.trim(), name: sendFor.name, language: sendFor.language, bodyParams: vars, connectionId: connId || undefined, headerImageUrl: hasImageHeader(sendFor) ? (sendImgUrl.trim() || undefined) : undefined });
       setSendResult(
         r.ok
           ? { ok: true, msg: en ? `Sent ✓ (id: ${r.messageId ?? '—'})` : `Enviada ✓ (id: ${r.messageId ?? '—'})` }
@@ -119,8 +129,17 @@ export default function WhatsappTemplatesPage() {
 
   function openCreate() {
     setShowCreate(true); setCName(''); setCCategory('UTILITY'); setCLanguage('es'); setCBody(''); setCExamples([]); setCreateError('');
-    setCHeader(''); setCFooter(''); setCButtonType('none'); setCQuick(['', '', '']);
+    setCHeaderType('none'); setCHeader(''); setCHeaderImgB64(''); setCHeaderImgMime(''); setCHeaderImgName('');
+    setCFooter(''); setCButtonType('none'); setCQuick(['', '', '']);
     setCUrlText(''); setCUrlUrl(''); setCCallText(''); setCCallPhone('');
+  }
+  function onHeaderImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCHeaderImgName(file.name); setCHeaderImgMime(file.type || 'image/jpeg');
+    const reader = new FileReader();
+    reader.onload = () => setCHeaderImgB64(String(reader.result).split(',')[1] ?? '');
+    reader.readAsDataURL(file);
   }
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -129,7 +148,10 @@ export default function WhatsappTemplatesPage() {
       const r = await createWhatsappTemplate({
         name: cName.trim(), category: cCategory, language: cLanguage.trim(), bodyText: cBody.trim(),
         examples: cExamples.slice(0, cVarCount), connectionId: connId || undefined,
-        headerText: cHeader.trim() || undefined,
+        headerFormat: cHeaderType === 'image' ? 'IMAGE' : cHeaderType === 'text' ? 'TEXT' : undefined,
+        headerText: cHeaderType === 'text' ? (cHeader.trim() || undefined) : undefined,
+        headerImageBase64: cHeaderType === 'image' ? (cHeaderImgB64 || undefined) : undefined,
+        headerImageMime: cHeaderType === 'image' ? (cHeaderImgMime || undefined) : undefined,
         footer: cFooter.trim() || undefined,
         buttonType: cButtonType,
         quickReplies: cButtonType === 'quick_reply' ? cQuick : undefined,
@@ -266,6 +288,13 @@ export default function WhatsappTemplatesPage() {
                 <input className="form-input" placeholder="447453599665" value={to} onChange={(e) => setTo(e.target.value)} />
               </div>
 
+              {hasImageHeader(sendFor) && (
+                <div className="form-group">
+                  <label className="form-label">{en ? 'Header image URL (public HTTPS)' : 'URL de la imagen del encabezado (HTTPS pública)'}</label>
+                  <input className="form-input" placeholder="https://…/image.jpg" value={sendImgUrl} onChange={(e) => setSendImgUrl(e.target.value)} />
+                </div>
+              )}
+
               {vars.map((v, idx) => (
                 <div className="form-group" key={idx}>
                   <label className="form-label">{en ? `Variable {{${idx + 1}}}` : `Variable {{${idx + 1}}}`}</label>
@@ -329,10 +358,29 @@ export default function WhatsappTemplatesPage() {
               </div>
               <div className="form-group">
                 <label className="form-label">{en ? 'Header (optional)' : 'Encabezado (opcional)'}</label>
-                <input className="form-input" maxLength={60} value={cHeader}
-                  placeholder={en ? 'e.g. Order update' : 'ej. Actualización de tu envío'}
-                  onChange={(e) => setCHeader(e.target.value)} />
+                <select className="form-input" value={cHeaderType} onChange={(e) => setCHeaderType(e.target.value as 'none' | 'text' | 'image')}>
+                  <option value="none">{en ? 'None' : 'Ninguno'}</option>
+                  <option value="text">{en ? 'Text' : 'Texto'}</option>
+                  <option value="image">{en ? 'Image' : 'Imagen'}</option>
+                </select>
               </div>
+              {cHeaderType === 'text' && (
+                <div className="form-group">
+                  <input className="form-input" maxLength={60} value={cHeader}
+                    placeholder={en ? 'e.g. Order update' : 'ej. Actualización de tu envío'}
+                    onChange={(e) => setCHeader(e.target.value)} />
+                </div>
+              )}
+              {cHeaderType === 'image' && (
+                <div className="form-group">
+                  <input type="file" accept="image/jpeg,image/png" className="form-input" style={{ padding: 6 }} onChange={onHeaderImage} />
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                    {cHeaderImgName
+                      ? `${en ? 'Sample' : 'Muestra'}: ${cHeaderImgName}`
+                      : (en ? 'Upload a sample image (JPG/PNG). Meta uses it for review; each send can use a different image.' : 'Sube una imagen de muestra (JPG/PNG). Meta la usa para revisar; cada envío puede usar una imagen distinta.')}
+                  </div>
+                </div>
+              )}
               <div className="form-group">
                 <label className="form-label">{en ? 'Body' : 'Cuerpo'} {en ? '(use {{1}}, {{2}}… for variables)' : '(usa {{1}}, {{2}}… para variables)'}</label>
                 <textarea className="form-input" style={{ minHeight: 90, resize: 'vertical' }} value={cBody}

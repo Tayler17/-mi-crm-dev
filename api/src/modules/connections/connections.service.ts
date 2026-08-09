@@ -5,6 +5,7 @@ import { Connection } from './connection.entity';
 import * as nodemailer from 'nodemailer';
 import { SmsService } from './sms.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PlatformSettingsService } from '../settings/platform-settings.service';
 
 @Injectable()
 export class ConnectionsService {
@@ -15,6 +16,7 @@ export class ConnectionsService {
     @InjectDataSource() private readonly db: DataSource,
     private readonly smsSvc: SmsService,
     private readonly notifications: NotificationsService,
+    private readonly platformSettings: PlatformSettingsService,
   ) {}
 
   async findAll(tenantId: string) {
@@ -50,7 +52,7 @@ export class ConnectionsService {
   private async getWhatsappCredsFor(
     tenantId: string,
     opts?: { connectionId?: string; conversationId?: string },
-  ): Promise<{ wabaId?: string; token?: string; phoneId?: string }> {
+  ): Promise<{ wabaId?: string; token?: string; phoneId?: string; appId?: string }> {
     let connId = opts?.connectionId;
     if (!connId && opts?.conversationId) {
       const [conv] = await this.db.query(
@@ -75,7 +77,30 @@ export class ConnectionsService {
       );
     }
     const creds = conn?.credentials ?? {};
-    return { wabaId: creds.wabaId, token: creds.accessToken, phoneId: creds.phoneNumberId };
+    return { wabaId: creds.wabaId, token: creds.accessToken, phoneId: creds.phoneNumberId, appId: creds.appId };
+  }
+
+  /** Upload a sample image to Meta's Resumable Upload API and return its handle,
+   *  used as the example for an IMAGE-header template. Requires the app's App ID. */
+  private async uploadResumable(appId: string, token: string, buffer: Buffer, mime: string): Promise<string | null> {
+    try {
+      const sessRes = await (globalThis as any).fetch(
+        `https://graph.facebook.com/v21.0/${appId}/uploads?file_length=${buffer.length}&file_type=${encodeURIComponent(mime)}&access_token=${encodeURIComponent(token)}`,
+        { method: 'POST', signal: AbortSignal.timeout(15000) },
+      );
+      const sess: any = await sessRes.json();
+      const sessionId = sess?.id;
+      if (!sessionId) { this.logger.warn(`[wa-templates] resumable session failed: ${JSON.stringify(sess?.error ?? sess)}`); return null; }
+      const upRes = await (globalThis as any).fetch(
+        `https://graph.facebook.com/v21.0/${sessionId}`,
+        { method: 'POST', headers: { Authorization: `OAuth ${token}`, file_offset: '0' }, body: buffer, signal: AbortSignal.timeout(30000) },
+      );
+      const up: any = await upRes.json();
+      return up?.h ?? null;
+    } catch (e: any) {
+      this.logger.warn(`[wa-templates] resumable upload failed: ${e.message}`);
+      return null;
+    }
   }
 
   /** List the tenant's WhatsApp message templates from Meta (Cloud API).
@@ -113,7 +138,7 @@ export class ConnectionsService {
    *  variables in order. Returns the Meta message id on success. */
   async sendWhatsappTemplate(
     tenantId: string,
-    dto: { to?: string; name?: string; language?: string; bodyParams?: string[]; conversationId?: string; connectionId?: string; renderedBody?: string },
+    dto: { to?: string; name?: string; language?: string; bodyParams?: string[]; conversationId?: string; connectionId?: string; renderedBody?: string; headerImageUrl?: string },
   ) {
     // Use the conversation's connection (inbox) or the explicit connectionId, so the
     // template is sent from the SAME number whose WABA it belongs to (not "the most recent").
@@ -126,6 +151,10 @@ export class ConnectionsService {
     if (!dto.name || !dto.language) return { ok: false, error: 'Falta el nombre o el idioma de la plantilla.' };
 
     const components: any[] = [];
+    // Image-header templates need the actual image supplied at send time (public HTTPS link).
+    if (dto.headerImageUrl?.trim()) {
+      components.push({ type: 'header', parameters: [{ type: 'image', image: { link: dto.headerImageUrl.trim() } }] });
+    }
     const bodyParams = (dto.bodyParams ?? []).filter((v) => v != null && String(v).trim() !== '');
     if (bodyParams.length) {
       components.push({ type: 'body', parameters: bodyParams.map((v) => ({ type: 'text', text: String(v) })) });
@@ -267,14 +296,15 @@ export class ConnectionsService {
     tenantId: string,
     dto: {
       name?: string; category?: string; language?: string; bodyText?: string; examples?: string[]; connectionId?: string;
-      headerText?: string; footer?: string;
+      headerText?: string; headerFormat?: 'TEXT' | 'IMAGE'; headerImageBase64?: string; headerImageMime?: string;
+      footer?: string;
       buttonType?: 'none' | 'quick_reply' | 'cta';
       quickReplies?: string[];
       urlButton?: { text?: string; url?: string };
       callButton?: { text?: string; phone?: string };
     },
   ) {
-    const { wabaId, token } = await this.getWhatsappCredsFor(tenantId, { connectionId: dto.connectionId });
+    const { wabaId, token, appId } = await this.getWhatsappCredsFor(tenantId, { connectionId: dto.connectionId });
     if (!wabaId || !token) return { ok: false, error: 'No hay una conexión de WhatsApp API con WABA ID y Access Token.' };
 
     const name = String(dto.name ?? '').trim().toLowerCase();
@@ -298,10 +328,19 @@ export class ConnectionsService {
       bodyComponent.example = { body_text: [examples.slice(0, varMax)] };
     }
 
-    // Optional rich components: header text, footer, and buttons (quick-reply or CTA).
+    // Optional rich components: header (text or image), footer, and buttons (quick-reply/CTA).
     const components: any[] = [];
-    const headerText = String(dto.headerText ?? '').trim();
-    if (headerText) components.push({ type: 'HEADER', format: 'TEXT', text: headerText.slice(0, 60) });
+    if (dto.headerFormat === 'IMAGE' && dto.headerImageBase64) {
+      const uploadAppId = appId || (await this.platformSettings.get('meta.app_id').catch(() => '')) || '';
+      if (!uploadAppId) return { ok: false, error: 'Falta el App ID (en la conexión o en Ajustes de plataforma → Meta) para plantillas con imagen.' };
+      const buffer = Buffer.from(dto.headerImageBase64, 'base64');
+      const handle = await this.uploadResumable(uploadAppId, token, buffer, dto.headerImageMime || 'image/jpeg');
+      if (!handle) return { ok: false, error: 'No se pudo subir la imagen de ejemplo a Meta (revisa el App ID y el token).' };
+      components.push({ type: 'HEADER', format: 'IMAGE', example: { header_handle: [handle] } });
+    } else {
+      const headerText = String(dto.headerText ?? '').trim();
+      if (headerText) components.push({ type: 'HEADER', format: 'TEXT', text: headerText.slice(0, 60) });
+    }
     components.push(bodyComponent);
     const footer = String(dto.footer ?? '').trim();
     if (footer) components.push({ type: 'FOOTER', text: footer.slice(0, 60) });

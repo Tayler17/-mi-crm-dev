@@ -33,6 +33,7 @@ const CRED_FIELDS: Record<ChannelType, { key: string; label: string; placeholder
     { key: 'wabaId', label: 'WABA ID', placeholder: 'WhatsApp Business Account ID' },
     { key: 'accessToken', label: 'Access Token', placeholder: 'EAABcde...', sensitive: true },
     { key: 'webhookVerifyToken', label: 'Webhook Verify Token', placeholder: 'token-secreto', sensitive: true },
+    { key: 'appId', label: 'App ID (opcional, para plantillas con imagen)', placeholder: '1070203892236271' },
   ],
   whatsapp_web: [],
   facebook: [

@@ -1199,11 +1199,12 @@ export const getWhatsappTemplates = (params?: { connectionId?: string; conversat
   const q = qs.toString();
   return apiGet<{ ok: boolean; error?: string; templates: WhatsappTemplate[] }>(`/connections/whatsapp/templates${q ? `?${q}` : ''}`);
 };
-export const sendWhatsappTemplate = (data: { to: string; name: string; language: string; bodyParams?: string[]; conversationId?: string; connectionId?: string; renderedBody?: string }) =>
+export const sendWhatsappTemplate = (data: { to: string; name: string; language: string; bodyParams?: string[]; conversationId?: string; connectionId?: string; renderedBody?: string; headerImageUrl?: string }) =>
   apiPost<{ ok: boolean; error?: string; messageId?: string }>('/connections/whatsapp/send-template', data);
 export const createWhatsappTemplate = (data: {
   name: string; category: string; language: string; bodyText: string; examples?: string[]; connectionId?: string;
-  headerText?: string; footer?: string;
+  headerText?: string; headerFormat?: 'TEXT' | 'IMAGE'; headerImageBase64?: string; headerImageMime?: string;
+  footer?: string;
   buttonType?: 'none' | 'quick_reply' | 'cta';
   quickReplies?: string[];
   urlButton?: { text?: string; url?: string };
