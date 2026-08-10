@@ -1320,6 +1320,8 @@ export interface Plan {
   has_image_gen: boolean;
   max_image_gen_month: number;
   has_stripe_connect: boolean;
+  has_business_assistant?: boolean;
+  max_assistant_tokens?: number;
   is_active: boolean;
   is_public: boolean;
   position: number;

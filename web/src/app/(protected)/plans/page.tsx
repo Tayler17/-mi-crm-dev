@@ -26,6 +26,7 @@ type PlanForm = {
   hasFlows: boolean; hasReports: boolean; hasApiAccess: boolean; hasWebhooks: boolean;
   allowOwnApiKeys: boolean; allowOwnTwilio: boolean; allowOverage: boolean;
   hasImageGen: boolean; maxImageGenMonth: number; hasStripeConnect: boolean;
+  hasBusinessAssistant: boolean; maxAssistantTokens: number;
   extraMessagePrice: number; extraCallMinutePrice: number;
   isActive: boolean; isPublic: boolean;
   stripePriceId: string;
@@ -50,6 +51,7 @@ function planToForm(p: Plan | null): PlanForm {
     allowOwnTwilio: p?.allow_own_twilio ?? false, allowOverage: p?.allow_overage ?? false,
     hasImageGen: p?.has_image_gen ?? false, maxImageGenMonth: p?.max_image_gen_month ?? 0,
     hasStripeConnect: p?.has_stripe_connect ?? false,
+    hasBusinessAssistant: p?.has_business_assistant ?? true, maxAssistantTokens: p?.max_assistant_tokens ?? 0,
     extraMessagePrice: p?.extra_message_price ?? 0, extraCallMinutePrice: p?.extra_call_minute_price ?? 0,
     isActive: p?.is_active ?? true, isPublic: p?.is_public ?? true,
     stripePriceId: p?.stripe_price_id ?? '',
@@ -214,6 +216,7 @@ function PlanModal({ plan, onSave, onClose }: { plan: Plan | null; onSave: (f: P
               <LimitField label="Mensajes IA/mes"      field="maxMessagesMonth" />
               <LimitField label="Minutos llamada/mes"  field="maxCallMinutes" />
               <LimitField label="📞 Números Twilio"   field="maxPhoneNumbers" />
+              <LimitField label="🗣 Tokens Asistente/mes (0 = ilimitado)" field="maxAssistantTokens" />
               <LimitField label="🎨 Imágenes IA/mes"  field="maxImageGenMonth" />
             </div>
           )}
@@ -254,6 +257,7 @@ function PlanModal({ plan, onSave, onClose }: { plan: Plan | null; onSave: (f: P
                 <Toggle label="📞 Twilio propio (tenant configura su cuenta Twilio)" field="allowOwnTwilio" />
                 <Toggle label="📈 Permitir uso adicional (se cobrará automáticamente)" field="allowOverage" />
                 <Toggle label="💳 Stripe Connect (tenant cobra a sus clientes vía Stripe)" field="hasStripeConnect" />
+                <Toggle label="🗣 Asistente de Negocio AI (agente que opera el CRM)" field="hasBusinessAssistant" />
               </div>
             </div>
           )}

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
@@ -19,7 +19,7 @@ Reglas:
 interface ChatMessage { role: 'user' | 'assistant' | 'system' | 'tool'; content: string; [k: string]: any }
 
 @Injectable()
-export class AiAgentService {
+export class AiAgentService implements OnModuleInit {
   private readonly logger = new Logger(AiAgentService.name);
 
   constructor(
@@ -27,10 +27,60 @@ export class AiAgentService {
     private readonly platformSettings: PlatformSettingsService,
   ) {}
 
+  async onModuleInit() {
+    // Per-plan Business Assistant toggle + monthly token budget, and a usage meter.
+    // Default enabled=true / limit=0 (unlimited) so existing tenants aren't cut off.
+    await this.db.query(`ALTER TABLE plans ADD COLUMN IF NOT EXISTS has_business_assistant boolean NOT NULL DEFAULT true`).catch(() => {});
+    await this.db.query(`ALTER TABLE plans ADD COLUMN IF NOT EXISTS max_assistant_tokens integer NOT NULL DEFAULT 0`).catch(() => {});
+    await this.db.query(
+      `CREATE TABLE IF NOT EXISTS ai_agent_usage (
+         tenant_id text NOT NULL, period text NOT NULL,
+         tokens bigint NOT NULL DEFAULT 0,
+         PRIMARY KEY (tenant_id, period))`,
+    ).catch(() => {});
+  }
+
+  private period(): string { return new Date().toISOString().slice(0, 7); } // YYYY-MM
+
+  /** Check the tenant's plan allows the assistant and hasn't blown its monthly token budget. */
+  private async checkAccess(tenantId: string): Promise<{ ok: boolean; error?: string }> {
+    const [row] = await this.db.query(
+      `SELECT COALESCE(p.has_business_assistant, true) AS enabled,
+              COALESCE(p.max_assistant_tokens, 0)     AS max_tokens,
+              COALESCE(p.allow_overage, false)        AS overage
+       FROM tenants t LEFT JOIN plans p ON p.id = t.plan_id WHERE t.id::text = $1`,
+      [tenantId],
+    );
+    if (row && row.enabled === false) {
+      return { ok: false, error: 'El Asistente de Negocio no está incluido en tu plan. Actualiza tu plan para usarlo.' };
+    }
+    const max = Number(row?.max_tokens ?? 0);
+    if (max > 0 && !row?.overage) {
+      const [u] = await this.db.query(`SELECT tokens FROM ai_agent_usage WHERE tenant_id::text=$1 AND period=$2`, [tenantId, this.period()]);
+      if (u && Number(u.tokens) >= max) {
+        return { ok: false, error: `Alcanzaste el límite mensual del Asistente (${max.toLocaleString()} tokens). Actualiza tu plan para seguir usándolo.` };
+      }
+    }
+    return { ok: true };
+  }
+
+  private async addUsage(tenantId: string, tokens: number) {
+    if (!tokens || tokens < 0) return;
+    await this.db.query(
+      `INSERT INTO ai_agent_usage (tenant_id, period, tokens) VALUES ($1,$2,$3)
+       ON CONFLICT (tenant_id, period) DO UPDATE SET tokens = ai_agent_usage.tokens + EXCLUDED.tokens`,
+      [tenantId, this.period(), Math.round(tokens)],
+    ).catch(() => {});
+  }
+
   /** Run one agent turn: LLM + tool-calling loop over the central CRM tool registry. */
   async chat(tenantId: string, role: string | undefined, history: ChatMessage[]) {
     const { apiKey, model } = await this.platformSettings.getAI();
     if (!apiKey) return { ok: false, error: 'No hay una API key de IA configurada en la plataforma (Ajustes → IA).', reply: '', actions: [] };
+
+    // Plan gate: assistant enabled + monthly token budget not exceeded.
+    const gate = await this.checkAccess(tenantId);
+    if (!gate.ok) return { ok: false, error: gate.error, reply: '', actions: [] };
 
     const ctx = { db: this.db, tenantId, role };
     const tools = toOpenAITools(CRM_TOOLS);
@@ -51,6 +101,7 @@ export class AiAgentService {
           signal: AbortSignal.timeout(45000),
         });
         const data: any = await res.json();
+        await this.addUsage(tenantId, data?.usage?.total_tokens ?? 0); // meter tokens per tenant/month
         if (data?.error) return { ok: false, error: `IA: ${data.error.message}`, reply: '', actions };
         const msg = data?.choices?.[0]?.message;
         if (!msg) return { ok: false, error: 'La IA no devolvió respuesta.', reply: '', actions };

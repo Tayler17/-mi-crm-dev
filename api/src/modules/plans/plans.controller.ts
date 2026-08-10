@@ -155,6 +155,7 @@ export class PlansController {
       extraMessagePrice: 'extra_message_price', extraCallMinutePrice: 'extra_call_minute_price',
       isActive: 'is_active', isPublic: 'is_public', stripePriceId: 'stripe_price_id',
       hasStripeConnect: 'has_stripe_connect', maxPhoneNumbers: 'max_phone_numbers',
+      hasBusinessAssistant: 'has_business_assistant', maxAssistantTokens: 'max_assistant_tokens',
     };
     for (const [k, col] of Object.entries(map)) {
       if (dto[k] !== undefined) { values.push(dto[k]); fields.push(`${col}=$${values.length}`); }
