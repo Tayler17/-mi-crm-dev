@@ -503,7 +503,7 @@ export default function DashboardPage() {
               return (
                 <div
                   key={conv.id}
-                  onClick={() => router.push('/inbox')}
+                  onClick={() => router.push(`/inbox?conversation=${conv.id}`)}
                   style={{ padding: '10px 12px', background: 'var(--bg-secondary)', borderRadius: 8, cursor: 'pointer', borderLeft: `3px solid ${statusColor}`, transition: 'background 0.15s' }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--border)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--bg-secondary)')}
