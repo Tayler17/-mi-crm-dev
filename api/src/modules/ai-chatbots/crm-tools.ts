@@ -460,4 +460,39 @@ export const CRM_TOOLS: ToolDef[] = [
       return { ok: true, deleted: true };
     },
   },
+  {
+    name: 'launch_campaign',
+    sensitive: true,
+    description: 'Lanzar (poner en marcha) una campaña existente. ENVÍA mensajes reales a los destinatarios y tiene COSTO. El usuario debe confirmar antes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        campaign_id: { type: 'string' },
+        confirm: { type: 'boolean', description: 'true SOLO tras confirmación explícita del usuario' },
+      },
+      required: ['campaign_id'],
+    },
+    handler: async (ctx, args) => {
+      const r = await ctx.db.query(
+        `UPDATE campaigns SET status='running', started_at=COALESCE(started_at, NOW()), updated_at=NOW()
+         WHERE id=$1 AND tenant_id=$2 AND status IN ('draft','scheduled','paused') RETURNING id, name, type`,
+        [args.campaign_id, ctx.tenantId],
+      );
+      if (!r.length) return { ok: false, error: 'Campaña no encontrada o no está en un estado lanzable (draft/scheduled/paused).' };
+      return { ok: true, launched: true, campaign: r[0] };
+    },
+  },
+  {
+    name: 'pause_campaign',
+    description: 'Pausar una campaña que está en marcha (reversible).',
+    parameters: { type: 'object', properties: { campaign_id: { type: 'string' } }, required: ['campaign_id'] },
+    handler: async (ctx, args) => {
+      const r = await ctx.db.query(
+        `UPDATE campaigns SET status='paused', updated_at=NOW() WHERE id=$1 AND tenant_id=$2 AND status='running' RETURNING id, name`,
+        [args.campaign_id, ctx.tenantId],
+      );
+      if (!r.length) return { ok: false, error: 'Campaña no encontrada o no está en marcha.' };
+      return { ok: true, paused: true, campaign: r[0] };
+    },
+  },
 ];
