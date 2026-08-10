@@ -31,6 +31,9 @@ export interface ToolDef {
   parameters: { type: 'object'; properties: Record<string, any>; required?: string[] };
   /** Executes the tool. Returns a plain JSON-serializable result. */
   handler: (ctx: ToolContext, args: any) => Promise<any>;
+  /** Powerful/destructive/costly: the backend refuses to run it unless args.confirm===true,
+   *  so the assistant must ask the user and re-call with confirm after an explicit yes. */
+  sensitive?: boolean;
 }
 
 // ── Provider format converters ──────────────────────────────────────────────
@@ -76,6 +79,10 @@ export function toGeminiTools(tools: ToolDef[]) {
 export async function runTool(tools: ToolDef[], name: string, ctx: ToolContext, args: any): Promise<any> {
   const tool = tools.find((t) => t.name === name);
   if (!tool) return { ok: false, error: `Unknown tool: ${name}` };
+  // Gate: sensitive actions won't run without explicit confirmation.
+  if (tool.sensitive && args?.confirm !== true) {
+    return { ok: false, needs_confirmation: true, message: 'Acción sensible: pide confirmación explícita al usuario y vuelve a llamar la herramienta con confirm=true.' };
+  }
   try {
     return await tool.handler(ctx, args ?? {});
   } catch (e: any) {
@@ -433,6 +440,24 @@ export const CRM_TOOLS: ToolDef[] = [
         [ctx.tenantId],
       );
       return { ok: true, count: rows.length, connections: rows };
+    },
+  },
+  {
+    name: 'delete_task',
+    sensitive: true,
+    description: 'Eliminar una tarea. ACCIÓN DESTRUCTIVA — el usuario debe confirmar antes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string' },
+        confirm: { type: 'boolean', description: 'true SOLO si el usuario ya confirmó explícitamente' },
+      },
+      required: ['task_id'],
+    },
+    handler: async (ctx, args) => {
+      const r = await ctx.db.query(`DELETE FROM tasks WHERE id=$1 AND tenant_id=$2 RETURNING id`, [args.task_id, ctx.tenantId]);
+      if (!r.length) return { ok: false, error: 'Tarea no encontrada' };
+      return { ok: true, deleted: true };
     },
   },
 ];

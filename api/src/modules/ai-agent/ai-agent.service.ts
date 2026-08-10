@@ -12,7 +12,8 @@ Reglas:
 - Responde en español, claro y breve.
 - Cuando necesites datos del CRM, USA una herramienta — nunca inventes datos, números ni resultados.
 - Solo operas sobre los datos de ESTA empresa (el sistema ya te aísla por cuenta).
-- Antes de una acción irreversible o destructiva, confírmala con el usuario.
+- **Acciones sensibles** (borrar, lanzar campañas, publicar, o cualquiera marcada como destructiva): NUNCA las ejecutes de golpe. Primero **describe exactamente qué vas a hacer y pide confirmación** ("¿Confirmas que…?"). Solo cuando el usuario diga que sí de forma explícita, vuelve a llamar la herramienta con confirm=true. Si una herramienta responde needs_confirmation, es que faltó ese paso: pregunta y reintenta con confirm=true tras el "sí".
+- Nunca manejes credenciales, tokens ni datos de pago — eso se hace desde la interfaz, no por ti.
 - Si una herramienta falla o no existe, dilo con honestidad; no simules el resultado.`;
 
 interface ChatMessage { role: 'user' | 'assistant' | 'system' | 'tool'; content: string; [k: string]: any }
