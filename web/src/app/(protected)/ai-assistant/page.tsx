@@ -21,6 +21,7 @@ export default function AiAssistantPage() {
   const [speaking, setSpeaking] = useState(false);
   const [interim, setInterim] = useState('');
   const [voiceSupported, setVoiceSupported] = useState(true);
+  const voiceLangRef = useRef<'es-ES' | 'en-US'>(en ? 'en-US' : 'es-ES');
 
   const threadRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<Msg[]>([]);
@@ -29,6 +30,7 @@ export default function AiAssistantPage() {
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
+  useEffect(() => { voiceLangRef.current = en ? 'en-US' : 'es-ES'; }, [en]);
   useEffect(() => { if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight; }, [messages, sending, interim]);
 
   useEffect(() => {
@@ -72,7 +74,7 @@ export default function AiAssistantPage() {
     if (!synth) { resumeListening(); return; }
     synth.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = en ? 'en-US' : 'es-ES';
+    u.lang = voiceLangRef.current;
     u.onstart = () => setSpeaking(true);
     u.onend = () => { setSpeaking(false); resumeListening(); };
     u.onerror = () => { setSpeaking(false); resumeListening(); };
@@ -87,27 +89,36 @@ export default function AiAssistantPage() {
     if (!voiceModeRef.current) return;
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) return;
-    try { recognitionRef.current?.abort(); } catch {}
+    // Detach handlers before aborting the old instance so its cleanup doesn't re-trigger the loop.
+    if (recognitionRef.current) {
+      try { recognitionRef.current.onend = null; recognitionRef.current.onerror = null; recognitionRef.current.onresult = null; recognitionRef.current.abort(); } catch {}
+    }
     const rec = new SR();
-    rec.lang = en ? 'en-US' : 'es-ES';
+    rec.lang = voiceLangRef.current;
     rec.continuous = false;
     rec.interimResults = true;
     let finalText = '';
+    let liveText = '';
     rec.onresult = (e: any) => {
-      let live = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
+      finalText = ''; liveText = '';
+      for (let i = 0; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalText += t; else live += t;
+        if (e.results[i].isFinal) finalText += t; else liveText += t;
       }
-      setInterim(finalText || live);
+      setInterim((finalText + ' ' + liveText).trim());
     };
     rec.onend = () => {
       setListening(false);
-      const t = finalText.trim();
+      // Send whatever we captured — final if present, otherwise the interim text.
+      const t = (finalText || liveText).trim();
       if (t) send(t);
       else resumeListening();
     };
-    rec.onerror = () => setListening(false);
+    rec.onerror = (ev: any) => {
+      setListening(false);
+      // 'no-speech'/'aborted' are normal — keep listening; other errors stop.
+      if (ev?.error === 'no-speech' || ev?.error === 'aborted') resumeListening();
+    };
     recognitionRef.current = rec;
     setListening(true);
     try { rec.start(); } catch {}
