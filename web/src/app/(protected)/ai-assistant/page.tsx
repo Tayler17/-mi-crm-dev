@@ -31,6 +31,14 @@ export default function AiAssistantPage() {
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
   useEffect(() => { voiceLangRef.current = en ? 'en-US' : 'es-ES'; }, [en]);
+
+  // Persist the chat so it survives refresh/navigation.
+  useEffect(() => {
+    try { const saved = localStorage.getItem('aiAssistantChat'); if (saved) setMessages(JSON.parse(saved)); } catch {}
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem('aiAssistantChat', JSON.stringify(messages)); } catch {}
+  }, [messages]);
   useEffect(() => { if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight; }, [messages, sending, interim]);
 
   useEffect(() => {
@@ -72,13 +80,21 @@ export default function AiAssistantPage() {
   function speak(text: string) {
     const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
     if (!synth) { resumeListening(); return; }
-    synth.cancel();
+    try { synth.cancel(); } catch {}
     const u = new SpeechSynthesisUtterance(text);
     u.lang = voiceLangRef.current;
-    u.onstart = () => setSpeaking(true);
-    u.onend = () => { setSpeaking(false); resumeListening(); };
-    u.onerror = () => { setSpeaking(false); resumeListening(); };
-    synth.speak(u);
+    try {
+      const pref = synth.getVoices().find((v) => v.lang?.toLowerCase().startsWith(voiceLangRef.current.slice(0, 2)));
+      if (pref) u.voice = pref;
+    } catch {}
+    // Always resume listening once — whether TTS finishes, errors, or never starts.
+    let done = false; let started = false;
+    const finish = () => { if (done) return; done = true; setSpeaking(false); resumeListening(); };
+    u.onstart = () => { started = true; setSpeaking(true); };
+    u.onend = finish;
+    u.onerror = finish;
+    setTimeout(() => { if (!started) finish(); }, 2200); // TTS blocked/unavailable → resume anyway
+    setTimeout(() => { try { synth.resume(); synth.speak(u); } catch { finish(); } }, 60);
   }
 
   function resumeListening() {
