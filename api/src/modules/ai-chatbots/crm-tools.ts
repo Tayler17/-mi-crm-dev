@@ -293,4 +293,146 @@ export const CRM_TOOLS: ToolDef[] = [
       return { ok: true, count: rows.length, tasks: rows };
     },
   },
+  {
+    name: 'list_campaigns',
+    description: 'Listar campañas y su estado/estadísticas (enviadas/entregadas/abiertas). Hasta 20.',
+    parameters: { type: 'object', properties: {}, required: [] },
+    handler: async (ctx) => {
+      const rows = await ctx.db.query(
+        `SELECT id, name, type, status, sent_count, delivered_count, opened_count
+         FROM campaigns WHERE tenant_id=$1 ORDER BY updated_at DESC LIMIT 20`,
+        [ctx.tenantId],
+      );
+      return { ok: true, count: rows.length, campaigns: rows };
+    },
+  },
+  {
+    name: 'list_content',
+    description: 'Listar el contenido de marketing (título, estado, canal, fechas). Hasta 20.',
+    parameters: { type: 'object', properties: {}, required: [] },
+    handler: async (ctx) => {
+      const rows = await ctx.db.query(
+        `SELECT id, title, status, channel, scheduled_at, published_at
+         FROM content WHERE tenant_id=$1 ORDER BY updated_at DESC LIMIT 20`,
+        [ctx.tenantId],
+      );
+      return { ok: true, count: rows.length, content: rows };
+    },
+  },
+  {
+    name: 'list_appointments',
+    description: 'Listar citas/recordatorios próximos (desde ayer en adelante). Hasta 20.',
+    parameters: { type: 'object', properties: {}, required: [] },
+    handler: async (ctx) => {
+      const rows = await ctx.db.query(
+        `SELECT a.id, a.title, a.scheduled_at, a.status, ct.full_name AS contact
+         FROM appointments a LEFT JOIN contacts ct ON ct.id = a.contact_id
+         WHERE a.tenant_id=$1 AND a.scheduled_at >= NOW() - interval '1 day'
+         ORDER BY a.scheduled_at ASC LIMIT 20`,
+        [ctx.tenantId],
+      );
+      return { ok: true, count: rows.length, appointments: rows };
+    },
+  },
+  {
+    name: 'list_contact_lists',
+    description: 'Listar las listas de contactos. Hasta 30.',
+    parameters: { type: 'object', properties: {}, required: [] },
+    handler: async (ctx) => {
+      const rows = await ctx.db.query(
+        `SELECT id, name, description FROM contact_lists WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 30`,
+        [ctx.tenantId],
+      );
+      return { ok: true, count: rows.length, lists: rows };
+    },
+  },
+  {
+    name: 'create_contact_list',
+    description: 'Crear una nueva lista de contactos.',
+    parameters: {
+      type: 'object',
+      properties: { name: { type: 'string' }, description: { type: 'string' } },
+      required: ['name'],
+    },
+    handler: async (ctx, args) => {
+      const name = String(args.name ?? '').trim();
+      if (!name) return { ok: false, error: 'Falta el nombre de la lista' };
+      const [row] = await ctx.db.query(
+        `INSERT INTO contact_lists (tenant_id, name, description, created_at, updated_at)
+         VALUES ($1,$2,$3,NOW(),NOW()) RETURNING id, name`,
+        [ctx.tenantId, name, args.description ?? null],
+      );
+      return { ok: true, list: row };
+    },
+  },
+  {
+    name: 'add_contact_to_list',
+    description: 'Agregar un contacto a una lista de contactos (usa search_contacts y list_contact_lists para los IDs).',
+    parameters: {
+      type: 'object',
+      properties: { contact_id: { type: 'string' }, list_id: { type: 'string' } },
+      required: ['contact_id', 'list_id'],
+    },
+    handler: async (ctx, args) => {
+      const [c] = await ctx.db.query(`SELECT id FROM contacts WHERE id=$1 AND tenant_id=$2`, [args.contact_id, ctx.tenantId]);
+      if (!c) return { ok: false, error: 'Contacto no encontrado' };
+      const [l] = await ctx.db.query(`SELECT id FROM contact_lists WHERE id=$1 AND tenant_id=$2`, [args.list_id, ctx.tenantId]);
+      if (!l) return { ok: false, error: 'Lista no encontrada' };
+      await ctx.db.query(`INSERT INTO contact_list_contacts (list_id, contact_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [args.list_id, args.contact_id]);
+      return { ok: true, added: true };
+    },
+  },
+  {
+    name: 'list_tags',
+    description: 'Listar las etiquetas (tags) disponibles.',
+    parameters: { type: 'object', properties: {}, required: [] },
+    handler: async (ctx) => {
+      const rows = await ctx.db.query(`SELECT id, name FROM tags WHERE tenant_id=$1 ORDER BY name`, [ctx.tenantId]);
+      return { ok: true, count: rows.length, tags: rows };
+    },
+  },
+  {
+    name: 'add_tag_to_contact',
+    description: 'Poner una etiqueta (existente) a un contacto. Usa list_tags para ver las disponibles.',
+    parameters: {
+      type: 'object',
+      properties: { contact_id: { type: 'string' }, tag_name: { type: 'string' } },
+      required: ['contact_id', 'tag_name'],
+    },
+    handler: async (ctx, args) => {
+      const [c] = await ctx.db.query(`SELECT id FROM contacts WHERE id=$1 AND tenant_id=$2`, [args.contact_id, ctx.tenantId]);
+      if (!c) return { ok: false, error: 'Contacto no encontrado' };
+      const [tag] = await ctx.db.query(`SELECT id FROM tags WHERE tenant_id=$1 AND LOWER(name)=LOWER($2) LIMIT 1`, [ctx.tenantId, String(args.tag_name ?? '').trim()]);
+      if (!tag) return { ok: false, error: `La etiqueta "${args.tag_name}" no existe (créala primero en Tags)` };
+      await ctx.db.query(`INSERT INTO contact_tags (contact_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [args.contact_id, tag.id]);
+      return { ok: true, tagged: true };
+    },
+  },
+  {
+    name: 'remove_tag_from_contact',
+    description: 'Quitar una etiqueta de un contacto.',
+    parameters: {
+      type: 'object',
+      properties: { contact_id: { type: 'string' }, tag_name: { type: 'string' } },
+      required: ['contact_id', 'tag_name'],
+    },
+    handler: async (ctx, args) => {
+      const [tag] = await ctx.db.query(`SELECT id FROM tags WHERE tenant_id=$1 AND LOWER(name)=LOWER($2) LIMIT 1`, [ctx.tenantId, String(args.tag_name ?? '').trim()]);
+      if (!tag) return { ok: false, error: `La etiqueta "${args.tag_name}" no existe` };
+      await ctx.db.query(`DELETE FROM contact_tags WHERE contact_id=$1 AND tag_id=$2`, [args.contact_id, tag.id]);
+      return { ok: true, removed: true };
+    },
+  },
+  {
+    name: 'list_connections',
+    description: 'Listar los canales/conexiones y su estado (WhatsApp, email, etc.). NO expone credenciales.',
+    parameters: { type: 'object', properties: {}, required: [] },
+    handler: async (ctx) => {
+      const rows = await ctx.db.query(
+        `SELECT name, channel_type, status FROM channel_connections WHERE tenant_id=$1 ORDER BY channel_type`,
+        [ctx.tenantId],
+      );
+      return { ok: true, count: rows.length, connections: rows };
+    },
+  },
 ];
