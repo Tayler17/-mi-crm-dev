@@ -320,7 +320,7 @@ export const CRM_TOOLS: ToolDef[] = [
     handler: async (ctx) => {
       const rows = await ctx.db.query(
         `SELECT id, title, status, channel, scheduled_at, published_at
-         FROM content WHERE tenant_id=$1 ORDER BY updated_at DESC LIMIT 20`,
+         FROM content_posts WHERE tenant_id=$1 ORDER BY updated_at DESC LIMIT 20`,
         [ctx.tenantId],
       );
       return { ok: true, count: rows.length, content: rows };
@@ -493,6 +493,28 @@ export const CRM_TOOLS: ToolDef[] = [
       );
       if (!r.length) return { ok: false, error: 'Campaña no encontrada o no está en marcha.' };
       return { ok: true, paused: true, campaign: r[0] };
+    },
+  },
+  {
+    name: 'publish_content',
+    sensitive: true,
+    description: 'Publicar un contenido de marketing (lo marca como publicado). El usuario debe confirmar antes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        content_id: { type: 'string' },
+        confirm: { type: 'boolean', description: 'true SOLO tras confirmación explícita del usuario' },
+      },
+      required: ['content_id'],
+    },
+    handler: async (ctx, args) => {
+      const r = await ctx.db.query(
+        `UPDATE content_posts SET status='published', published_at=COALESCE(published_at, NOW()), updated_at=NOW()
+         WHERE id=$1 AND tenant_id=$2 RETURNING id, title`,
+        [args.content_id, ctx.tenantId],
+      );
+      if (!r.length) return { ok: false, error: 'Contenido no encontrado' };
+      return { ok: true, published: true, content: r[0] };
     },
   },
 ];
