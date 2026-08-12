@@ -12,6 +12,7 @@ import { KnowledgeBaseService } from '../knowledge-base/knowledge-base.service';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
 import { BillingService } from '../billing/billing.service';
 import { IntegrationsService } from '../integrations/integrations.service';
+import { buildChatbotTools, toOpenAiChatbotTools, toAnthropicChatbotTools, toGeminiChatbotTools, mapChatbotToolCall } from './chatbot-tools';
 
 interface MediaResult {
   /** Text to pass to the LLM (transcription for audio, empty for images) */
@@ -899,35 +900,7 @@ export class AiChatbotEngineService {
     }
 
     const body: any = { model, messages, max_tokens: maxTokens, temperature };
-    const tools: any[] = [];
-
-    if (transferTargets.length > 0) {
-      tools.push({ type: 'function', function: { name: 'transfer_conversation', description: 'Transfer this conversation to another specialized team or bot. Call this ONLY when the user explicitly requests transfer or clearly needs a service you cannot handle. The "message" field is a short friendly message sent DIRECTLY TO THE CUSTOMER (e.g. "Un momento, te conecto con el equipo de reservas ✓"). NEVER write internal phrases like "el cliente ha pedido ser transferido" — always address the customer directly in second person.', parameters: { type: 'object', properties: { destination: { type: 'string', enum: transferTargets, description: 'The destination team/bot name' }, message: { type: 'string', description: 'Short friendly message TO THE CUSTOMER confirming the transfer (e.g. "Un momento, te conecto con el equipo de reservas ✓"). Write directly to the customer, never use internal language.' } }, required: ['destination', 'message'] } } });
-    }
-    tools.push({ type: 'function', function: { name: 'resolve_conversation', description: "Mark this conversation as resolved when the customer's request has been fully addressed.", parameters: { type: 'object', properties: { message: { type: 'string', description: 'Final message to the customer before closing' } }, required: ['message'] } } });
-    tools.push({ type: 'function', function: { name: 'set_waiting', description: 'Put conversation on hold when more information is needed or you cannot proceed right now.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'Message explaining the wait' } }, required: ['message'] } } });
-    if (stageNames.length > 0) {
-      tools.push({ type: 'function', function: { name: 'create_deal', description: 'Create a new deal/booking in the CRM for this customer. Use only when the customer requests a NEW service or product distinct from existing open deals.', parameters: { type: 'object', properties: { title: { type: 'string', description: 'Deal title (e.g. "Envío LDN→SDQ - Taylor Cabrera")' }, value: { type: 'number', description: 'Deal value' }, currency: { type: 'string', description: 'Currency (USD/GBP/EUR)', default: 'USD' }, stage_name: { type: 'string', enum: stageNames, description: 'Pipeline stage' }, notes: { type: 'string', description: 'Additional notes' }, message: { type: 'string', description: 'Confirmation message to customer' } }, required: ['title', 'stage_name', 'message'] } } });
-      if (existingDeals.length > 0) {
-        const dealIds = existingDeals.map((d: any) => d.id);
-        tools.push({ type: 'function', function: { name: 'update_deal', description: `Update an existing open deal. Use this when the customer is following up on an existing deal. Open deals: ${existingDeals.map((d: any) => `"${d.title}"(id:${d.id},stage:${d.stage_name ?? 'none'})`).join(', ')}`, parameters: { type: 'object', properties: { deal_id: { type: 'string', enum: dealIds, description: 'Deal ID to update' }, stage_name: { type: 'string', enum: stageNames, description: 'New stage' }, value: { type: 'number', description: 'New value' }, notes: { type: 'string', description: 'Updated notes' }, status: { type: 'string', enum: ['open', 'won', 'lost'], description: 'Deal status' }, message: { type: 'string', description: 'Message to customer' } }, required: ['deal_id', 'message'] } } });
-      }
-    }
-    if (tagNames.length > 0) {
-      tools.push({ type: 'function', function: { name: 'add_tag', description: 'Add a tag/label to this contact and conversation. Use when the conversation reveals information that should classify this contact (e.g. "Interesado", "VIP", "Reclamación").', parameters: { type: 'object', properties: { tag_name: { type: 'string', enum: tagNames, description: 'Tag to add' }, message: { type: 'string', description: 'Optional short message to the customer (leave empty string if no message needed)' } }, required: ['tag_name', 'message'] } } });
-      tools.push({ type: 'function', function: { name: 'remove_tag', description: 'Remove a tag/label from this contact and conversation.', parameters: { type: 'object', properties: { tag_name: { type: 'string', enum: tagNames, description: 'Tag to remove' }, message: { type: 'string', description: 'Optional short message to the customer (leave empty string if no message needed)' } }, required: ['tag_name', 'message'] } } });
-    }
-    tools.push({ type: 'function', function: { name: 'create_task', description: 'Create a follow-up task linked to this contact. Use when the customer requests a callback, a quote, or any pending action that must be tracked.', parameters: { type: 'object', properties: { title: { type: 'string', description: 'Short task title (e.g. "Llamar a María el lunes", "Enviar cotización")' }, description: { type: 'string', description: 'Additional details (optional)' }, due_date: { type: 'string', description: 'ISO 8601 date string for the deadline (optional, e.g. "2026-05-01")' }, priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Task priority (default: medium)' }, message: { type: 'string', description: 'Confirmation message to the customer' } }, required: ['title', 'message'] } } });
-    if (stripeConnectEnabled) {
-      tools.push({ type: 'function', function: { name: 'create_payment_link', description: 'Generate a Stripe payment link to send to the customer. RULES: 1) ONLY call after the customer explicitly confirms they want to pay AND you have confirmed the exact amount. 2) Always ask "¿Confirmas el pago de $X [currency]?" BEFORE calling this. 3) Amount: min $1, max $10,000. 4) The link will be sent automatically after generation.', parameters: { type: 'object', properties: { amount: { type: 'number', description: 'Amount to charge (e.g. 150.00). Must be between 1 and 10000.' }, currency: { type: 'string', description: 'Currency code: USD, EUR, GBP, MXN, etc.', default: 'USD' }, description: { type: 'string', description: 'Description visible to the customer on the payment page (e.g. "Consulta médica - 1 hora")' }, message: { type: 'string', description: 'Message to send to the customer confirming the payment link is being sent' } }, required: ['amount', 'currency', 'description', 'message'] } } });
-    }
-    if (dentallyConnected) {
-      tools.push({ type: 'function', function: { name: 'dentally_list_practitioners', description: 'List the clinic professionals/doctors available for appointments.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'Optional short message to the customer' } } } } });
-      tools.push({ type: 'function', function: { name: 'dentally_check_availability', description: 'Check open appointment slots. If the requested day has no slots, it AUTOMATICALLY returns the soonest available day, so never ask the customer to try dates one by one. For "the soonest/earliest available" requests, pass today as the date. Use when the customer asks about availability or times.', parameters: { type: 'object', properties: { date: { type: 'string', description: 'Day to check, format YYYY-MM-DD' }, practitioner_name: { type: 'string', description: 'Optional professional name' }, duration: { type: 'number', description: 'Minutes (default 30)' } }, required: ['date'] } } });
-      tools.push({ type: 'function', function: { name: 'dentally_book_appointment', description: "Book an appointment once the customer has chosen a day and time. ALWAYS pass the patient's own name (and phone/email if the customer gave them) — these identify the patient in the clinic system, do NOT rely on the caller's phone number. If the customer is NOT a registered patient, also ask for date_of_birth (YYYY-MM-DD) and gender (male/female) before calling this.", parameters: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD' }, time: { type: 'string', description: 'HH:MM (24h), must be one of the available slots' }, name: { type: 'string', description: "Patient's full name as given by the customer" }, phone: { type: 'string', description: "Patient's phone number as given by the customer (may differ from the caller's number)" }, email: { type: 'string', description: "Patient's email if given" }, practitioner_name: { type: 'string' }, duration: { type: 'number' }, reason: { type: 'string' }, date_of_birth: { type: 'string', description: 'Patient DOB YYYY-MM-DD (only if a new patient)' }, gender: { type: 'string', enum: ['male', 'female'] }, title: { type: 'string', description: 'Mr/Mrs/Ms/Dr (only if a new patient)' } }, required: ['date', 'time'] } } });
-      tools.push({ type: 'function', function: { name: 'dentally_get_appointments', description: "Look up the customer's own existing/upcoming appointments. Use when they ask \"what/when is my appointment\", \"which doctor do I have\", \"do I have an appointment\". Read the real result; never guess.", parameters: { type: 'object', properties: { message: { type: 'string' } } } } });
-    }
-    body.tools = tools;
+    body.tools = toOpenAiChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected }));
     body.tool_choice = 'auto';
 
     const res = await axios.post('https://api.openai.com/v1/chat/completions', body, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, timeout: 30000 });
@@ -936,21 +909,8 @@ export class AiChatbotEngineService {
     if (toolCall) {
       try {
         const args = JSON.parse(toolCall.function.arguments);
-        switch (toolCall.function.name) {
-          case 'transfer_conversation': return { reply: args.message ?? '', transferTo: args.destination };
-          case 'resolve_conversation':  return { reply: args.message ?? '', resolveConversation: true };
-          case 'set_waiting':           return { reply: args.message ?? '', setWaiting: true };
-          case 'create_deal':           return { reply: args.message ?? '', createDeal: { title: args.title, value: args.value, currency: args.currency, stageName: args.stage_name, notes: args.notes } };
-          case 'update_deal':           return { reply: args.message ?? '', updateDeal: { dealId: args.deal_id, stageName: args.stage_name, value: args.value, notes: args.notes, status: args.status } };
-          case 'add_tag':               return { reply: args.message ?? '', addTag: { tagName: args.tag_name } };
-          case 'remove_tag':            return { reply: args.message ?? '', removeTag: { tagName: args.tag_name } };
-          case 'create_task':           return { reply: args.message ?? '', createTask: { title: args.title, description: args.description, dueDate: args.due_date, priority: args.priority } };
-          case 'create_payment_link':   return { reply: args.message ?? '', createPaymentLink: { amount: args.amount, currency: args.currency ?? 'USD', description: args.description } };
-          case 'dentally_list_practitioners': return { reply: args.message ?? '', dentallyListPractitioners: true };
-          case 'dentally_check_availability': return { reply: args.message ?? '', dentallyCheckAvailability: { date: args.date, practitionerName: args.practitioner_name, durationMinutes: args.duration } };
-          case 'dentally_book_appointment':   return { reply: args.message ?? '', dentallyBook: { date: args.date, time: args.time, practitionerName: args.practitioner_name, durationMinutes: args.duration, reason: args.reason, name: args.name, phone: args.phone, email: args.email, dateOfBirth: args.date_of_birth, gender: args.gender, title: args.title } };
-          case 'dentally_get_appointments':   return { reply: args.message ?? '', dentallyGetAppointments: true };
-        }
+        const intent = mapChatbotToolCall(toolCall.function.name, args);
+        if (intent) return intent;
       } catch { /* fall through */ }
     }
     return { reply: choice?.message?.content?.trim() ?? '' };
@@ -970,51 +930,13 @@ export class AiChatbotEngineService {
     const body: any = { model, messages: chatMsgs, max_tokens: maxTokens, temperature };
     if (systemPrompt) body.system = systemPrompt;
 
-    const tools: any[] = [];
-    if (transferTargets.length > 0) tools.push({ name: 'transfer_conversation', description: 'Transfer this conversation to another specialized team or bot. Call this ONLY when the user explicitly requests transfer or clearly needs a service you cannot handle. The "message" field is a short friendly message sent DIRECTLY TO THE CUSTOMER (e.g. "Un momento, te conecto con el equipo de reservas ✓"). NEVER write internal phrases like "el cliente ha pedido ser transferido" — always address the customer directly.', input_schema: { type: 'object', properties: { destination: { type: 'string', enum: transferTargets }, message: { type: 'string', description: 'Short friendly message TO THE CUSTOMER confirming the transfer. Write directly to the customer, never use internal language.' } }, required: ['destination', 'message'] } });
-    tools.push({ name: 'resolve_conversation', description: "Mark conversation as resolved.", input_schema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } });
-    tools.push({ name: 'set_waiting', description: 'Put conversation on hold.', input_schema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } });
-    if (stageNames.length > 0) {
-      tools.push({ name: 'create_deal', description: 'Create a new deal in the CRM. Use only when the customer requests a NEW service or product distinct from existing open deals.', input_schema: { type: 'object', properties: { title: { type: 'string' }, value: { type: 'number' }, currency: { type: 'string' }, stage_name: { type: 'string', enum: stageNames }, notes: { type: 'string' }, message: { type: 'string' } }, required: ['title', 'stage_name', 'message'] } });
-      if (existingDeals.length > 0) {
-        tools.push({ name: 'update_deal', description: `Update an existing open deal. Use when the customer follows up on an existing deal. Open deals: ${existingDeals.map((d: any) => `"${d.title}"(id:${d.id})`).join(', ')}`, input_schema: { type: 'object', properties: { deal_id: { type: 'string', enum: existingDeals.map((d: any) => d.id) }, stage_name: { type: 'string', enum: stageNames }, value: { type: 'number' }, notes: { type: 'string' }, status: { type: 'string', enum: ['open','won','lost'] }, message: { type: 'string' } }, required: ['deal_id', 'message'] } });
-      }
-    }
-    if (tagNames.length > 0) {
-      tools.push({ name: 'add_tag', description: 'Add a tag/label to this contact and conversation. Use when the conversation reveals information that should classify this contact (e.g. "Interesado", "VIP", "Reclamación").', input_schema: { type: 'object', properties: { tag_name: { type: 'string', enum: tagNames }, message: { type: 'string', description: 'Optional message to the customer (empty string if not needed)' } }, required: ['tag_name', 'message'] } });
-      tools.push({ name: 'remove_tag', description: 'Remove a tag/label from this contact and conversation.', input_schema: { type: 'object', properties: { tag_name: { type: 'string', enum: tagNames }, message: { type: 'string', description: 'Optional message to the customer (empty string if not needed)' } }, required: ['tag_name', 'message'] } });
-    }
-    tools.push({ name: 'create_task', description: 'Create a follow-up task linked to this contact. Use when the customer requests a callback, a quote, or any pending action that must be tracked.', input_schema: { type: 'object', properties: { title: { type: 'string' }, description: { type: 'string' }, due_date: { type: 'string', description: 'ISO 8601 date (optional)' }, priority: { type: 'string', enum: ['low', 'medium', 'high'] }, message: { type: 'string' } }, required: ['title', 'message'] } });
-    if (stripeConnectEnabled) {
-      tools.push({ name: 'create_payment_link', description: 'Generate a Stripe payment link to send to the customer. RULES: 1) ONLY call after the customer explicitly confirms they want to pay AND you confirmed the exact amount. 2) Always ask "¿Confirmas el pago de $X [currency]?" BEFORE calling. 3) Amount: min $1, max $10,000.', input_schema: { type: 'object', properties: { amount: { type: 'number', description: 'Amount to charge. Must be between 1 and 10000.' }, currency: { type: 'string', description: 'Currency code: USD, EUR, GBP, MXN, etc.' }, description: { type: 'string', description: 'Description visible to the customer on the payment page' }, message: { type: 'string', description: 'Message to send to the customer' } }, required: ['amount', 'currency', 'description', 'message'] } });
-    if (dentallyConnected) {
-      tools.push({ name: 'dentally_list_practitioners', description: 'List the clinic professionals/doctors available for appointments.', input_schema: { type: 'object', properties: { message: { type: 'string' } } } });
-      tools.push({ name: 'dentally_check_availability', description: 'Check open appointment slots for a given day. Use when the customer asks about availability or times.', input_schema: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD' }, practitioner_name: { type: 'string' }, duration: { type: 'number' } }, required: ['date'] } });
-      tools.push({ name: 'dentally_book_appointment', description: 'Book an appointment once the customer chose a day and time. If the customer is NOT a registered patient, first ask for date_of_birth (YYYY-MM-DD) and gender (male/female), then call this.', input_schema: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD' }, time: { type: 'string', description: 'HH:MM (24h)' }, practitioner_name: { type: 'string' }, duration: { type: 'number' }, reason: { type: 'string' }, date_of_birth: { type: 'string' }, gender: { type: 'string', enum: ['male', 'female'] }, title: { type: 'string' } }, required: ['date', 'time'] } });
-      tools.push({ name: 'dentally_get_appointments', description: "Look up the customer's own existing/upcoming appointments (when/which doctor). Read the real result; never guess.", input_schema: { type: 'object', properties: { message: { type: 'string' } } } });
-    }
-    }
-    body.tools = tools;
+    body.tools = toAnthropicChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected }));
 
     const res = await axios.post('https://api.anthropic.com/v1/messages', body, { headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }, timeout: 30000 });
     for (const block of res.data.content ?? []) {
       if (block.type === 'tool_use') {
-        const i = block.input ?? {};
-        switch (block.name) {
-          case 'transfer_conversation': return { reply: i.message ?? '', transferTo: i.destination };
-          case 'resolve_conversation':  return { reply: i.message ?? '', resolveConversation: true };
-          case 'set_waiting':           return { reply: i.message ?? '', setWaiting: true };
-          case 'create_deal':           return { reply: i.message ?? '', createDeal: { title: i.title, value: i.value, currency: i.currency, stageName: i.stage_name, notes: i.notes } };
-          case 'update_deal':           return { reply: i.message ?? '', updateDeal: { dealId: i.deal_id, stageName: i.stage_name, value: i.value, notes: i.notes, status: i.status } };
-          case 'add_tag':               return { reply: i.message ?? '', addTag: { tagName: i.tag_name } };
-          case 'remove_tag':            return { reply: i.message ?? '', removeTag: { tagName: i.tag_name } };
-          case 'create_task':           return { reply: i.message ?? '', createTask: { title: i.title, description: i.description, dueDate: i.due_date, priority: i.priority } };
-          case 'create_payment_link':   return { reply: i.message ?? '', createPaymentLink: { amount: i.amount, currency: i.currency ?? 'USD', description: i.description } };
-          case 'dentally_list_practitioners': return { reply: i.message ?? '', dentallyListPractitioners: true };
-          case 'dentally_check_availability': return { reply: i.message ?? '', dentallyCheckAvailability: { date: i.date, practitionerName: i.practitioner_name, durationMinutes: i.duration } };
-          case 'dentally_book_appointment':   return { reply: i.message ?? '', dentallyBook: { date: i.date, time: i.time, practitionerName: i.practitioner_name, durationMinutes: i.duration, reason: i.reason, name: i.name, phone: i.phone, email: i.email, dateOfBirth: i.date_of_birth, gender: i.gender, title: i.title } };
-          case 'dentally_get_appointments':   return { reply: i.message ?? '', dentallyGetAppointments: true };
-        }
+        const intent = mapChatbotToolCall(block.name, block.input ?? {});
+        if (intent) return intent;
       }
     }
     return { reply: res.data.content?.find((b: any) => b.type === 'text')?.text?.trim() ?? '' };
@@ -1037,51 +959,14 @@ export class AiChatbotEngineService {
     const body: any = { contents, generationConfig: { maxOutputTokens: maxTokens, temperature } };
     if (systemPrompt) body.systemInstruction = { parts: [{ text: systemPrompt }] };
 
-    const fnDeclarations: any[] = [];
-    if (transferTargets.length > 0) fnDeclarations.push({ name: 'transfer_conversation', description: 'Transfer this conversation to another specialized team or bot. Call this ONLY when the user explicitly requests transfer or clearly needs a service you cannot handle. The "message" field is a short friendly message sent DIRECTLY TO THE CUSTOMER (e.g. "Un momento, te conecto con el equipo de reservas ✓"). NEVER write internal phrases like "el cliente ha pedido ser transferido" — always address the customer directly.', parameters: { type: 'OBJECT', properties: { destination: { type: 'STRING', enum: transferTargets }, message: { type: 'STRING', description: 'Short friendly message TO THE CUSTOMER confirming the transfer. Write directly to the customer, never use internal language.' } }, required: ['destination', 'message'] } });
-    fnDeclarations.push({ name: 'resolve_conversation', description: 'Mark conversation as resolved.', parameters: { type: 'OBJECT', properties: { message: { type: 'STRING' } }, required: ['message'] } });
-    fnDeclarations.push({ name: 'set_waiting', description: 'Put conversation on hold.', parameters: { type: 'OBJECT', properties: { message: { type: 'STRING' } }, required: ['message'] } });
-    if (stageNames.length > 0) {
-      fnDeclarations.push({ name: 'create_deal', description: 'Create a new deal/booking. Use only when the customer requests a NEW service or product distinct from existing open deals.', parameters: { type: 'OBJECT', properties: { title: { type: 'STRING' }, value: { type: 'NUMBER' }, currency: { type: 'STRING' }, stage_name: { type: 'STRING', enum: stageNames }, notes: { type: 'STRING' }, message: { type: 'STRING' } }, required: ['title', 'stage_name', 'message'] } });
-      if (existingDeals.length > 0) {
-        fnDeclarations.push({ name: 'update_deal', description: `Update existing deal. Use when the customer follows up on an existing deal. Open deals: ${existingDeals.map((d: any) => `"${d.title}"(id:${d.id})`).join(', ')}`, parameters: { type: 'OBJECT', properties: { deal_id: { type: 'STRING', enum: existingDeals.map((d: any) => d.id) }, stage_name: { type: 'STRING', enum: stageNames }, value: { type: 'NUMBER' }, notes: { type: 'STRING' }, status: { type: 'STRING', enum: ['open','won','lost'] }, message: { type: 'STRING' } }, required: ['deal_id', 'message'] } });
-      }
-    }
-    if (tagNames.length > 0) {
-      fnDeclarations.push({ name: 'add_tag', description: 'Add a tag/label to this contact and conversation. Use when the conversation reveals information that should classify this contact (e.g. "Interesado", "VIP", "Reclamación").', parameters: { type: 'OBJECT', properties: { tag_name: { type: 'STRING', enum: tagNames }, message: { type: 'STRING', description: 'Optional message to the customer (empty string if not needed)' } }, required: ['tag_name', 'message'] } });
-      fnDeclarations.push({ name: 'remove_tag', description: 'Remove a tag/label from this contact and conversation.', parameters: { type: 'OBJECT', properties: { tag_name: { type: 'STRING', enum: tagNames }, message: { type: 'STRING', description: 'Optional message to the customer (empty string if not needed)' } }, required: ['tag_name', 'message'] } });
-    }
-    fnDeclarations.push({ name: 'create_task', description: 'Create a follow-up task linked to this contact. Use when the customer requests a callback, a quote, or any pending action that must be tracked.', parameters: { type: 'OBJECT', properties: { title: { type: 'STRING' }, description: { type: 'STRING' }, due_date: { type: 'STRING', description: 'ISO 8601 date (optional)' }, priority: { type: 'STRING', enum: ['low', 'medium', 'high'] }, message: { type: 'STRING' } }, required: ['title', 'message'] } });
-    if (stripeConnectEnabled) {
-      fnDeclarations.push({ name: 'create_payment_link', description: 'Generate a Stripe payment link to send to the customer. RULES: 1) ONLY call after the customer explicitly confirms they want to pay AND you confirmed the exact amount. 2) Always ask "¿Confirmas el pago de $X [currency]?" BEFORE calling. 3) Amount: min $1, max $10,000.', parameters: { type: 'OBJECT', properties: { amount: { type: 'NUMBER', description: 'Amount to charge. Must be between 1 and 10000.' }, currency: { type: 'STRING', description: 'Currency code: USD, EUR, GBP, MXN, etc.' }, description: { type: 'STRING', description: 'Description visible to the customer on the payment page' }, message: { type: 'STRING', description: 'Message to send to the customer' } }, required: ['amount', 'currency', 'description', 'message'] } });
-    if (dentallyConnected) {
-      fnDeclarations.push({ name: 'dentally_list_practitioners', description: 'List the clinic professionals/doctors available for appointments.', parameters: { type: 'OBJECT', properties: { message: { type: 'STRING' } } } });
-      fnDeclarations.push({ name: 'dentally_check_availability', description: 'Check open appointment slots for a given day. Use when the customer asks about availability or times.', parameters: { type: 'OBJECT', properties: { date: { type: 'STRING', description: 'YYYY-MM-DD' }, practitioner_name: { type: 'STRING' }, duration: { type: 'NUMBER' } }, required: ['date'] } });
-      fnDeclarations.push({ name: 'dentally_book_appointment', description: 'Book an appointment once the customer chose a day and time. If the customer is NOT a registered patient, first ask for date_of_birth (YYYY-MM-DD) and gender (male/female), then call this.', parameters: { type: 'OBJECT', properties: { date: { type: 'STRING', description: 'YYYY-MM-DD' }, time: { type: 'STRING', description: 'HH:MM (24h)' }, practitioner_name: { type: 'STRING' }, duration: { type: 'NUMBER' }, reason: { type: 'STRING' }, date_of_birth: { type: 'STRING' }, gender: { type: 'STRING', enum: ['male', 'female'] }, title: { type: 'STRING' } }, required: ['date', 'time'] } });
-      fnDeclarations.push({ name: 'dentally_get_appointments', description: "Look up the customer's own existing/upcoming appointments (when/which doctor). Read the real result; never guess.", parameters: { type: 'OBJECT', properties: { message: { type: 'STRING' } } } });
-    }
-    }
-    body.tools = [{ functionDeclarations: fnDeclarations }];
+    body.tools = [{ functionDeclarations: toGeminiChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected })) }];
 
     const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, body, { headers: { 'Content-Type': 'application/json' }, timeout: 30000 });
     const part = res.data.candidates?.[0]?.content?.parts?.[0];
     if (part?.functionCall) {
       const { name, args } = part.functionCall;
-      switch (name) {
-        case 'transfer_conversation': return { reply: args?.message ?? '', transferTo: args?.destination };
-        case 'resolve_conversation':  return { reply: args?.message ?? '', resolveConversation: true };
-        case 'set_waiting':           return { reply: args?.message ?? '', setWaiting: true };
-        case 'create_deal':           return { reply: args?.message ?? '', createDeal: { title: args.title, value: args.value, currency: args.currency, stageName: args.stage_name, notes: args.notes } };
-        case 'update_deal':           return { reply: args?.message ?? '', updateDeal: { dealId: args.deal_id, stageName: args.stage_name, value: args.value, notes: args.notes, status: args.status } };
-        case 'add_tag':               return { reply: args?.message ?? '', addTag: { tagName: args.tag_name } };
-        case 'remove_tag':            return { reply: args?.message ?? '', removeTag: { tagName: args.tag_name } };
-        case 'create_task':           return { reply: args?.message ?? '', createTask: { title: args.title, description: args.description, dueDate: args.due_date, priority: args.priority } };
-        case 'create_payment_link':   return { reply: args?.message ?? '', createPaymentLink: { amount: args?.amount, currency: args?.currency ?? 'USD', description: args?.description } };
-        case 'dentally_list_practitioners': return { reply: args?.message ?? '', dentallyListPractitioners: true };
-        case 'dentally_check_availability': return { reply: args?.message ?? '', dentallyCheckAvailability: { date: args?.date, practitionerName: args?.practitioner_name, durationMinutes: args?.duration } };
-        case 'dentally_book_appointment':   return { reply: args?.message ?? '', dentallyBook: { date: args?.date, time: args?.time, practitionerName: args?.practitioner_name, durationMinutes: args?.duration, reason: args?.reason, name: args?.name, phone: args?.phone, email: args?.email, dateOfBirth: args?.date_of_birth, gender: args?.gender, title: args?.title } };
-        case 'dentally_get_appointments':   return { reply: args?.message ?? '', dentallyGetAppointments: true };
-      }
+      const intent = mapChatbotToolCall(name, args);
+      if (intent) return intent;
     }
     return { reply: part?.text?.trim() ?? '' };
   }
