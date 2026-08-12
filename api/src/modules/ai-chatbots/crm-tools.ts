@@ -149,12 +149,14 @@ export const CRM_TOOLS: ToolDef[] = [
   },
   {
     name: 'update_contact',
-    description: 'Actualizar datos de un contacto (nombre, teléfono, email). Usa search_contacts primero para el contact_id.',
+    description: 'Actualizar datos de un contacto (nombre, teléfono, email, puesto, notas). Usa search_contacts primero para el contact_id. Solo cambia los campos que envíes.',
     parameters: {
       type: 'object',
       properties: {
         contact_id: { type: 'string', description: 'ID del contacto' },
         full_name: { type: 'string' }, phone: { type: 'string' }, email: { type: 'string' },
+        job_title: { type: 'string', description: 'Puesto/cargo' },
+        notes: { type: 'string', description: 'Notas del contacto (reemplaza las existentes)' },
       },
       required: ['contact_id'],
     },
@@ -163,10 +165,12 @@ export const CRM_TOOLS: ToolDef[] = [
       if (String(args.full_name ?? '').trim()) { params.push(args.full_name.trim()); sets.push(`full_name=$${params.length}`); }
       if (String(args.phone ?? '').trim()) { params.push(args.phone.trim()); sets.push(`phone=$${params.length}`); }
       if (String(args.email ?? '').trim()) { params.push(args.email.trim()); sets.push(`email=$${params.length}`); }
+      if (String(args.job_title ?? '').trim()) { params.push(args.job_title.trim()); sets.push(`job_title=$${params.length}`); }
+      if (args.notes !== undefined) { params.push(String(args.notes ?? '')); sets.push(`notes=$${params.length}`); }
       if (!sets.length) return { ok: false, error: 'Nada que actualizar' };
       params.push(args.contact_id, ctx.tenantId);
       const r = await ctx.db.query(
-        `UPDATE contacts SET ${sets.join(',')}, updated_at=NOW() WHERE id=$${params.length - 1} AND tenant_id=$${params.length} RETURNING id, full_name, phone, email`,
+        `UPDATE contacts SET ${sets.join(',')}, updated_at=NOW() WHERE id=$${params.length - 1} AND tenant_id=$${params.length} RETURNING id, full_name, phone, email, job_title, notes`,
         params,
       );
       if (!r.length) return { ok: false, error: 'Contacto no encontrado' };
@@ -256,6 +260,42 @@ export const CRM_TOOLS: ToolDef[] = [
       const r = await ctx.db.query(`UPDATE deals SET stage_id=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3 RETURNING id`, [s.id, args.deal_id, ctx.tenantId]);
       if (!r.length) return { ok: false, error: 'Deal no encontrado' };
       return { ok: true, moved: true };
+    },
+  },
+  {
+    name: 'update_deal',
+    description: 'Actualizar los datos de un deal (título, valor, moneda, notas, estado). Usa list_deals para el deal_id. Para cambiar de etapa usa move_deal. Solo cambia los campos que envíes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string' },
+        title: { type: 'string' },
+        value: { type: 'number' },
+        currency: { type: 'string', description: 'USD/GBP/EUR' },
+        notes: { type: 'string', description: 'Notas del deal (reemplaza las existentes)' },
+        status: { type: 'string', description: 'Estado: open (abierto), won (ganado) o lost (perdido)' },
+      },
+      required: ['deal_id'],
+    },
+    handler: async (ctx, args) => {
+      const sets: string[] = []; const params: any[] = [];
+      if (String(args.title ?? '').trim()) { params.push(args.title.trim()); sets.push(`title=$${params.length}`); }
+      if (args.value !== undefined && args.value !== null && !Number.isNaN(Number(args.value))) { params.push(Number(args.value)); sets.push(`value=$${params.length}`); }
+      if (String(args.currency ?? '').trim()) { params.push(args.currency.trim().toUpperCase()); sets.push(`currency=$${params.length}`); }
+      if (args.notes !== undefined) { params.push(String(args.notes ?? '')); sets.push(`notes=$${params.length}`); }
+      if (String(args.status ?? '').trim()) {
+        const st = String(args.status).trim().toLowerCase();
+        if (!['open', 'won', 'lost'].includes(st)) return { ok: false, error: 'status debe ser open, won o lost' };
+        params.push(st); sets.push(`status=$${params.length}`);
+      }
+      if (!sets.length) return { ok: false, error: 'Nada que actualizar' };
+      params.push(args.deal_id, ctx.tenantId);
+      const r = await ctx.db.query(
+        `UPDATE deals SET ${sets.join(',')}, updated_at=NOW() WHERE id=$${params.length - 1} AND tenant_id=$${params.length} RETURNING id, title, value, currency, status`,
+        params,
+      );
+      if (!r.length) return { ok: false, error: 'Deal no encontrado' };
+      return { ok: true, deal: r[0] };
     },
   },
   {
