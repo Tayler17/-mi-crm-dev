@@ -136,6 +136,7 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   { group: '🏢 ADMIN',         href: '/status',           label: 'Estado del sistema',   icon: '🩺', minRole: 'owner' },
   { group: '🏢 ADMIN',         href: '/tenants',          label: 'Workspaces',           icon: '🏗', minRole: 'owner' },
   { group: '🏢 ADMIN',         href: '/api-docs',         label: 'API Docs',             icon: '📖', minRole: 'owner' },
+  { group: '🏢 ADMIN',         href: '/mcp',              label: 'MCP (Claude)',         icon: '🔌', minRole: 'owner' },
   // ── Sin grupo ──
   { group: null,               href: '/help',             label: 'Centro de Ayuda',      icon: '❓' },
 ];

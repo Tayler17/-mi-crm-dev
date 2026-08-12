@@ -526,6 +526,12 @@ export const getDealsReport = (from?: string, to?: string) => {
   return apiGet<any>(`/reports/deals${p.toString() ? `?${p}` : ''}`);
 };
 export const getTeamsReport = () => apiGet<any>('/reports/teams');
+
+// ── MCP (owner: expose the CRM as an MCP server for Claude) ──────────────────
+export interface McpToken { id: string; label: string; role: string; last_used_at: string | null; revoked_at: string | null; created_at: string; token_hint: string }
+export const getMcpTokens = () => apiGet<McpToken[]>('/mcp/tokens');
+export const createMcpToken = (label?: string) => apiPost<{ id: string; label: string; role: string; created_at: string; token: string }>('/mcp/tokens', { label });
+export const revokeMcpToken = (id: string) => apiDelete(`/mcp/tokens/${id}`);
 export const getConversationsDrill = (params: { from?: string; to?: string; channel?: string; status?: string; agentId?: string }) => {
   const p = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => { if (v) p.set(k, v); });
