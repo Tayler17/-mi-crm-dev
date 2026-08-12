@@ -37,7 +37,9 @@ export class PlansController {
               p.has_call_bots, p.has_ai_chatbots,
               p.has_automations, p.has_flows, p.has_reports, p.has_api_access,
               p.has_webhooks, p.allow_own_twilio, p.price, p.currency, p.billing_period, p.color,
-              p.has_stripe_connect
+              p.has_stripe_connect,
+              COALESCE(p.has_business_assistant, true) AS has_business_assistant,
+              COALESCE(p.max_assistant_tokens, 0)      AS max_assistant_tokens
        FROM tenants t
        LEFT JOIN plans p ON p.id = t.plan_id
        WHERE t.id = $1`,
@@ -46,7 +48,7 @@ export class PlansController {
 
     const [
       [users], [contacts], [inboxes], [campaigns], [automations], [flows], [callBots], [aiChatbots],
-      [aiMessages], [callStats],
+      [aiMessages], [callStats], [assistantUsage],
     ] = await Promise.all([
       this.db.query(`SELECT COUNT(*)::int AS count FROM users WHERE tenant_id=$1 AND is_active=true`, [tenantId]),
       this.db.query(`SELECT COUNT(*)::int AS count FROM contacts WHERE tenant_id=$1`, [tenantId]),
@@ -67,6 +69,13 @@ export class PlansController {
          FROM call_logs WHERE tenant_id::text=$1 AND created_at >= date_trunc('month', NOW())`,
         [tenantId],
       ),
+      this.db
+        .query(
+          `SELECT COALESCE(tokens,0)::bigint AS tokens FROM ai_agent_usage
+           WHERE tenant_id::text=$1 AND period=to_char(NOW(),'YYYY-MM')`,
+          [tenantId],
+        )
+        .catch(() => [{ tokens: 0 }]),
     ]);
 
     const usageObj = {
@@ -81,6 +90,7 @@ export class PlansController {
       aiMessagesMonth:  aiMessages.count,
       callsMonth:       callStats.calls,
       callMinutesMonth: Math.ceil(callStats.seconds / 60),
+      assistantTokensMonth: Number(assistantUsage?.tokens ?? 0),
     };
 
     const overage = tenant ? calculateOverage(usageObj, tenant) : null;

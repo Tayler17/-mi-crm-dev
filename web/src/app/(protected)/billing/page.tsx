@@ -39,6 +39,8 @@ interface PlanData {
     has_reports: boolean;
     has_api_access: boolean;
     has_webhooks: boolean;
+    has_business_assistant: boolean;
+    max_assistant_tokens: number;
   };
   usage: {
     users: number;
@@ -52,6 +54,7 @@ interface PlanData {
     aiMessagesMonth: number;
     callsMonth: number;
     callMinutesMonth: number;
+    assistantTokensMonth: number;
   };
   overage: {
     extraMessages: number;
@@ -228,6 +231,14 @@ export default function BillingPage() {
           value={(usage.callMinutesMonth ?? 0).toLocaleString()}
           sub={(tenant.max_call_minutes ?? 0) > 0 ? `Límite: ${tenant.max_call_minutes} min · ${usage.callsMonth ?? 0} llamadas` : `${usage.callsMonth ?? 0} llamadas`}
         />
+        {tenant.has_business_assistant && (
+          <StatCard
+            icon="🗣"
+            label="Tokens Asistente AI este mes"
+            value={(usage.assistantTokensMonth ?? 0).toLocaleString()}
+            sub={(tenant.max_assistant_tokens ?? 0) > 0 ? `Límite: ${Number(tenant.max_assistant_tokens).toLocaleString()}` : 'Sin límite'}
+          />
+        )}
         <StatCard
           icon="👥"
           label="Usuarios activos"
@@ -271,6 +282,9 @@ export default function BillingPage() {
         )}
         {(tenant.max_call_minutes ?? 0) > 0 && (
           <UsageBar label="Minutos llamada / mes" used={usage.callMinutesMonth ?? 0} max={tenant.max_call_minutes ?? 0}   color={planColor} />
+        )}
+        {tenant.has_business_assistant && (tenant.max_assistant_tokens ?? 0) > 0 && (
+          <UsageBar label="Tokens Asistente AI / mes" used={usage.assistantTokensMonth ?? 0} max={tenant.max_assistant_tokens ?? 0} color={planColor} />
         )}
       </div>
 
@@ -344,6 +358,7 @@ export default function BillingPage() {
           <Feature label="Automatizaciones"      enabled={tenant.has_automations} />
           <Feature label="Flujos de conversación" enabled={tenant.has_flows} />
           <Feature label="AI Chatbots"           enabled={tenant.has_ai_chatbots} />
+          <Feature label="Asistente de Negocio AI" enabled={tenant.has_business_assistant} />
           <Feature label="Call Bots"             enabled={tenant.has_call_bots} />
           <Feature label="Reportes avanzados"    enabled={tenant.has_reports} />
           <Feature label="Acceso a API"          enabled={tenant.has_api_access} />
