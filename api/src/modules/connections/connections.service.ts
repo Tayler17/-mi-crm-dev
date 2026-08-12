@@ -443,7 +443,18 @@ export class ConnectionsService {
     });
     conn.status = 'disconnected';
     conn.errorMessage = undefined;
-    return this.repo.save(conn);
+    const saved = await this.repo.save(conn);
+
+    // Keep the linked inbox's name in sync with the connection name. The inbox is
+    // named once at creation and otherwise never re-synced, so renaming the
+    // connection used to leave the old inbox name in the UI.
+    if (dto.name !== undefined && saved.inboxId) {
+      await this.db.query(
+        `UPDATE inboxes SET name=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3`,
+        [dto.name, saved.inboxId, tenantId],
+      ).catch((e: any) => this.logger.warn(`[connections] inbox name sync failed: ${e.message}`));
+    }
+    return saved;
   }
 
   async remove(id: string, tenantId: string) {
