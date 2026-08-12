@@ -158,10 +158,12 @@ export class SmsService {
       this.logger.log(`[SMS] Created contact ${contact.id} for ${sms.from}`);
     }
 
-    // Find or create open conversation
+    // Find or REOPEN the contact's latest conversation so the whole history stays
+    // in ONE chat (each reopen still counts via session_count). Only create a new
+    // conversation when the contact has none at all on this inbox.
     let convo = await this.db.query(
-      `SELECT id FROM conversations
-       WHERE tenant_id=$1 AND inbox_id=$2 AND contact_id=$3 AND status='open'
+      `SELECT id, status FROM conversations
+       WHERE tenant_id=$1 AND inbox_id=$2 AND contact_id=$3
        ORDER BY created_at DESC LIMIT 1`,
       [tenantId, inboxId, contact.id],
     ).then((r: any[]) => r[0] ?? null);
@@ -175,6 +177,12 @@ export class SmsService {
       );
       convo = c;
       this.logger.log(`[SMS] Created conversation ${convo.id}`);
+    } else if (convo.status === 'resolved') {
+      await this.db.query(
+        `UPDATE conversations SET status='open', session_count=session_count+1, updated_at=NOW() WHERE id=$1`,
+        [convo.id],
+      );
+      this.logger.log(`[SMS] Reopened conversation ${convo.id}`);
     }
 
     // Save message

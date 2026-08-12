@@ -115,16 +115,24 @@ export class EmailPollerService {
       contactId = nc.id;
     }
 
-    // Find open conversation for this connection+contact or open a new one
+    // Find or REOPEN the contact's latest conversation so the whole history stays
+    // in ONE chat (each reopen still counts via session_count). Only open a new one
+    // when the contact has none at all on this connection.
     let convId: string;
-    const openConv = await this.db.query(
-      `SELECT id FROM conversations
-       WHERE tenant_id = $1 AND connection_id = $2 AND contact_id = $3 AND status != 'resolved'
-       ORDER BY updated_at DESC LIMIT 1`,
+    const latestConv = await this.db.query(
+      `SELECT id, status FROM conversations
+       WHERE tenant_id = $1 AND connection_id = $2 AND contact_id = $3
+       ORDER BY created_at DESC LIMIT 1`,
       [conn.tenant_id, conn.id, contactId],
     );
-    if (openConv.length) {
-      convId = openConv[0].id;
+    if (latestConv.length) {
+      convId = latestConv[0].id;
+      if (latestConv[0].status === 'resolved') {
+        await this.db.query(
+          `UPDATE conversations SET status='open', session_count=session_count+1, updated_at=NOW() WHERE id=$1`,
+          [convId],
+        );
+      }
     } else {
       const [nc] = await this.db.query(
         `INSERT INTO conversations
