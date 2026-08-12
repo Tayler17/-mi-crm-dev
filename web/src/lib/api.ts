@@ -526,6 +526,16 @@ export const getDealsReport = (from?: string, to?: string) => {
   return apiGet<any>(`/reports/deals${p.toString() ? `?${p}` : ''}`);
 };
 export const getTeamsReport = () => apiGet<any>('/reports/teams');
+export const getConversationsDrill = (params: { from?: string; to?: string; channel?: string; status?: string; agentId?: string }) => {
+  const p = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => { if (v) p.set(k, v); });
+  return apiGet<{ count: number; rows: any[] }>(`/reports/conversations/list${p.toString() ? `?${p}` : ''}`);
+};
+export const getDealsDrill = (params: { from?: string; to?: string; stage?: string; status?: string; agentId?: string }) => {
+  const p = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => { if (v) p.set(k, v); });
+  return apiGet<{ count: number; rows: any[] }>(`/reports/deals/list${p.toString() ? `?${p}` : ''}`);
+};
 export const getContactsReport = (from?: string, to?: string) => {
   const p = new URLSearchParams();
   if (from) p.set('from', from);

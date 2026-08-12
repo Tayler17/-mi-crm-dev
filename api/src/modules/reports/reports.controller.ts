@@ -144,7 +144,7 @@ export class ReportsController {
         [tenantId, f, t],
       ),
       this.db.query(
-        `SELECT u.full_name AS agent,
+        `SELECT u.full_name AS agent, u.id AS agent_id,
                 COUNT(d.id)::int AS total,
                 COUNT(d.id) FILTER (WHERE d.status = 'won')::int AS won,
                 COALESCE(SUM(d.value) FILTER (WHERE d.status = 'won'), 0)::numeric AS won_value
@@ -415,5 +415,79 @@ export class ReportsController {
     ]);
 
     return { summary: summary[0], byDay, byAgent, worst, range: { from: f, to: t } };
+  }
+
+  // ── Drill-down: the records behind a report segment ───────────────────────────
+
+  /** Conversations behind a segment (channel / status / agent). Max 100. */
+  @Get('conversations/list')
+  async conversationsList(
+    @TenantId() tenantId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('channel') channel?: string,
+    @Query('status') status?: string,
+    @Query('agentId') agentId?: string,
+  ) {
+    const f = from || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const t = to || new Date().toISOString().slice(0, 10);
+    const params: any[] = [tenantId, f, t];
+    const where: string[] = [`c.tenant_id = $1`, `c.created_at::date BETWEEN $2 AND $3`];
+    if (channel) { params.push(channel); where.push(`c.channel_type = $${params.length}`); }
+    if (status)  { params.push(status);  where.push(`c.status = $${params.length}`); }
+    if (agentId) {
+      // Conversations this agent actually attended (sent at least one human reply).
+      params.push(agentId);
+      where.push(`c.id IN (
+        SELECT m.conversation_id FROM messages m
+        WHERE m.tenant_id = $1 AND m.sender_type = 'agent' AND m.sender_id = $${params.length}
+          AND m.is_private = false AND m.direction = 'outbound'
+      )`);
+    }
+    const rows = await this.db.query(
+      `SELECT c.id, c.channel_type, c.status, c.updated_at,
+              COALESCE(NULLIF(ct.full_name,''), ct.email, ct.phone, 'Sin contacto') AS contact
+       FROM conversations c
+       LEFT JOIN contacts ct ON ct.id = c.contact_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY c.updated_at DESC LIMIT 100`,
+      params,
+    );
+    return { count: rows.length, rows };
+  }
+
+  /** Deals behind a segment (stage / status / agent). Max 100. */
+  @Get('deals/list')
+  async dealsList(
+    @TenantId() tenantId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('stage') stage?: string,
+    @Query('status') status?: string,
+    @Query('agentId') agentId?: string,
+  ) {
+    const f = from || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const t = to || new Date().toISOString().slice(0, 10);
+    const params: any[] = [tenantId, f, t];
+    const where: string[] = [`d.tenant_id = $1`, `d.created_at::date BETWEEN $2 AND $3`];
+    if (stage) {
+      // Funnel counts only active deals per stage; match that here.
+      params.push(stage); where.push(`ps.name = $${params.length}`);
+      where.push(`d.status NOT IN ('won','lost')`);
+    }
+    if (status)  { params.push(status);  where.push(`d.status = $${params.length}`); }
+    if (agentId) { params.push(agentId); where.push(`d.assigned_to = $${params.length}`); }
+    const rows = await this.db.query(
+      `SELECT d.id, d.title, d.value, d.currency, d.status,
+              ps.name AS stage,
+              COALESCE(NULLIF(ct.full_name,''), ct.email, 'Sin contacto') AS contact
+       FROM deals d
+       LEFT JOIN pipeline_stages ps ON ps.id = d.stage_id
+       LEFT JOIN contacts ct ON ct.id = d.contact_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY d.updated_at DESC LIMIT 100`,
+      params,
+    );
+    return { count: rows.length, rows };
   }
 }

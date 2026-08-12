@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   getConversationsReport, getDealsReport, getTeamsReport, getContactsReport, getCallsReport, getSlaReport, getCsatReport,
+  getConversationsDrill, getDealsDrill,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
 import { APP } from '@/lib/i18n/app';
@@ -47,12 +49,96 @@ function BarChart({ data, valueKey = 'count', labelKey = 'day', color = 'var(--p
 
 // ── Stat card ─────────────────────────────────────────────────────────────────
 
-function Stat({ label, value, sub, color }: { label: string; value: any; sub?: string; color?: string }) {
+function Stat({ label, value, sub, color, onClick }: { label: string; value: any; sub?: string; color?: string; onClick?: () => void }) {
   return (
-    <div style={{ padding: '14px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)' }}>
+    <div
+      onClick={onClick}
+      style={{
+        padding: '14px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)',
+        cursor: onClick ? 'pointer' : 'default', transition: 'border-color .15s',
+        position: 'relative',
+      }}
+      onMouseEnter={onClick ? (e) => (e.currentTarget.style.borderColor = color ?? 'var(--primary)') : undefined}
+      onMouseLeave={onClick ? (e) => (e.currentTarget.style.borderColor = 'var(--border)') : undefined}
+    >
       <div style={{ fontSize: 24, fontWeight: 700, color: color ?? 'var(--text)', lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)', marginTop: 4 }}>{label}</div>
+      <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)', marginTop: 4 }}>{label}{onClick && <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>›</span>}</div>
       {sub && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+// ── Drill-down modal ────────────────────────────────────────────────────────────
+
+type DrillState = { open: boolean; title: string; type: 'conversations' | 'deals'; loading: boolean; rows: any[] };
+
+const STATUS_LABELS: Record<string, string> = { open: 'Abierta', pending: 'En espera', resolved: 'Resuelta', won: 'Ganado', lost: 'Perdido' };
+const STATUS_COLORS: Record<string, string> = { open: '#6366f1', pending: '#f59e0b', resolved: '#22c55e', won: '#22c55e', lost: '#ef4444' };
+
+function DrillModal({ drill, onClose, onOpenConversation, currency }: {
+  drill: DrillState; onClose: () => void; onOpenConversation: (id: string) => void; currency: (v: any) => string;
+}) {
+  if (!drill.open) return null;
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: 'var(--bg-card, var(--bg))', border: '1px solid var(--border)', borderRadius: 12, width: 'min(640px, 100%)', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 12px 40px rgba(0,0,0,0.3)' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>{drill.title}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{drill.loading ? 'Cargando…' : `${drill.rows.length} resultado${drill.rows.length === 1 ? '' : 's'}${drill.rows.length === 100 ? ' (máx.)' : ''}`}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-muted)', lineHeight: 1 }}>×</button>
+        </div>
+        <div style={{ overflowY: 'auto', padding: '8px 0' }}>
+          {drill.loading ? (
+            <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)' }}>Cargando…</div>
+          ) : drill.rows.length === 0 ? (
+            <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)' }}>Sin resultados en este rango.</div>
+          ) : drill.type === 'conversations' ? (
+            drill.rows.map((r) => (
+              <div
+                key={r.id}
+                onClick={() => onOpenConversation(r.id)}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 18px', borderBottom: '1px solid var(--border)', cursor: 'pointer', gap: 10 }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-secondary, rgba(127,127,127,0.08))')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {CHANNEL_ICONS[r.channel_type] ?? '💬'} {r.contact}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{new Date(r.updated_at).toLocaleString()}</div>
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: STATUS_COLORS[r.status] ?? 'var(--text-muted)', flexShrink: 0 }}>
+                  {STATUS_LABELS[r.status] ?? r.status} ›
+                </span>
+              </div>
+            ))
+          ) : (
+            drill.rows.map((r) => (
+              <div
+                key={r.id}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 18px', borderBottom: '1px solid var(--border)', gap: 10 }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.title}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{r.contact}{r.stage ? ` · ${r.stage}` : ''}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>{currency(r.value)}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: STATUS_COLORS[r.status] ?? 'var(--text-muted)' }}>{STATUS_LABELS[r.status] ?? r.status}</span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -114,11 +200,25 @@ function exportCSV(rows: Record<string, any>[], filename: string) {
 
 export default function ReportsPage() {
   const { lang } = useLangCtx();
+  const router = useRouter();
   const i18n = APP[lang];
   const currency = makeCurrency(i18n.locale);
   const [tab, setTab] = useState<TabKey>('conversations');
+  const [drill, setDrill] = useState<DrillState>({ open: false, title: '', type: 'conversations', loading: false, rows: [] });
   const [from, setFrom] = useState(() => new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10));
   const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
+
+  const openConvDrill = useCallback(async (title: string, filter: { channel?: string; status?: string; agentId?: string }) => {
+    setDrill({ open: true, title, type: 'conversations', loading: true, rows: [] });
+    try { const r = await getConversationsDrill({ from, to, ...filter }); setDrill((s) => ({ ...s, loading: false, rows: r.rows })); }
+    catch { setDrill((s) => ({ ...s, loading: false, rows: [] })); }
+  }, [from, to]);
+
+  const openDealsDrill = useCallback(async (title: string, filter: { stage?: string; status?: string; agentId?: string }) => {
+    setDrill({ open: true, title, type: 'deals', loading: true, rows: [] });
+    try { const r = await getDealsDrill({ from, to, ...filter }); setDrill((s) => ({ ...s, loading: false, rows: r.rows })); }
+    catch { setDrill((s) => ({ ...s, loading: false, rows: [] })); }
+  }, [from, to]);
   const [data, setData] = useState<Record<TabKey, any>>({ conversations: null, deals: null, calls: null, teams: null, contacts: null, sla: null, csat: null });
   const [loading, setLoading] = useState(false);
 
@@ -204,10 +304,10 @@ export default function ReportsPage() {
         <>
           {/* Summary KPIs */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 16 }}>
-            <Stat label="Total" value={d.summary.total} color="#3b82f6" />
-            <Stat label="Abiertas" value={d.summary.open} color="#6366f1" />
-            <Stat label="En espera" value={d.summary.pending} color="#f59e0b" />
-            <Stat label="Resueltas" value={d.summary.resolved} color="#22c55e" />
+            <Stat label="Total" value={d.summary.total} color="#3b82f6" onClick={() => openConvDrill('Todas las conversaciones', {})} />
+            <Stat label="Abiertas" value={d.summary.open} color="#6366f1" onClick={() => openConvDrill('Conversaciones abiertas', { status: 'open' })} />
+            <Stat label="En espera" value={d.summary.pending} color="#f59e0b" onClick={() => openConvDrill('Conversaciones en espera', { status: 'pending' })} />
+            <Stat label="Resueltas" value={d.summary.resolved} color="#22c55e" onClick={() => openConvDrill('Conversaciones resueltas', { status: 'resolved' })} />
             <Stat label="Tiempo prom. resolución" value={`${d.summary.avg_resolution_hours ?? '—'}h`} color="#8b5cf6" sub="en horas" />
           </div>
 
@@ -222,8 +322,10 @@ export default function ReportsPage() {
               {d.byChannel.length === 0
                 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Sin datos</div>
                 : d.byChannel.map((c: any) => (
-                  <div key={c.channel_type} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-                    <span style={{ fontSize: 13 }}>{CHANNEL_ICONS[c.channel_type] ?? '💬'} {c.channel_type}</span>
+                  <div key={c.channel_type} onClick={() => openConvDrill(`Canal: ${c.channel_type}`, { channel: c.channel_type })}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.7')} onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}>
+                    <span style={{ fontSize: 13 }}>{CHANNEL_ICONS[c.channel_type] ?? '💬'} {c.channel_type} ›</span>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       <div style={{ width: 60, height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
                         <div style={{ width: pct(c.total, d.summary.total), height: '100%', background: '#3b82f6', borderRadius: 3 }} />
@@ -264,8 +366,10 @@ export default function ReportsPage() {
               {d.byAgent.length === 0
                 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Sin datos — asigna conversaciones a agentes</div>
                 : d.byAgent.map((a: any) => (
-                  <div key={a.agent_id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
-                    <span style={{ fontWeight: 600 }}>{a.agent}</span>
+                  <div key={a.agent_id} onClick={() => openConvDrill(`Agente: ${a.agent}`, { agentId: a.agent_id })}
+                    style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 13, cursor: 'pointer' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.7')} onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}>
+                    <span style={{ fontWeight: 600 }}>{a.agent} ›</span>
                     <div style={{ display: 'flex', gap: 12, color: 'var(--text-muted)' }}>
                       <span title="Total">{a.total} total</span>
                       <span style={{ color: '#22c55e' }} title="Resueltas">✓ {a.resolved}</span>
@@ -284,9 +388,9 @@ export default function ReportsPage() {
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
             <Stat label="Pipeline activo" value={currency(d.summary.pipeline_value)} color="#f59e0b" />
-            <Stat label="Ganados" value={currency(d.summary.won_value)} color="#22c55e" sub={`${d.summary.won} deals`} />
-            <Stat label="Tasa de cierre" value={`${d.summary.win_rate ?? 0}%`} color="#6366f1" sub={`${d.summary.won}W / ${d.summary.lost}L`} />
-            <Stat label="Total deals" value={d.summary.total} color="#3b82f6" sub={`${d.summary.active} activos`} />
+            <Stat label="Ganados" value={currency(d.summary.won_value)} color="#22c55e" sub={`${d.summary.won} deals`} onClick={() => openDealsDrill('Deals ganados', { status: 'won' })} />
+            <Stat label="Tasa de cierre" value={`${d.summary.win_rate ?? 0}%`} color="#6366f1" sub={`${d.summary.won}W / ${d.summary.lost}L`} onClick={() => openDealsDrill('Deals perdidos', { status: 'lost' })} />
+            <Stat label="Total deals" value={d.summary.total} color="#3b82f6" sub={`${d.summary.active} activos`} onClick={() => openDealsDrill('Todos los deals', {})} />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 16 }}>
@@ -296,8 +400,10 @@ export default function ReportsPage() {
 
             <Section title="Funnel por etapa">
               {d.byStage.map((s: any) => (
-                <div key={s.stage} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
-                  <span>{s.stage}</span>
+                <div key={s.stage} onClick={() => openDealsDrill(`Etapa: ${s.stage}`, { stage: s.stage })}
+                  style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 13, cursor: 'pointer' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.7')} onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}>
+                  <span>{s.stage} ›</span>
                   <div style={{ display: 'flex', gap: 10, color: 'var(--text-muted)' }}>
                     <span style={{ fontWeight: 700, color: 'var(--text)' }}>{s.count}</span>
                     <span style={{ color: '#f59e0b' }}>{currency(s.value)}</span>
@@ -318,10 +424,12 @@ export default function ReportsPage() {
               {d.byAgent.length === 0
                 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Sin datos</div>
                 : d.byAgent.map((a: any, i: number) => (
-                  <div key={a.agent} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+                  <div key={a.agent} onClick={() => a.agent_id && openDealsDrill(`Agente: ${a.agent}`, { agentId: a.agent_id })}
+                    style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--border)', fontSize: 13, cursor: a.agent_id ? 'pointer' : 'default' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.7')} onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       <span style={{ fontWeight: 700, color: i === 0 ? '#f59e0b' : 'var(--text-muted)', fontSize: 14 }}>#{i + 1}</span>
-                      <span style={{ fontWeight: 600 }}>{a.agent}</span>
+                      <span style={{ fontWeight: 600 }}>{a.agent}{a.agent_id ? ' ›' : ''}</span>
                     </div>
                     <div style={{ display: 'flex', gap: 12, color: 'var(--text-muted)' }}>
                       <span style={{ color: '#22c55e', fontWeight: 700 }}>{currency(a.won_value)}</span>
@@ -666,6 +774,13 @@ export default function ReportsPage() {
           </>
         );
       })()}
+
+      <DrillModal
+        drill={drill}
+        onClose={() => setDrill((s) => ({ ...s, open: false }))}
+        onOpenConversation={(id) => router.push(`/inbox?conversation=${id}`)}
+        currency={currency}
+      />
     </div>
   );
 }
