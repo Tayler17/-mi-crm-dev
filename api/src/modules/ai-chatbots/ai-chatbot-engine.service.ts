@@ -35,6 +35,7 @@ interface AiResult {
   addTag?: { tagName: string };
   removeTag?: { tagName: string };
   createTask?: { title: string; description?: string; dueDate?: string; priority?: string };
+  updateContact?: { fullName?: string; phone?: string; email?: string; jobTitle?: string; notes?: string; customFields?: Record<string, any> };
   createPaymentLink?: { amount: number; currency: string; description: string };
   dentallyListPractitioners?: boolean;
   dentallyCheckAvailability?: { date: string; practitionerName?: string; durationMinutes?: number };
@@ -294,6 +295,7 @@ export class AiChatbotEngineService {
     let existingDeals: any[] = [];
     let tagNames: string[] = [];
     let tagMap: Record<string, string> = {}; // name.lower → id
+    let contactFields: any[] = []; // custom field definitions for contacts
     let stripeConnectEnabled = false;
     try {
       const [connectRow] = await this.db.query(
@@ -328,6 +330,12 @@ export class AiChatbotEngineService {
       ).catch(() => []);
       tagNames = tags.map((t: any) => t.name);
       tags.forEach((t: any) => { tagMap[t.name.toLowerCase()] = t.id; });
+      contactFields = await this.db.query(
+        `SELECT id, name, label, field_type AS "fieldType", options
+         FROM custom_field_definitions WHERE tenant_id=$1 AND entity_type='contact'
+         ORDER BY position, created_at`,
+        [tenantId],
+      ).catch(() => []);
     } catch {}
 
     // 7. Build message history — only include messages from AFTER this bot's session
@@ -393,7 +401,7 @@ export class AiChatbotEngineService {
 
     // 9c. Call AI — pass queueMap + stages + deals + tags + stripeConnect so each provider can use function/tool calling
     const dentallyConnected = await this.integrations.isConnected(tenantId, 'dentally').catch(() => false);
-    const result = await this.callAi(bot, apiKey, history, media, queueMap, stageNames, stageMap, existingDeals, tagNames, tagMap, ragContext, stripeConnectEnabled, dentallyConnected);
+    const result = await this.callAi(bot, apiKey, history, media, queueMap, stageNames, stageMap, existingDeals, tagNames, tagMap, ragContext, stripeConnectEnabled, dentallyConnected, contactFields);
     if (!result) {
       this.logger.warn(`[engine] AI returned null for conv ${conversationId} (bot "${bot.name}", provider "${bot.provider}") — sending fallback`);
       await this.saveBotMessage(tenantId, conversationId,
@@ -401,7 +409,7 @@ export class AiChatbotEngineService {
       return;
     }
 
-    let { reply, transferTo, resolveConversation, setWaiting, createDeal, updateDeal, addTag, removeTag, createTask, createPaymentLink } = result;
+    let { reply, transferTo, resolveConversation, setWaiting, createDeal, updateDeal, addTag, removeTag, createTask, updateContact, createPaymentLink } = result;
     this.logger.log(`[engine] AI reply (first 120): "${reply?.slice(0, 120)}" transferTo="${transferTo ?? 'none'}" resolve=${!!resolveConversation} wait=${!!setWaiting} createDeal=${!!createDeal} updateDeal=${!!updateDeal} addTag=${addTag?.tagName ?? 'none'} removeTag=${removeTag?.tagName ?? 'none'} createTask=${createTask?.title ?? 'none'}`);
 
     // Dentally actions: execute and send the authoritative reply our code composes
@@ -436,7 +444,7 @@ export class AiChatbotEngineService {
 
     // If a CRM action was requested but the AI returned no message, use a generic confirmation
     // so the bot doesn't go silent after silently running a tool.
-    const hasCrmAction = !!(createDeal || updateDeal || addTag || removeTag || createTask || resolveConversation || setWaiting);
+    const hasCrmAction = !!(createDeal || updateDeal || addTag || removeTag || createTask || updateContact || resolveConversation || setWaiting);
     if (!reply && hasCrmAction && !transferTo) {
       reply = bot.language?.startsWith('es') !== false
         ? '¡Listo, lo he registrado!'
@@ -560,6 +568,51 @@ export class AiChatbotEngineService {
         ? `${createTask.title} · vence ${new Date(createTask.dueDate).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' })}`
         : createTask.title;
       await this.saveActivityMessage(tenantId, conversationId, `🤖 Bot creó tarea: ${taskLabel}`);
+    }
+
+    // 10e-bis. Handle contact update (standard fields + custom fields) for THIS contact
+    if (updateContact && conv.contact_id) {
+      const { fullName, phone, email, jobTitle, notes, customFields } = updateContact;
+      const sets: string[] = [];
+      const params: any[] = [];
+      if (String(fullName ?? '').trim()) { params.push(fullName!.trim()); sets.push(`full_name=$${params.length}`); }
+      if (String(phone ?? '').trim())    { params.push(phone!.trim());    sets.push(`phone=$${params.length}`); }
+      if (String(email ?? '').trim())    { params.push(email!.trim());    sets.push(`email=$${params.length}`); }
+      if (String(jobTitle ?? '').trim()) { params.push(jobTitle!.trim()); sets.push(`job_title=$${params.length}`); }
+      if (notes !== undefined && notes !== null) { params.push(String(notes)); sets.push(`notes=$${params.length}`); }
+      const changed: string[] = [];
+      if (sets.length) {
+        params.push(conv.contact_id, tenantId);
+        await this.db.query(
+          `UPDATE contacts SET ${sets.join(',')}, updated_at=NOW() WHERE id=$${params.length - 1} AND tenant_id=$${params.length}`,
+          params,
+        ).catch((e: any) => this.logger.warn(`[engine] update_contact failed: ${e.message}`));
+        if (String(fullName ?? '').trim()) changed.push('nombre');
+        if (String(phone ?? '').trim())    changed.push('teléfono');
+        if (String(email ?? '').trim())    changed.push('email');
+        if (String(jobTitle ?? '').trim()) changed.push('puesto');
+        if (notes !== undefined && notes !== null) changed.push('notas');
+      }
+      // Custom fields: resolve each provided field name → definition and upsert its value.
+      if (customFields && typeof customFields === 'object' && contactFields.length) {
+        const byName = new Map<string, any>(contactFields.map((f: any) => [String(f.name).toLowerCase(), f]));
+        for (const [key, rawVal] of Object.entries(customFields)) {
+          if (rawVal === undefined || rawVal === null || String(rawVal).trim() === '') continue;
+          const def = byName.get(String(key).toLowerCase());
+          if (!def) continue;
+          await this.db.query(
+            `INSERT INTO custom_field_values (tenant_id, definition_id, entity_id, entity_type, value, created_at, updated_at)
+             VALUES ($1,$2,$3,'contact',$4,NOW(),NOW())
+             ON CONFLICT (definition_id, entity_id) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+            [tenantId, def.id, conv.contact_id, String(rawVal)],
+          ).catch((e: any) => this.logger.warn(`[engine] update_contact custom field "${key}" failed: ${e.message}`));
+          changed.push(def.label || def.name);
+        }
+      }
+      if (changed.length) {
+        this.logger.log(`[engine] Contact ${conv.contact_id} updated by bot: ${changed.join(', ')}`);
+        await this.saveActivityMessage(tenantId, conversationId, `🤖 Bot actualizó el contacto (${changed.join(', ')})`);
+      }
     }
 
     // 10f. Handle payment link creation
@@ -792,6 +845,7 @@ export class AiChatbotEngineService {
     ragContext: string = '',
     stripeConnectEnabled = false,
     dentallyConnected = false,
+    contactFields: any[] = [],
   ): Promise<AiResult | null> {
     try {
       const maxTokens   = parseInt(bot.max_tokens,  10) || 300;
@@ -809,6 +863,7 @@ export class AiChatbotEngineService {
       }
       if (tagNames.length > 0)   crmLines.push(`- add_tag: OBLIGATORIO — en cuanto identifiques la intención principal del usuario, aplica la etiqueta más apropiada de esta lista: ${tagNames.join(', ')}. Úsala en la misma respuesta en que queda clara la intención, no esperes al final de la conversación. Si el tema cambia, usa remove_tag para la anterior y add_tag para la nueva.`);
       crmLines.push('- create_task: cuando el usuario pida callback, cotización, recordatorio o cualquier acción de seguimiento.');
+      crmLines.push(`- update_contact: cuando el cliente te dé o corrija SUS propios datos (nombre, teléfono, email, puesto, notas${contactFields.length ? `, o los campos: ${contactFields.map((f: any) => f.label || f.name).join(', ')}` : ''}). Envía solo los campos que el cliente realmente te dio; no inventes ni sobrescribas datos que no mencionó.`);
       if (stripeConnectEnabled) crmLines.push('- create_payment_link: SOLO cuando el cliente confirme EXPLÍCITAMENTE que quiere pagar y hayas acordado el monto exacto. Siempre pregunta primero "¿Confirmas el pago de $X [moneda]?" antes de llamar esta herramienta. Monto mínimo $1, máximo $10,000.');
       if (transferTargets.length > 0) crmLines.push(`- transfer_conversation: solo cuando el usuario pida explícitamente hablar con otro departamento o cuando claramente necesitas un servicio que no puedes ofrecer. Destinos: ${transferTargets.join(', ')}.`);
       crmLines.push('- resolve_conversation: cuando el caso del usuario haya quedado completamente resuelto.');
@@ -854,9 +909,9 @@ export class AiChatbotEngineService {
       ].filter(Boolean).join('\n\n').trim();
 
       switch (bot.provider) {
-        case 'openai':    return await this.callOpenAi(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected);
-        case 'anthropic': return await this.callAnthropic(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected);
-        case 'gemini':    return await this.callGemini(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected);
+        case 'openai':    return await this.callOpenAi(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields);
+        case 'anthropic': return await this.callAnthropic(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields);
+        case 'gemini':    return await this.callGemini(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields);
         default:
           this.logger.warn(`Unknown AI provider: ${bot.provider}`);
           return null;
@@ -888,7 +943,7 @@ export class AiChatbotEngineService {
   private async callOpenAi(
     apiKey: string, model: string, systemPrompt: string | null,
     history: any[], media: MediaResult, maxTokens: number, temperature: number,
-    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false, dentallyConnected = false,
+    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false, dentallyConnected = false, contactFields: any[] = [],
   ): Promise<AiResult> {
     const messages: any[] = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
@@ -900,7 +955,7 @@ export class AiChatbotEngineService {
     }
 
     const body: any = { model, messages, max_tokens: maxTokens, temperature };
-    body.tools = toOpenAiChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected }));
+    body.tools = toOpenAiChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields }));
     body.tool_choice = 'auto';
 
     const res = await axios.post('https://api.openai.com/v1/chat/completions', body, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, timeout: 30000 });
@@ -919,7 +974,7 @@ export class AiChatbotEngineService {
   private async callAnthropic(
     apiKey: string, model: string, systemPrompt: string | null,
     history: any[], media: MediaResult, maxTokens: number, temperature: number,
-    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false, dentallyConnected = false,
+    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false, dentallyConnected = false, contactFields: any[] = [],
   ): Promise<AiResult> {
     const chatMsgs: any[] = [...this.historyToMsgs(history)];
     if (media.imageBase64 && media.imageMimeType) {
@@ -930,7 +985,7 @@ export class AiChatbotEngineService {
     const body: any = { model, messages: chatMsgs, max_tokens: maxTokens, temperature };
     if (systemPrompt) body.system = systemPrompt;
 
-    body.tools = toAnthropicChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected }));
+    body.tools = toAnthropicChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields }));
 
     const res = await axios.post('https://api.anthropic.com/v1/messages', body, { headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }, timeout: 30000 });
     for (const block of res.data.content ?? []) {
@@ -945,7 +1000,7 @@ export class AiChatbotEngineService {
   private async callGemini(
     apiKey: string, model: string, systemPrompt: string | null,
     history: any[], media: MediaResult, maxTokens: number, temperature: number,
-    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false, dentallyConnected = false,
+    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false, dentallyConnected = false, contactFields: any[] = [],
   ): Promise<AiResult> {
     const histMsgs = this.historyToMsgs(history);
     const contents = histMsgs.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
@@ -959,7 +1014,7 @@ export class AiChatbotEngineService {
     const body: any = { contents, generationConfig: { maxOutputTokens: maxTokens, temperature } };
     if (systemPrompt) body.systemInstruction = { parts: [{ text: systemPrompt }] };
 
-    body.tools = [{ functionDeclarations: toGeminiChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected })) }];
+    body.tools = [{ functionDeclarations: toGeminiChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields })) }];
 
     const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, body, { headers: { 'Content-Type': 'application/json' }, timeout: 30000 });
     const part = res.data.candidates?.[0]?.content?.parts?.[0];

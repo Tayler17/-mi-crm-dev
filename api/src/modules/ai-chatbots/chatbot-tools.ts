@@ -29,6 +29,8 @@ export interface ChatbotToolContext {
   stripeConnectEnabled: boolean;
   /** Dentally integration connected → expose the dentally_* tools. */
   dentallyConnected: boolean;
+  /** Tenant's custom field definitions for contacts → exposed inside update_contact. */
+  contactFields?: Array<{ id: string; name: string; label?: string; fieldType?: string; options?: any }>;
 }
 
 /** JSON-Schema-ish neutral parameter shape (lowercase types, like OpenAI/Anthropic). */
@@ -55,6 +57,7 @@ export interface ChatbotToolIntent {
   addTag?: { tagName: string };
   removeTag?: { tagName: string };
   createTask?: { title: string; description?: string; dueDate?: string; priority?: string };
+  updateContact?: { fullName?: string; phone?: string; email?: string; jobTitle?: string; notes?: string; customFields?: Record<string, any> };
   createPaymentLink?: { amount: number; currency: string; description: string };
   dentallyListPractitioners?: boolean;
   dentallyCheckAvailability?: { date: string; practitionerName?: string; durationMinutes?: number };
@@ -63,6 +66,14 @@ export interface ChatbotToolIntent {
     name?: string; phone?: string; email?: string; dateOfBirth?: string; gender?: string; title?: string;
   };
   dentallyGetAppointments?: boolean;
+}
+
+/** Normalize a custom field's `options` (jsonb: string[] or {value/label}[]) to a string[] enum. */
+function normalizeOptions(options: any): string[] {
+  if (!Array.isArray(options)) return [];
+  return options
+    .map((o) => (typeof o === 'string' ? o : (o?.value ?? o?.label ?? '')))
+    .filter((v) => typeof v === 'string' && v.length > 0);
 }
 
 /**
@@ -98,6 +109,36 @@ export function buildChatbotTools(ctx: ChatbotToolContext): NeutralTool[] {
     description: 'Put conversation on hold when more information is needed or you cannot proceed right now.',
     parameters: { type: 'object', properties: { message: { type: 'string', description: 'Message explaining the wait' } }, required: ['message'] },
   });
+
+  // update_contact — always available. Updates THIS customer's own contact record.
+  // The contact is resolved from the conversation, so no id is passed by the model.
+  {
+    const properties: Record<string, any> = {
+      full_name: { type: 'string', description: "The customer's full name" },
+      phone: { type: 'string', description: "The customer's phone number, with country code" },
+      email: { type: 'string', description: "The customer's email address" },
+      job_title: { type: 'string', description: 'Job title / role, if the customer mentions it' },
+      notes: { type: 'string', description: 'A free-form note to save on the contact (replaces existing notes)' },
+    };
+    let customFieldsHint = '';
+    if (ctx.contactFields && ctx.contactFields.length > 0) {
+      const cfProps: Record<string, any> = {};
+      for (const f of ctx.contactFields) {
+        const prop: any = { type: 'string', description: f.label || f.name };
+        const opts = normalizeOptions(f.options);
+        if ((f.fieldType === 'select' || f.fieldType === 'dropdown') && opts.length) prop.enum = opts;
+        cfProps[f.name] = prop;
+      }
+      properties.custom_fields = { type: 'object', description: 'Additional custom fields for this contact. Only include a field when the customer gives its value.', properties: cfProps };
+      customFieldsHint = ` Custom fields you may also set: ${ctx.contactFields.map((f) => f.label || f.name).join(', ')}.`;
+    }
+    properties.message = { type: 'string', description: 'Short friendly confirmation to the customer' };
+    tools.push({
+      name: 'update_contact',
+      description: `Save or correct THIS customer's own contact details in the CRM (name, phone, email, job title, notes${ctx.contactFields && ctx.contactFields.length ? ', custom fields' : ''}). Use when the customer provides or corrects their own information. Only include the fields the customer actually gave you — leave the rest out.${customFieldsHint}`,
+      parameters: { type: 'object', properties, required: ['message'] },
+    });
+  }
 
   if (ctx.stageNames.length > 0) {
     tools.push({
@@ -298,6 +339,7 @@ export function mapChatbotToolCall(name: string, rawArgs: any): ChatbotToolInten
     case 'add_tag':               return { reply: a.message ?? '', addTag: { tagName: a.tag_name } };
     case 'remove_tag':            return { reply: a.message ?? '', removeTag: { tagName: a.tag_name } };
     case 'create_task':           return { reply: a.message ?? '', createTask: { title: a.title, description: a.description, dueDate: a.due_date, priority: a.priority } };
+    case 'update_contact':        return { reply: a.message ?? '', updateContact: { fullName: a.full_name, phone: a.phone, email: a.email, jobTitle: a.job_title, notes: a.notes, customFields: a.custom_fields } };
     case 'create_payment_link':   return { reply: a.message ?? '', createPaymentLink: { amount: a.amount, currency: a.currency ?? 'USD', description: a.description } };
     case 'dentally_list_practitioners': return { reply: a.message ?? '', dentallyListPractitioners: true };
     case 'dentally_check_availability': return { reply: a.message ?? '', dentallyCheckAvailability: { date: a.date, practitionerName: a.practitioner_name, durationMinutes: a.duration } };
