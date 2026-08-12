@@ -31,6 +31,8 @@ export interface ChatbotToolContext {
   dentallyConnected: boolean;
   /** Tenant's custom field definitions for contacts → exposed inside update_contact. */
   contactFields?: Array<{ id: string; name: string; label?: string; fieldType?: string; options?: any }>;
+  /** Conversation is on WhatsApp Cloud API → expose send_interactive (buttons/lists). */
+  whatsappInteractive?: boolean;
 }
 
 /** JSON-Schema-ish neutral parameter shape (lowercase types, like OpenAI/Anthropic). */
@@ -58,6 +60,7 @@ export interface ChatbotToolIntent {
   removeTag?: { tagName: string };
   createTask?: { title: string; description?: string; dueDate?: string; priority?: string };
   updateContact?: { fullName?: string; phone?: string; email?: string; jobTitle?: string; notes?: string; customFields?: Record<string, any> };
+  sendInteractive?: { kind: 'button' | 'list'; bodyText: string; buttons?: string[]; rows?: { title?: string; description?: string }[]; listButton?: string };
   createPaymentLink?: { amount: number; currency: string; description: string };
   dentallyListPractitioners?: boolean;
   dentallyCheckAvailability?: { date: string; practitionerName?: string; durationMinutes?: number };
@@ -222,6 +225,28 @@ export function buildChatbotTools(ctx: ChatbotToolContext): NeutralTool[] {
     },
   });
 
+  if (ctx.whatsappInteractive) {
+    tools.push({
+      name: 'send_interactive',
+      description: 'Send an interactive WhatsApp message with TAPPABLE options instead of a plain text reply. Use it when you are offering the customer a clear set of choices (e.g. confirmar/cancelar, elegir un servicio, elegir un horario). Prefer this over writing the options as a numbered text list. Use kind="button" for up to 3 short options, or kind="list" for 4–10 options. This REPLACES your text reply for this turn — put the question in body_text.',
+      parameters: {
+        type: 'object',
+        properties: {
+          body_text: { type: 'string', description: 'The message/question shown above the options' },
+          kind: { type: 'string', enum: ['button', 'list'], description: 'button = up to 3 quick-reply buttons; list = a menu of up to 10 options' },
+          buttons: { type: 'array', items: { type: 'string' }, description: 'For kind=button: up to 3 short option titles (≤20 chars each)' },
+          rows: {
+            type: 'array',
+            description: 'For kind=list: up to 10 options',
+            items: { type: 'object', properties: { title: { type: 'string', description: 'Option title (≤24 chars)' }, description: { type: 'string', description: 'Optional short detail (≤72 chars)' } } },
+          },
+          list_button: { type: 'string', description: 'For kind=list: label of the button that opens the menu (e.g. "Ver opciones")' },
+        },
+        required: ['body_text', 'kind'],
+      },
+    });
+  }
+
   if (ctx.stripeConnectEnabled) {
     tools.push({
       name: 'create_payment_link',
@@ -340,6 +365,7 @@ export function mapChatbotToolCall(name: string, rawArgs: any): ChatbotToolInten
     case 'remove_tag':            return { reply: a.message ?? '', removeTag: { tagName: a.tag_name } };
     case 'create_task':           return { reply: a.message ?? '', createTask: { title: a.title, description: a.description, dueDate: a.due_date, priority: a.priority } };
     case 'update_contact':        return { reply: a.message ?? '', updateContact: { fullName: a.full_name, phone: a.phone, email: a.email, jobTitle: a.job_title, notes: a.notes, customFields: a.custom_fields } };
+    case 'send_interactive':      return { reply: '', sendInteractive: { kind: a.kind === 'list' ? 'list' : 'button', bodyText: a.body_text ?? '', buttons: Array.isArray(a.buttons) ? a.buttons : undefined, rows: Array.isArray(a.rows) ? a.rows : undefined, listButton: a.list_button } };
     case 'create_payment_link':   return { reply: a.message ?? '', createPaymentLink: { amount: a.amount, currency: a.currency ?? 'USD', description: a.description } };
     case 'dentally_list_practitioners': return { reply: a.message ?? '', dentallyListPractitioners: true };
     case 'dentally_check_availability': return { reply: a.message ?? '', dentallyCheckAvailability: { date: a.date, practitionerName: a.practitioner_name, durationMinutes: a.duration } };

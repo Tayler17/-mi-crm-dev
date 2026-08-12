@@ -7,6 +7,7 @@ import { join } from 'path';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const FormData = require('form-data');
 import { WhatsappWebService } from '../connections/whatsapp-web.service';
+import { ConnectionsService } from '../connections/connections.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { KnowledgeBaseService } from '../knowledge-base/knowledge-base.service';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
@@ -36,6 +37,7 @@ interface AiResult {
   removeTag?: { tagName: string };
   createTask?: { title: string; description?: string; dueDate?: string; priority?: string };
   updateContact?: { fullName?: string; phone?: string; email?: string; jobTitle?: string; notes?: string; customFields?: Record<string, any> };
+  sendInteractive?: { kind: 'button' | 'list'; bodyText: string; buttons?: string[]; rows?: { title?: string; description?: string }[]; listButton?: string };
   createPaymentLink?: { amount: number; currency: string; description: string };
   dentallyListPractitioners?: boolean;
   dentallyCheckAvailability?: { date: string; practitionerName?: string; durationMinutes?: number };
@@ -55,6 +57,7 @@ export class AiChatbotEngineService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly waSvc: WhatsappWebService,
+    private readonly connections: ConnectionsService,
     private readonly notifications: NotificationsService,
     private readonly kbSvc: KnowledgeBaseService,
     private readonly platformSettings: PlatformSettingsService,
@@ -88,7 +91,7 @@ export class AiChatbotEngineService {
     // 1. Load conversation + linked inbox + current queue
     const [conv] = await this.db.query(
       `SELECT c.id, c.inbox_id, c.contact_id, c.connection_id, c.queue_id,
-              c.team_id, c.is_group,
+              c.team_id, c.is_group, c.channel_type, c.external_id,
               cc.inbox_id AS conn_inbox_id
        FROM conversations c
        LEFT JOIN channel_connections cc ON cc.id = c.connection_id
@@ -401,7 +404,8 @@ export class AiChatbotEngineService {
 
     // 9c. Call AI — pass queueMap + stages + deals + tags + stripeConnect so each provider can use function/tool calling
     const dentallyConnected = await this.integrations.isConnected(tenantId, 'dentally').catch(() => false);
-    const result = await this.callAi(bot, apiKey, history, media, queueMap, stageNames, stageMap, existingDeals, tagNames, tagMap, ragContext, stripeConnectEnabled, dentallyConnected, contactFields);
+    const whatsappInteractive = conv.channel_type === 'whatsapp'; // interactive msgs = Cloud API only
+    const result = await this.callAi(bot, apiKey, history, media, queueMap, stageNames, stageMap, existingDeals, tagNames, tagMap, ragContext, stripeConnectEnabled, dentallyConnected, contactFields, whatsappInteractive);
     if (!result) {
       this.logger.warn(`[engine] AI returned null for conv ${conversationId} (bot "${bot.name}", provider "${bot.provider}") — sending fallback`);
       await this.saveBotMessage(tenantId, conversationId,
@@ -439,6 +443,36 @@ export class AiChatbotEngineService {
       if (reply && reply.trim()) await this.saveBotMessage(tenantId, conversationId, reply);
       if (outMsg) await this.saveBotMessage(tenantId, conversationId, outMsg);
       await this.saveActivityMessage(tenantId, conversationId, '🤖 Bot usó Dentally').catch(() => {});
+      return;
+    }
+
+    // Interactive message (buttons/list) — replaces the text reply for this turn.
+    // Only meaningful on WhatsApp Cloud API; on other channels fall back to plain text.
+    const { sendInteractive } = result;
+    if (sendInteractive && (sendInteractive.bodyText || reply)) {
+      await this.db.query(`UPDATE ai_chatbot_sessions SET message_count=message_count+1 WHERE id=$1`, [session.id]).catch(() => {});
+      const bodyText = (sendInteractive.bodyText || reply || '').trim();
+      if (conv.channel_type === 'whatsapp') {
+        const r: any = await this.connections.sendWhatsappInteractive(tenantId, {
+          to: conv.external_id,
+          conversationId,
+          kind: sendInteractive.kind === 'list' ? 'list' : 'button',
+          bodyText,
+          buttons: sendInteractive.buttons,
+          rows: sendInteractive.rows,
+          listButton: sendInteractive.listButton,
+        }).catch((e: any) => ({ ok: false, error: e?.message }));
+        if (r?.ok) {
+          await this.saveActivityMessage(tenantId, conversationId, '🤖 Bot envió opciones interactivas').catch(() => {});
+        } else {
+          // Fallback so the bot isn't silent if Meta rejects the interactive payload.
+          this.logger.warn(`[engine] send_interactive failed: ${r?.error ?? 'unknown'}`);
+          if (bodyText) await this.saveBotMessage(tenantId, conversationId, bodyText);
+        }
+      } else if (bodyText) {
+        // Non-WhatsApp channel: interactive not supported → send the question as text.
+        await this.saveBotMessage(tenantId, conversationId, bodyText);
+      }
       return;
     }
 
@@ -846,6 +880,7 @@ export class AiChatbotEngineService {
     stripeConnectEnabled = false,
     dentallyConnected = false,
     contactFields: any[] = [],
+    whatsappInteractive = false,
   ): Promise<AiResult | null> {
     try {
       const maxTokens   = parseInt(bot.max_tokens,  10) || 300;
@@ -864,6 +899,7 @@ export class AiChatbotEngineService {
       if (tagNames.length > 0)   crmLines.push(`- add_tag: OBLIGATORIO — en cuanto identifiques la intención principal del usuario, aplica la etiqueta más apropiada de esta lista: ${tagNames.join(', ')}. Úsala en la misma respuesta en que queda clara la intención, no esperes al final de la conversación. Si el tema cambia, usa remove_tag para la anterior y add_tag para la nueva.`);
       crmLines.push('- create_task: cuando el usuario pida callback, cotización, recordatorio o cualquier acción de seguimiento.');
       crmLines.push(`- update_contact: cuando el cliente te dé o corrija SUS propios datos (nombre, teléfono, email, puesto, notas${contactFields.length ? `, o los campos: ${contactFields.map((f: any) => f.label || f.name).join(', ')}` : ''}). Envía solo los campos que el cliente realmente te dio; no inventes ni sobrescribas datos que no mencionó.`);
+      if (whatsappInteractive) crmLines.push('- send_interactive: cuando ofrezcas al cliente un conjunto claro de opciones para elegir (confirmar/cancelar, elegir servicio, elegir horario, menú). Úsala en vez de escribir las opciones como lista numerada de texto. kind="button" para hasta 3 opciones, kind="list" para 4–10. La pregunta va en body_text; esta herramienta REEMPLAZA tu respuesta de texto en ese turno. No la uses para respuestas abiertas ni cuando el cliente debe escribir texto libre.');
       if (stripeConnectEnabled) crmLines.push('- create_payment_link: SOLO cuando el cliente confirme EXPLÍCITAMENTE que quiere pagar y hayas acordado el monto exacto. Siempre pregunta primero "¿Confirmas el pago de $X [moneda]?" antes de llamar esta herramienta. Monto mínimo $1, máximo $10,000.');
       if (transferTargets.length > 0) crmLines.push(`- transfer_conversation: solo cuando el usuario pida explícitamente hablar con otro departamento o cuando claramente necesitas un servicio que no puedes ofrecer. Destinos: ${transferTargets.join(', ')}.`);
       crmLines.push('- resolve_conversation: cuando el caso del usuario haya quedado completamente resuelto.');
@@ -909,9 +945,9 @@ export class AiChatbotEngineService {
       ].filter(Boolean).join('\n\n').trim();
 
       switch (bot.provider) {
-        case 'openai':    return await this.callOpenAi(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields);
-        case 'anthropic': return await this.callAnthropic(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields);
-        case 'gemini':    return await this.callGemini(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields);
+        case 'openai':    return await this.callOpenAi(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields, whatsappInteractive);
+        case 'anthropic': return await this.callAnthropic(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields, whatsappInteractive);
+        case 'gemini':    return await this.callGemini(apiKey, bot.model, systemPrompt, history, media, maxTokens, temperature, transferTargets, stageNames, stageMap, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields, whatsappInteractive);
         default:
           this.logger.warn(`Unknown AI provider: ${bot.provider}`);
           return null;
@@ -943,7 +979,7 @@ export class AiChatbotEngineService {
   private async callOpenAi(
     apiKey: string, model: string, systemPrompt: string | null,
     history: any[], media: MediaResult, maxTokens: number, temperature: number,
-    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false, dentallyConnected = false, contactFields: any[] = [],
+    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false, dentallyConnected = false, contactFields: any[] = [], whatsappInteractive = false,
   ): Promise<AiResult> {
     const messages: any[] = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
@@ -955,7 +991,7 @@ export class AiChatbotEngineService {
     }
 
     const body: any = { model, messages, max_tokens: maxTokens, temperature };
-    body.tools = toOpenAiChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields }));
+    body.tools = toOpenAiChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields, whatsappInteractive }));
     body.tool_choice = 'auto';
 
     const res = await axios.post('https://api.openai.com/v1/chat/completions', body, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, timeout: 30000 });
@@ -974,7 +1010,7 @@ export class AiChatbotEngineService {
   private async callAnthropic(
     apiKey: string, model: string, systemPrompt: string | null,
     history: any[], media: MediaResult, maxTokens: number, temperature: number,
-    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false, dentallyConnected = false, contactFields: any[] = [],
+    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false, dentallyConnected = false, contactFields: any[] = [], whatsappInteractive = false,
   ): Promise<AiResult> {
     const chatMsgs: any[] = [...this.historyToMsgs(history)];
     if (media.imageBase64 && media.imageMimeType) {
@@ -985,7 +1021,7 @@ export class AiChatbotEngineService {
     const body: any = { model, messages: chatMsgs, max_tokens: maxTokens, temperature };
     if (systemPrompt) body.system = systemPrompt;
 
-    body.tools = toAnthropicChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields }));
+    body.tools = toAnthropicChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields, whatsappInteractive }));
 
     const res = await axios.post('https://api.anthropic.com/v1/messages', body, { headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }, timeout: 30000 });
     for (const block of res.data.content ?? []) {
@@ -1000,7 +1036,7 @@ export class AiChatbotEngineService {
   private async callGemini(
     apiKey: string, model: string, systemPrompt: string | null,
     history: any[], media: MediaResult, maxTokens: number, temperature: number,
-    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false, dentallyConnected = false, contactFields: any[] = [],
+    transferTargets: string[] = [], stageNames: string[] = [], _stageMap: Record<string, string> = {}, existingDeals: any[] = [], tagNames: string[] = [], stripeConnectEnabled = false, dentallyConnected = false, contactFields: any[] = [], whatsappInteractive = false,
   ): Promise<AiResult> {
     const histMsgs = this.historyToMsgs(history);
     const contents = histMsgs.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
@@ -1014,7 +1050,7 @@ export class AiChatbotEngineService {
     const body: any = { contents, generationConfig: { maxOutputTokens: maxTokens, temperature } };
     if (systemPrompt) body.systemInstruction = { parts: [{ text: systemPrompt }] };
 
-    body.tools = [{ functionDeclarations: toGeminiChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields })) }];
+    body.tools = [{ functionDeclarations: toGeminiChatbotTools(buildChatbotTools({ transferTargets, stageNames, existingDeals, tagNames, stripeConnectEnabled, dentallyConnected, contactFields, whatsappInteractive })) }];
 
     const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, body, { headers: { 'Content-Type': 'application/json' }, timeout: 30000 });
     const part = res.data.candidates?.[0]?.content?.parts?.[0];
