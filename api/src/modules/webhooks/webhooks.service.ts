@@ -77,6 +77,8 @@ export class WebhooksService {
               inboxId: conn.inbox_id, channel: 'whatsapp',
               externalId: waId, contactName: name, contactPhone: waId,
               messageExtId: msg.id, body, contentType,
+              // Don't let the bot try to answer a message whose content Meta didn't deliver.
+              skipAutomation: msg.type === 'unsupported',
             });
           }
         }
@@ -183,12 +185,18 @@ export class WebhooksService {
         const maps = `https://www.google.com/maps?q=${latitude},${longitude}`;
         return { body: `📍 Ubicación${label ? ': ' + label : ''} ${maps}`, contentType: 'text' };
       }
+      // WhatsApp Cloud API can't deliver the CONTENT of some messages (view-once,
+      // certain native/interactive messages, newer features) → it sends type:'unsupported'
+      // with no readable body. Store a clear placeholder instead of the literal
+      // "unsupported" (which the bot would otherwise try to answer with a confusing reply).
+      if (msg.type === 'unsupported') {
+        return { body: '⚠️ Mensaje no compatible: WhatsApp no permite recibir este tipo de mensaje. Pídele al cliente que lo reenvíe como texto.', contentType: 'text' };
+      }
       const text = msg.text?.body
         ?? msg.button?.text
         ?? msg.interactive?.list_reply?.title
         ?? msg.interactive?.button_reply?.title
-        ?? msg.type
-        ?? '(mensaje)';
+        ?? '[mensaje no compatible]';
       return { body: text, contentType: 'text' };
     }
 

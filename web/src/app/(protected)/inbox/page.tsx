@@ -796,8 +796,8 @@ export default function InboxPage() {
       }
 
       if (data.type === 'message_status_updated') {
-        const { messageId, status } = data as { messageId: string; status: string };
-        setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, status } : m));
+        const { messageId, status, error } = data as { messageId: string; status: string; error?: string };
+        setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, status, ...(error ? { statusError: error } : {}) } : m));
       }
 
       // Real-time note from another agent
@@ -1960,6 +1960,9 @@ export default function InboxPage() {
                           </span>
                         )}
                       </div>
+                      {m.direction === 'outbound' && m.status === 'failed' && m.statusError && (
+                        <div style={{ fontSize: 11, color: '#ef4444', marginTop: 2, textAlign: 'right', maxWidth: 320, marginLeft: 'auto' }}>⚠ {m.statusError}</div>
+                      )}
                     </div>
                   );
                 })}

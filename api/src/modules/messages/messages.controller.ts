@@ -548,8 +548,30 @@ export class MessagesController {
                 signal: AbortSignal.timeout(15000),
               },
             );
-            // Capture Meta's message id so delivery/read status webhooks can match it.
             const waData: any = await waRes.json().catch(() => null);
+            // Meta rejected the send (most commonly: outside the 24h customer-service
+            // window → must use a template). Mark the message failed and surface why,
+            // instead of leaving it looking "sent" when it never reached the customer.
+            if (waData?.error) {
+              const err = waData.error;
+              const code = err.code;
+              const isWindow = code === 131047 || code === 131026 || code === 470
+                || /24 hours|re-?engagement|outside.*window/i.test(err.message ?? '');
+              const reason = isWindow
+                ? 'No entregado: pasaron más de 24h desde el último mensaje del cliente. Envía una plantilla para reabrir la conversación.'
+                : `No entregado: ${err.message ?? 'Meta rechazó el mensaje.'}`;
+              console.warn(`[messages] WA send rejected (code ${code}): ${err.message}`);
+              if (messageId) {
+                await this.db.query(`UPDATE messages SET status='failed', updated_at=NOW() WHERE id=$1`, [messageId]).catch(() => {});
+                this.notifications.emit({
+                  tenantId,
+                  type: 'message_status_updated',
+                  payload: { conversationId, messageId, status: 'failed', error: reason },
+                });
+              }
+              break;
+            }
+            // Capture Meta's message id so delivery/read status webhooks can match it.
             const wamid = waData?.messages?.[0]?.id;
             if (wamid && messageId) {
               await this.db.query(`UPDATE messages SET external_id=$1 WHERE id=$2`, [wamid, messageId]).catch(() => {});
