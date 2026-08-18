@@ -24,16 +24,16 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  // Umami web analytics — inert unless both env vars are set on the web server
-  // (runtime, server-side → no rebuild needed to enable/disable). See deploy/umami.
-  const umamiSrc = process.env.UMAMI_SRC;
-  const umamiId = process.env.UMAMI_WEBSITE_ID;
+  // Umami web analytics — only on production, identified by the prod API URL
+  // (NEXT_PUBLIC_API_URL is a build arg, so this is baked into the static HTML at
+  // build time). Staging/dev use a non-automarkiq API URL → no tracking there.
+  const trackAnalytics = process.env.NEXT_PUBLIC_API_URL?.includes('api.automarkiq.com');
   return (
     <html lang="es">
       <body>
         {children}
-        {umamiSrc && umamiId && (
-          <script defer src={umamiSrc} data-website-id={umamiId}></script>
+        {trackAnalytics && (
+          <script defer src="https://analytics.automarkiq.com/script.js" data-website-id="a87bfb2a-1f3f-49e3-9c84-a9887808e52f"></script>
         )}
       </body>
     </html>
