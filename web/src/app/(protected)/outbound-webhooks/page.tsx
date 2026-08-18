@@ -24,6 +24,7 @@ export default function OutboundWebhooksPage() {
     contact_updated:       i.evtContactUpdated,
     deal_created:          i.evtDealCreated,
     deal_updated:          i.evtDealUpdated,
+    deal_stage_changed:    (i as any).evtDealStageChanged ?? 'Deal cambió de etapa',
     csat_submitted:        i.evtCsatSubmitted,
   };
 

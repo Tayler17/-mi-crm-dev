@@ -533,6 +533,12 @@ export interface McpToken { id: string; label: string; role: string; last_used_a
 export const getMcpTokens = () => apiGet<McpToken[]>('/mcp/tokens');
 export const createMcpToken = (label?: string) => apiPost<{ id: string; label: string; role: string; created_at: string; token: string }>('/mcp/tokens', { label });
 export const revokeMcpToken = (id: string) => apiDelete(`/mcp/tokens/${id}`);
+
+// ── Public API keys (tenant's external integration) ─────────────────────────
+export interface ApiKeyRow { id: string; label: string; last_used_at: string | null; revoked_at: string | null; created_at: string; key_hint: string }
+export const getApiKeys = () => apiGet<ApiKeyRow[]>('/api-keys');
+export const createApiKey = (label?: string) => apiPost<{ id: string; label: string; created_at: string; key: string }>('/api-keys', { label });
+export const revokeApiKey = (id: string) => apiDelete(`/api-keys/${id}`);
 export const getConversationsDrill = (params: { from?: string; to?: string; channel?: string; status?: string; agentId?: string }) => {
   const p = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => { if (v) p.set(k, v); });

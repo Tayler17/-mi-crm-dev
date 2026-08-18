@@ -35,6 +35,7 @@ import { FlowsModule } from './modules/flows/flows.module';
 import { AiChatbotsModule } from './modules/ai-chatbots/ai-chatbots.module';
 import { AiAgentModule } from './modules/ai-agent/ai-agent.module';
 import { McpModule } from './modules/mcp/mcp.module';
+import { PublicApiModule } from './modules/public-api/public-api.module';
 import { AiPromptsModule } from './modules/ai-prompts/ai-prompts.module';
 import { KnowledgeBaseModule } from './modules/knowledge-base/knowledge-base.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -129,6 +130,7 @@ import { TenantMiddleware } from './common/middleware/tenant.middleware';
     AiChatbotsModule,
     AiAgentModule,
     McpModule,
+    PublicApiModule,
     AiPromptsModule,
     KnowledgeBaseModule,
     NotificationsModule,

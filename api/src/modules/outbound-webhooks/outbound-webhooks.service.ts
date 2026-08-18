@@ -15,6 +15,7 @@ const SUPPORTED_EVENTS = [
   'contact_updated',
   'deal_created',
   'deal_updated',
+  'deal_stage_changed',
   'csat_submitted',
 ] as const;
 
@@ -81,6 +82,50 @@ export class OutboundWebhooksService {
     for (const hook of hooks) {
       this.deliver(hook, event, payload).catch(() => {});
     }
+  }
+
+  // ── Enriched domain events ──────────────────────────────────────────────────
+  // Deal stage changes are emitted on EventEmitter2 (deals.service + public API) with
+  // only IDs. Enrich here with the full deal + contact + custom fields + stage names,
+  // then fire the webhook so the tenant's external system gets everything it needs.
+  @OnEvent('deal.stage_changed')
+  async onDealStageChanged(p: any) {
+    const tenantId = p?.tenantId;
+    const dealId = p?.entityId ?? p?.dealId;
+    if (!tenantId || !dealId) return;
+    const [deal] = await this.db.query(
+      `SELECT d.id, d.title, d.value, d.currency, d.status, d.stage_id, d.contact_id,
+              ps.name AS stage, ct.full_name AS contact_name, ct.phone AS contact_phone, ct.email AS contact_email
+       FROM deals d
+       LEFT JOIN pipeline_stages ps ON ps.id = d.stage_id
+       LEFT JOIN contacts ct ON ct.id = d.contact_id
+       WHERE d.id=$1 AND d.tenant_id=$2`,
+      [dealId, tenantId],
+    ).catch(() => []);
+    if (!deal) return;
+    let oldStage: string | null = null;
+    if (p.oldStageId) {
+      const [os] = await this.db.query(`SELECT name FROM pipeline_stages WHERE id=$1`, [p.oldStageId]).catch(() => []);
+      oldStage = os?.name ?? null;
+    }
+    const cfRows = await this.db.query(
+      `SELECT d.name, v.value FROM custom_field_values v
+       JOIN custom_field_definitions d ON d.id = v.definition_id
+       WHERE v.tenant_id=$1 AND v.entity_type='deal' AND v.entity_id=$2`,
+      [tenantId, dealId],
+    ).catch(() => []);
+    const custom_fields: Record<string, any> = {};
+    for (const r of cfRows) custom_fields[r.name] = r.value;
+    const payload = {
+      deal: {
+        id: deal.id, title: deal.title, value: deal.value, currency: deal.currency,
+        status: deal.status, stage: deal.stage, old_stage: oldStage, custom_fields,
+      },
+      contact: deal.contact_id
+        ? { id: deal.contact_id, full_name: deal.contact_name, phone: deal.contact_phone, email: deal.contact_email }
+        : null,
+    };
+    await this.fire(tenantId, 'deal_stage_changed', payload);
   }
 
   private async deliver(hook: { id: string; url: string; secret: string | null }, event: string, payload: any) {
