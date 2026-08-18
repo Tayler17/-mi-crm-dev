@@ -980,4 +980,86 @@ export const CRM_TOOLS: ToolDef[] = [
       return { ok: true, count: rows.length, teams: rows };
     },
   },
+
+  // ── Batch: setup / onboarding (estructura del CRM) ──────────────────────────
+  {
+    name: 'create_pipeline',
+    description: 'Crea un pipeline (embudo) de ventas. Luego agrégale etapas con create_stage. Úsalo al configurar el CRM.',
+    parameters: { type: 'object', properties: { name: { type: 'string' }, is_default: { type: 'boolean', description: 'Marcar como pipeline por defecto' } }, required: ['name'] },
+    handler: async (ctx, args) => {
+      const name = String(args.name ?? '').trim();
+      if (!name) return { ok: false, error: 'name es obligatorio' };
+      const [row] = await ctx.db.query(
+        `INSERT INTO pipelines (tenant_id, name, is_default, created_at, updated_at) VALUES ($1,$2,$3,NOW(),NOW()) RETURNING id, name`,
+        [ctx.tenantId, name, args.is_default === true],
+      );
+      return { ok: true, pipeline: row };
+    },
+  },
+  {
+    name: 'create_stage',
+    description: 'Crea una etapa dentro de un pipeline. Indica el pipeline por nombre o id (o se usa el primero). Si no das posición, se agrega al final.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        pipeline: { type: 'string', description: 'Nombre o id del pipeline (opcional; por defecto el primero)' },
+        position: { type: 'number', description: 'Orden (opcional)' },
+      },
+      required: ['name'],
+    },
+    handler: async (ctx, args) => {
+      const name = String(args.name ?? '').trim();
+      if (!name) return { ok: false, error: 'name es obligatorio' };
+      let pipelineId: string | null = null;
+      const pref = String(args.pipeline ?? '').trim();
+      if (pref) {
+        const [p] = await ctx.db.query(`SELECT id FROM pipelines WHERE tenant_id=$1 AND (id::text=$2 OR name ILIKE $2) LIMIT 1`, [ctx.tenantId, pref]);
+        pipelineId = p?.id ?? null;
+        if (!pipelineId) return { ok: false, error: `Pipeline "${pref}" no encontrado` };
+      } else {
+        const [p] = await ctx.db.query(`SELECT id FROM pipelines WHERE tenant_id=$1 ORDER BY is_default DESC, created_at ASC LIMIT 1`, [ctx.tenantId]);
+        pipelineId = p?.id ?? null;
+        if (!pipelineId) return { ok: false, error: 'No hay pipelines. Crea uno con create_pipeline primero.' };
+      }
+      let position = args.position;
+      if (position === undefined || position === null) {
+        const [m] = await ctx.db.query(`SELECT COALESCE(MAX(position),-1)+1 AS pos FROM pipeline_stages WHERE pipeline_id=$1`, [pipelineId]);
+        position = m?.pos ?? 0;
+      }
+      const [row] = await ctx.db.query(
+        `INSERT INTO pipeline_stages (tenant_id, pipeline_id, name, position, created_at, updated_at) VALUES ($1,$2,$3,$4,NOW(),NOW()) RETURNING id, name, position`,
+        [ctx.tenantId, pipelineId, name, Number(position)],
+      );
+      return { ok: true, stage: row };
+    },
+  },
+  {
+    name: 'create_team',
+    description: 'Crea un equipo (para agrupar agentes). Úsalo al configurar el CRM.',
+    parameters: { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' } }, required: ['name'] },
+    handler: async (ctx, args) => {
+      const name = String(args.name ?? '').trim();
+      if (!name) return { ok: false, error: 'name es obligatorio' };
+      const [row] = await ctx.db.query(
+        `INSERT INTO teams (tenant_id, name, description, created_at, updated_at) VALUES ($1,$2,$3,NOW(),NOW()) RETURNING id, name`,
+        [ctx.tenantId, name, args.description ?? null],
+      );
+      return { ok: true, team: row };
+    },
+  },
+  {
+    name: 'create_queue',
+    description: 'Crea una cola de atención (para enrutar conversaciones). Úsalo al configurar el CRM.',
+    parameters: { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' } }, required: ['name'] },
+    handler: async (ctx, args) => {
+      const name = String(args.name ?? '').trim();
+      if (!name) return { ok: false, error: 'name es obligatorio' };
+      const [row] = await ctx.db.query(
+        `INSERT INTO queues (tenant_id, name, description, is_active, created_at, updated_at) VALUES ($1,$2,$3,true,NOW(),NOW()) RETURNING id, name`,
+        [ctx.tenantId, name, args.description ?? null],
+      );
+      return { ok: true, queue: row };
+    },
+  },
 ];
