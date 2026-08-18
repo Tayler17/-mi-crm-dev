@@ -24,14 +24,20 @@ export function BusinessAssistantFab({ lang }: { lang: string }) {
   const [error, setError] = useState('');
   const [input, setInput] = useState('');
   const [voiceSupported, setVoiceSupported] = useState(true);
+  // Read replies aloud even in text mode (persisted preference).
+  const [autoRead, setAutoRead] = useState(false);
 
   const messagesRef = useRef<Msg[]>([]);
   const voiceModeRef = useRef(false);
   const recognitionRef = useRef<any>(null);
+  const autoReadRef = useRef(false);
   const voiceLangRef = useRef<'es-ES' | 'en-US'>(en ? 'en-US' : 'es-ES');
 
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
+  useEffect(() => { autoReadRef.current = autoRead; }, [autoRead]);
   useEffect(() => { voiceLangRef.current = en ? 'en-US' : 'es-ES'; }, [en]);
+  useEffect(() => { try { setAutoRead(localStorage.getItem('amkAssistantAutoRead') === '1'); } catch {} }, []);
+  const toggleAutoRead = () => setAutoRead((v) => { const nv = !v; try { localStorage.setItem('amkAssistantAutoRead', nv ? '1' : '0'); } catch {} if (!nv) { try { window.speechSynthesis?.cancel(); } catch {} } return nv; });
 
   useEffect(() => {
     const SR = typeof window !== 'undefined' ? ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) : null;
@@ -56,7 +62,8 @@ export function BusinessAssistantFab({ lang }: { lang: string }) {
       if (r.ok) {
         messagesRef.current = [...next, { role: 'assistant', content: r.reply || '…' }];
         setLastReply(r.reply || '…');
-        if (voiceModeRef.current && r.reply) { speak(r.reply); return; }
+        // Speak the reply in voice mode, or in text mode when auto-read is on.
+        if (r.reply && (voiceModeRef.current || autoReadRef.current)) { speak(r.reply); return; }
       } else {
         setError(r.error || (en ? 'The assistant failed' : 'El asistente falló'));
         if (voiceModeRef.current) resumeListening();
@@ -172,7 +179,14 @@ export function BusinessAssistantFab({ lang }: { lang: string }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: 'linear-gradient(135deg,#7c3aed,#8b5cf6)', color: '#fff' }}>
             <div style={{ fontSize: 14, fontWeight: 700 }}>🧠 {en ? 'Business Assistant' : 'Asistente de Negocio'}</div>
-            <button onClick={togglePanel} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>×</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <button
+                onClick={toggleAutoRead}
+                title={en ? 'Read replies aloud' : 'Leer respuestas en voz alta'}
+                style={{ background: autoRead ? 'rgba(255,255,255,0.25)' : 'none', border: 'none', color: '#fff', fontSize: 15, cursor: 'pointer', lineHeight: 1, padding: '3px 6px', borderRadius: 6 }}
+              >{autoRead ? '🔊' : '🔇'}</button>
+              <button onClick={togglePanel} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>×</button>
+            </div>
           </div>
 
           <div style={{ padding: 18, textAlign: 'center' }}>
@@ -194,8 +208,15 @@ export function BusinessAssistantFab({ lang }: { lang: string }) {
             </div>
 
             {lastReply && !listening && (
-              <div style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--text)', textAlign: 'left', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', maxHeight: 160, overflowY: 'auto', marginBottom: 10, whiteSpace: 'pre-wrap' }}>
-                {lastReply}
+              <div style={{ textAlign: 'left', marginBottom: 10 }}>
+                <div style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--text)', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', maxHeight: 160, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                  {lastReply}
+                </div>
+                <button
+                  onClick={() => speak(lastReply)}
+                  title={en ? 'Play audio' : 'Escuchar'}
+                  style={{ marginTop: 6, background: 'none', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: '4px 10px' }}
+                >🔊 {en ? 'Play' : 'Escuchar'}</button>
               </div>
             )}
 

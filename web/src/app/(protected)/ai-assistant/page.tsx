@@ -21,16 +21,21 @@ export default function AiAssistantPage() {
   const [speaking, setSpeaking] = useState(false);
   const [interim, setInterim] = useState('');
   const [voiceSupported, setVoiceSupported] = useState(true);
+  const [autoRead, setAutoRead] = useState(false); // read replies aloud even in text mode
   const voiceLangRef = useRef<'es-ES' | 'en-US'>(en ? 'en-US' : 'es-ES');
 
   const threadRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<Msg[]>([]);
   const voiceModeRef = useRef(false);
+  const autoReadRef = useRef(false);
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
+  useEffect(() => { autoReadRef.current = autoRead; }, [autoRead]);
   useEffect(() => { voiceLangRef.current = en ? 'en-US' : 'es-ES'; }, [en]);
+  useEffect(() => { try { setAutoRead(localStorage.getItem('amkAssistantAutoRead') === '1'); } catch {} }, []);
+  const toggleAutoRead = () => setAutoRead((v) => { const nv = !v; try { localStorage.setItem('amkAssistantAutoRead', nv ? '1' : '0'); } catch {} if (!nv) { try { window.speechSynthesis?.cancel(); } catch {} } return nv; });
 
   // Persist the chat so it survives refresh/navigation.
   useEffect(() => {
@@ -63,7 +68,8 @@ export default function AiAssistantPage() {
       const r = await aiAgentChat(next.map((m) => ({ role: m.role, content: m.content })));
       if (r.ok) {
         setMessages((prev) => [...prev, { role: 'assistant', content: r.reply || '…', actions: r.actions }]);
-        if (voiceModeRef.current && r.reply) { speak(r.reply); return; }
+        // Speak in voice mode, or in text mode when auto-read is on.
+        if (r.reply && (voiceModeRef.current || autoReadRef.current)) { speak(r.reply); return; }
       } else {
         setError(r.error || (en ? 'The assistant failed' : 'El asistente falló'));
         if (voiceModeRef.current) resumeListening();
@@ -161,6 +167,12 @@ export default function AiAssistantPage() {
       <div className="page-header">
         <h1 className="page-title">🧠 {en ? 'Business AI Assistant' : 'Asistente de Negocio AI'}</h1>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn btn-secondary"
+            onClick={toggleAutoRead}
+            title={en ? 'Read replies aloud' : 'Leer respuestas en voz alta'}
+            style={autoRead ? { borderColor: 'var(--primary)', color: 'var(--primary)' } : undefined}
+          >{autoRead ? '🔊' : '🔇'} {en ? 'Read aloud' : 'Leer en voz alta'}</button>
           {voiceSupported && (
             voiceMode ? (
               <button className="btn btn-danger" onClick={stopVoice}>⏹ {en ? 'Stop voice' : 'Detener voz'}</button>
@@ -217,6 +229,13 @@ export default function AiAssistantPage() {
                   <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)' }}>
                     {en ? 'Actions:' : 'Acciones:'} {m.actions.map((a) => a.tool).join(', ')}
                   </div>
+                )}
+                {m.role === 'assistant' && voiceSupported && m.content && (
+                  <button
+                    onClick={() => speak(m.content)}
+                    title={en ? 'Play audio' : 'Escuchar'}
+                    style={{ marginTop: 6, display: 'block', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: 0 }}
+                  >🔊 {en ? 'Play' : 'Escuchar'}</button>
                 )}
               </div>
             </div>
