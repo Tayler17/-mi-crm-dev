@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
@@ -6,11 +6,34 @@ import { StripeProvider } from './providers/stripe.provider';
 import { PaymentProvider } from './providers/payment-provider.interface';
 
 @Injectable()
-export class BillingService {
+export class BillingService implements OnModuleInit {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly platformSettings: PlatformSettingsService,
   ) {}
+
+  async onModuleInit() {
+    // Payment links created by the bot/agent (Stripe Connect checkout), so the team
+    // can SEE each one and its status (pending / paid / expired) in the CRM.
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS payment_links (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id uuid NOT NULL,
+        session_id text NOT NULL UNIQUE,
+        account_id text,
+        deal_id uuid,
+        contact_id uuid,
+        amount numeric NOT NULL DEFAULT 0,
+        currency text NOT NULL DEFAULT 'usd',
+        description text,
+        url text,
+        status text NOT NULL DEFAULT 'pending',
+        created_at timestamptz NOT NULL DEFAULT now(),
+        paid_at timestamptz,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `).catch((e: any) => console.error(`[billing] payment_links init: ${e.message}`));
+  }
 
   // ── Provider factory ──────────────────────────────────────────────────────
 
@@ -152,6 +175,13 @@ export class BillingService {
 
     switch (event.type) {
       case 'checkout.session.completed': {
+        // Agent/bot payment link paid → mark it (matched by session id). Independent
+        // of the subscription flow below (those carry planId in metadata).
+        await this.db.query(
+          `UPDATE payment_links SET status='paid', paid_at=NOW(), updated_at=NOW()
+           WHERE session_id=$1 AND status <> 'paid'`,
+          [obj.id],
+        ).catch(() => {});
         const { tenantId, planId } = obj.metadata ?? {};
         if (!tenantId || !planId) break;
         await this.db.query(
@@ -169,6 +199,15 @@ export class BillingService {
           status: 'succeeded', providerRef: obj.id,
           description: `Checkout: plan ${planId}`,
         });
+        break;
+      }
+
+      case 'checkout.session.expired': {
+        await this.db.query(
+          `UPDATE payment_links SET status='expired', updated_at=NOW()
+           WHERE session_id=$1 AND status='pending'`,
+          [obj.id],
+        ).catch(() => {});
         break;
       }
 
@@ -337,6 +376,7 @@ export class BillingService {
     currency: string;
     description: string;
     dealId?: string;
+    contactId?: string;
   }): Promise<{ url: string; sessionId: string }> {
     const row = await this.getConnectAccount(tenantId);
     if (!row?.account_id) throw new BadRequestException('No tienes una cuenta de Stripe Connect activa. Ve a Configuración → Pagos para conectarla.');
@@ -349,7 +389,7 @@ export class BillingService {
     const returnPath = params.dealId ? `/deals/${params.dealId}` : '/deals';
 
     try {
-      return await (provider as any).createConnectCheckoutSession({
+      const result = await (provider as any).createConnectCheckoutSession({
         accountId:   row.account_id,
         amount:      params.amount,
         currency:    params.currency,
@@ -357,6 +397,15 @@ export class BillingService {
         successUrl:  `${base}${returnPath}?payment=success`,
         cancelUrl:   `${base}${returnPath}?payment=cancelled`,
       });
+      // Record the link so the team can track its status in the CRM.
+      await this.db.query(
+        `INSERT INTO payment_links (tenant_id, session_id, account_id, deal_id, contact_id, amount, currency, description, url, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending')
+         ON CONFLICT (session_id) DO NOTHING`,
+        [tenantId, result.sessionId, row.account_id, params.dealId ?? null, params.contactId ?? null,
+         params.amount, (params.currency || 'usd').toLowerCase(), params.description ?? null, result.url],
+      ).catch((e: any) => console.error(`[billing] store payment_link: ${e.message}`));
+      return result;
     } catch (e: any) {
       if (e?.status) throw e; // re-throw our own HttpExceptions as-is
       const msg: string = e?.message ?? String(e);
@@ -376,6 +425,57 @@ export class BillingService {
   async getTransactions(tenantId: string, limit = 50) {
     return this.db.query(
       `SELECT * FROM transactions WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2`,
+      [tenantId, limit],
+    );
+  }
+
+  // ── Payment links (bot/agent-generated Stripe Connect checkouts) ────────────
+
+  /** List payment links with their current status. Refreshes recent pending ones
+   *  from Stripe (the checkout lives on the connected account, so we poll it) and
+   *  auto-expires stale ones — so the team always sees the real status. */
+  async getPaymentLinks(tenantId: string, limit = 100) {
+    // Stripe checkout sessions expire ~24h; mark long-pending ones as expired locally.
+    await this.db.query(
+      `UPDATE payment_links SET status='expired', updated_at=NOW()
+       WHERE tenant_id=$1 AND status='pending' AND created_at < NOW() - interval '25 hours'`,
+      [tenantId],
+    ).catch(() => {});
+
+    const pending = await this.db.query(
+      `SELECT id, session_id, account_id FROM payment_links
+       WHERE tenant_id=$1 AND status='pending' AND account_id IS NOT NULL
+       ORDER BY created_at DESC LIMIT 15`,
+      [tenantId],
+    ).catch(() => []);
+    if (pending.length) {
+      const provider: any = await this.getProvider(tenantId).catch(() => null);
+      if (provider?.retrieveConnectCheckoutSession) {
+        for (const p of pending) {
+          try {
+            const s = await provider.retrieveConnectCheckoutSession(p.account_id, p.session_id);
+            let status: string | null = null;
+            if (s.status === 'complete' && s.paymentStatus === 'paid') status = 'paid';
+            else if (s.status === 'expired') status = 'expired';
+            if (status) {
+              await this.db.query(
+                `UPDATE payment_links SET status=$2, paid_at=CASE WHEN $2='paid' THEN NOW() ELSE paid_at END, updated_at=NOW() WHERE id=$1`,
+                [p.id, status],
+              );
+            }
+          } catch { /* ignore individual refresh failures */ }
+        }
+      }
+    }
+
+    return this.db.query(
+      `SELECT pl.id, pl.session_id, pl.amount, pl.currency, pl.description, pl.url, pl.status,
+              pl.created_at, pl.paid_at, pl.deal_id, pl.contact_id,
+              ct.full_name AS contact_name, d.title AS deal_title
+       FROM payment_links pl
+       LEFT JOIN contacts ct ON ct.id = pl.contact_id
+       LEFT JOIN deals d ON d.id = pl.deal_id
+       WHERE pl.tenant_id=$1 ORDER BY pl.created_at DESC LIMIT $2`,
       [tenantId, limit],
     );
   }

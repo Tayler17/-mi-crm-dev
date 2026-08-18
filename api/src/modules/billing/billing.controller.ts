@@ -51,6 +51,12 @@ export class BillingController {
     return this.billing.getTransactions(tenantId, limit ? +limit : 50);
   }
 
+  @Get('payment-links')
+  @UseGuards(JwtAuthGuard)
+  getPaymentLinks(@TenantId() tenantId: string, @Query('limit') limit?: string) {
+    return this.billing.getPaymentLinks(tenantId, limit ? +limit : 100);
+  }
+
   // ── Stripe Connect ────────────────────────────────────────────────────────
 
   @Get('connect/account')

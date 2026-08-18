@@ -1062,4 +1062,22 @@ export const CRM_TOOLS: ToolDef[] = [
       return { ok: true, queue: row };
     },
   },
+  {
+    name: 'list_payment_links',
+    description: 'Lista los links de pago generados (por el bot o agentes) con su estado: pending (pendiente), paid (pagado) o expired (expirado). Filtra por estado opcional. Úsalo para "¿quién no ha pagado?", "¿cuánto cobramos?", "links pendientes".',
+    parameters: { type: 'object', properties: { status: { type: 'string', description: 'paid|pending|expired (opcional)' } }, required: [] },
+    handler: async (ctx, args) => {
+      const params: any[] = [ctx.tenantId];
+      let where = 'pl.tenant_id=$1';
+      const st = String(args.status ?? '').trim().toLowerCase();
+      if (['paid', 'pending', 'expired'].includes(st)) { params.push(st); where += ` AND pl.status=$${params.length}`; }
+      const rows = await ctx.db.query(
+        `SELECT pl.amount, pl.currency, pl.description, pl.status, pl.created_at, pl.paid_at, ct.full_name AS contact
+         FROM payment_links pl LEFT JOIN contacts ct ON ct.id = pl.contact_id
+         WHERE ${where} ORDER BY pl.created_at DESC LIMIT 30`,
+        params,
+      );
+      return { ok: true, count: rows.length, payment_links: rows };
+    },
+  },
 ];

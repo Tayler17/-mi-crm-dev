@@ -661,6 +661,7 @@ export class AiChatbotEngineService {
             amount: clampedAmount,
             currency: (currency || 'USD').toUpperCase(),
             description: description || 'Pago',
+            contactId: conv.contact_id ?? undefined,
           });
           await this.saveBotMessage(tenantId, conversationId, `💳 ${url}`);
           await this.saveActivityMessage(tenantId, conversationId,

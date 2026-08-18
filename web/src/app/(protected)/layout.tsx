@@ -101,6 +101,7 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   // ── Comunicación ──
   { group: '💬 COMUNICACIÓN',  href: '/inbox',            label: 'Inbox',                icon: '✉' },
   { group: '💬 COMUNICACIÓN',  href: '/chat',             label: 'Chat Interno',         icon: '💬' },
+  { group: '💬 COMUNICACIÓN',  href: '/payments',         label: 'Links de pago',        icon: '💳' },
   { group: '💬 COMUNICACIÓN',  href: '/queues',           label: 'Colas',                icon: '📬' },
   { group: '💬 COMUNICACIÓN',  href: '/teams',            label: 'Equipos',              icon: '🏆' },
   // ── Automatización ──

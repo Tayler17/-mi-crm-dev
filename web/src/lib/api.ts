@@ -1422,6 +1422,14 @@ export const createPortalSession = () =>
 export const getBillingTransactions = (limit = 50) =>
   apiGet<any[]>(`/billing/transactions?limit=${limit}`);
 
+export interface PaymentLinkRow {
+  id: string; session_id: string; amount: number; currency: string; description: string | null;
+  url: string | null; status: string; created_at: string; paid_at: string | null;
+  contact_name: string | null; deal_title: string | null;
+}
+export const getPaymentLinks = (limit = 100) =>
+  apiGet<PaymentLinkRow[]>(`/billing/payment-links?limit=${limit}`);
+
 // ── Stripe Connect ────────────────────────────────────────────────────────────
 
 export interface ConnectAccount {

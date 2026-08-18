@@ -191,6 +191,13 @@ export class StripeProvider implements PaymentProvider {
     return { url: session.url, sessionId: session.id };
   }
 
+  /** Retrieve a checkout session on a connected account to read its current status. */
+  async retrieveConnectCheckoutSession(accountId: string, sessionId: string): Promise<{ status: string; paymentStatus: string }> {
+    const stripe = await this.sdk();
+    const s = await stripe.checkout.sessions.retrieve(sessionId, { stripeAccount: accountId });
+    return { status: String(s.status ?? ''), paymentStatus: String(s.payment_status ?? '') };
+  }
+
   async createTransfer(params: { accountId: string; amount: number; currency: string; description?: string }): Promise<{ transferId: string }> {
     const stripe = await this.sdk();
     const transfer = await stripe.transfers.create({
