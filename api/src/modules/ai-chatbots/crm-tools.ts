@@ -728,4 +728,256 @@ export const CRM_TOOLS: ToolDef[] = [
       return { ok: true, published: true, content: r[0] };
     },
   },
+
+  // ── Batch: conversation actions ────────────────────────────────────────────
+  {
+    name: 'list_users',
+    description: 'Lista los agentes/usuarios activos del equipo (id, nombre, email, rol). Úsalo para saber a quién asignar una conversación.',
+    parameters: { type: 'object', properties: {}, required: [] },
+    handler: async (ctx) => {
+      const rows = await ctx.db.query(
+        `SELECT id, full_name, email, role FROM users WHERE tenant_id=$1 AND is_active=true ORDER BY full_name`,
+        [ctx.tenantId],
+      );
+      return { ok: true, count: rows.length, users: rows };
+    },
+  },
+  {
+    name: 'resolve_conversation',
+    description: 'Marca una conversación como resuelta. Usa list_recent_conversations para el id.',
+    parameters: { type: 'object', properties: { conversation_id: { type: 'string' } }, required: ['conversation_id'] },
+    handler: async (ctx, args) => {
+      const r = await ctx.db.query(
+        `UPDATE conversations SET status='resolved', updated_at=NOW() WHERE id=$1 AND tenant_id=$2 RETURNING id`,
+        [args.conversation_id, ctx.tenantId],
+      );
+      if (!r.length) return { ok: false, error: 'Conversación no encontrada' };
+      return { ok: true, resolved: true };
+    },
+  },
+  {
+    name: 'assign_conversation',
+    description: 'Asigna una conversación a un agente. Usa list_users para el agent_id y list_recent_conversations para el conversation_id.',
+    parameters: { type: 'object', properties: { conversation_id: { type: 'string' }, agent_id: { type: 'string' } }, required: ['conversation_id', 'agent_id'] },
+    handler: async (ctx, args) => {
+      const [u] = await ctx.db.query(`SELECT id FROM users WHERE id=$1 AND tenant_id=$2 AND is_active=true`, [args.agent_id, ctx.tenantId]);
+      if (!u) return { ok: false, error: 'Agente no encontrado' };
+      const r = await ctx.db.query(
+        `UPDATE conversations SET assigned_to=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3 RETURNING id`,
+        [args.agent_id, args.conversation_id, ctx.tenantId],
+      );
+      if (!r.length) return { ok: false, error: 'Conversación no encontrada' };
+      return { ok: true, assigned: true };
+    },
+  },
+  {
+    name: 'add_conversation_note',
+    description: 'Agrega una NOTA INTERNA (privada, no la ve el cliente) a una conversación. Úsalo para dejar contexto al equipo.',
+    parameters: { type: 'object', properties: { conversation_id: { type: 'string' }, note: { type: 'string' } }, required: ['conversation_id', 'note'] },
+    handler: async (ctx, args) => {
+      const note = String(args.note ?? '').trim();
+      if (!note) return { ok: false, error: 'La nota está vacía' };
+      const [conv] = await ctx.db.query(`SELECT id FROM conversations WHERE id=$1 AND tenant_id=$2`, [args.conversation_id, ctx.tenantId]);
+      if (!conv) return { ok: false, error: 'Conversación no encontrada' };
+      await ctx.db.query(
+        `INSERT INTO messages (tenant_id, conversation_id, body, content_type, direction, sender_type, is_private, created_at, updated_at)
+         VALUES ($1,$2,$3,'text','outbound','agent',true,NOW(),NOW())`,
+        [ctx.tenantId, args.conversation_id, note],
+      );
+      return { ok: true, added: true };
+    },
+  },
+  {
+    name: 'add_tag_to_conversation',
+    description: 'Etiqueta una conversación con una etiqueta existente (usa list_tags). No la crea si no existe.',
+    parameters: { type: 'object', properties: { conversation_id: { type: 'string' }, tag_name: { type: 'string' } }, required: ['conversation_id', 'tag_name'] },
+    handler: async (ctx, args) => {
+      const [conv] = await ctx.db.query(`SELECT id FROM conversations WHERE id=$1 AND tenant_id=$2`, [args.conversation_id, ctx.tenantId]);
+      if (!conv) return { ok: false, error: 'Conversación no encontrada' };
+      const [tag] = await ctx.db.query(`SELECT id FROM tags WHERE tenant_id=$1 AND name ILIKE $2 LIMIT 1`, [ctx.tenantId, String(args.tag_name ?? '').trim()]);
+      if (!tag) return { ok: false, error: `La etiqueta "${args.tag_name}" no existe (usa create_tag primero)` };
+      await ctx.db.query(
+        `INSERT INTO conversation_tags (conversation_id, tag_id, tenant_id, created_at) VALUES ($1,$2,$3,NOW()) ON CONFLICT DO NOTHING`,
+        [args.conversation_id, tag.id, ctx.tenantId],
+      );
+      return { ok: true, tagged: true };
+    },
+  },
+
+  // ── Batch: task & appointment actions ──────────────────────────────────────
+  {
+    name: 'complete_task',
+    description: 'Marca una tarea como completada. Usa list_tasks o get_tasks_due para el task_id.',
+    parameters: { type: 'object', properties: { task_id: { type: 'string' } }, required: ['task_id'] },
+    handler: async (ctx, args) => {
+      const r = await ctx.db.query(
+        `UPDATE tasks SET status='completed', updated_at=NOW() WHERE id=$1 AND tenant_id=$2 RETURNING id, title`,
+        [args.task_id, ctx.tenantId],
+      );
+      if (!r.length) return { ok: false, error: 'Tarea no encontrada' };
+      return { ok: true, completed: true, task: r[0] };
+    },
+  },
+  {
+    name: 'update_task',
+    description: 'Actualiza una tarea (título, descripción, fecha límite, prioridad). Solo cambia los campos que envíes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string' },
+        title: { type: 'string' }, description: { type: 'string' },
+        due_date: { type: 'string', description: 'Fecha ISO YYYY-MM-DD' },
+        priority: { type: 'string', description: 'low/medium/high' },
+      },
+      required: ['task_id'],
+    },
+    handler: async (ctx, args) => {
+      const sets: string[] = []; const params: any[] = [];
+      if (String(args.title ?? '').trim()) { params.push(args.title.trim()); sets.push(`title=$${params.length}`); }
+      if (args.description !== undefined) { params.push(String(args.description ?? '')); sets.push(`description=$${params.length}`); }
+      if (String(args.due_date ?? '').trim()) { params.push(args.due_date.trim()); sets.push(`due_date=$${params.length}`); }
+      if (String(args.priority ?? '').trim()) { params.push(args.priority.trim().toLowerCase()); sets.push(`priority=$${params.length}`); }
+      if (!sets.length) return { ok: false, error: 'Nada que actualizar' };
+      params.push(args.task_id, ctx.tenantId);
+      const r = await ctx.db.query(
+        `UPDATE tasks SET ${sets.join(',')}, updated_at=NOW() WHERE id=$${params.length - 1} AND tenant_id=$${params.length} RETURNING id, title`,
+        params,
+      );
+      if (!r.length) return { ok: false, error: 'Tarea no encontrada' };
+      return { ok: true, task: r[0] };
+    },
+  },
+  {
+    name: 'create_appointment',
+    description: 'Crea una cita/recordatorio con fecha y hora. scheduled_at en ISO (YYYY-MM-DDTHH:MM). Opcional: contacto.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        scheduled_at: { type: 'string', description: 'Fecha y hora ISO, ej. 2026-08-20T15:30' },
+        contact_id: { type: 'string', description: 'ID del contacto (opcional)' },
+      },
+      required: ['title', 'scheduled_at'],
+    },
+    handler: async (ctx, args) => {
+      if (!String(args.scheduled_at ?? '').trim()) return { ok: false, error: 'scheduled_at es obligatorio' };
+      const [row] = await ctx.db.query(
+        `INSERT INTO appointments (tenant_id, contact_id, title, scheduled_at, status, created_at, updated_at)
+         VALUES ($1,$2,$3,$4::timestamptz,'pending',NOW(),NOW()) RETURNING id, title, scheduled_at`,
+        [ctx.tenantId, args.contact_id ?? null, String(args.title), args.scheduled_at],
+      );
+      return { ok: true, appointment: row };
+    },
+  },
+  {
+    name: 'cancel_appointment',
+    description: 'Cancela una cita. Usa list_appointments/get_appointment_stats para el appointment_id.',
+    parameters: { type: 'object', properties: { appointment_id: { type: 'string' } }, required: ['appointment_id'] },
+    handler: async (ctx, args) => {
+      const r = await ctx.db.query(
+        `UPDATE appointments SET status='cancelled', updated_at=NOW() WHERE id=$1 AND tenant_id=$2 RETURNING id`,
+        [args.appointment_id, ctx.tenantId],
+      );
+      if (!r.length) return { ok: false, error: 'Cita no encontrada' };
+      return { ok: true, cancelled: true };
+    },
+  },
+
+  // ── Batch: creation & management ───────────────────────────────────────────
+  {
+    name: 'create_tag',
+    description: 'Crea una etiqueta nueva (nombre y color opcional). Si ya existe una con ese nombre, la devuelve.',
+    parameters: { type: 'object', properties: { name: { type: 'string' }, color: { type: 'string', description: 'Color hex, ej. #6366f1' } }, required: ['name'] },
+    handler: async (ctx, args) => {
+      const name = String(args.name ?? '').trim();
+      if (!name) return { ok: false, error: 'name es obligatorio' };
+      const [existing] = await ctx.db.query(`SELECT id, name, color FROM tags WHERE tenant_id=$1 AND name ILIKE $2 LIMIT 1`, [ctx.tenantId, name]);
+      if (existing) return { ok: true, tag: existing, existed: true };
+      const [row] = await ctx.db.query(
+        `INSERT INTO tags (tenant_id, name, color, created_at, updated_at) VALUES ($1,$2,$3,NOW(),NOW()) RETURNING id, name, color`,
+        [ctx.tenantId, name, args.color ?? '#6366f1'],
+      );
+      return { ok: true, tag: row };
+    },
+  },
+  {
+    name: 'create_content',
+    description: 'Crea un contenido de marketing en borrador (título, cuerpo, canal). Para publicarlo usa publish_content.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        body: { type: 'string' },
+        channel: { type: 'string', description: 'blog|instagram|facebook|linkedin|twitter|youtube|other (default blog)' },
+        scheduled_at: { type: 'string', description: 'Fecha ISO para programar (opcional)' },
+      },
+      required: ['title'],
+    },
+    handler: async (ctx, args) => {
+      const [row] = await ctx.db.query(
+        `INSERT INTO content_posts (tenant_id, title, body, channel, status, scheduled_at, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,'draft',$5,NOW(),NOW()) RETURNING id, title, channel, status`,
+        [ctx.tenantId, String(args.title), args.body ?? null, args.channel ?? 'blog', args.scheduled_at ?? null],
+      );
+      return { ok: true, content: row };
+    },
+  },
+  {
+    name: 'create_campaign',
+    description: 'Crea una campaña en borrador (nombre y tipo: email|whatsapp|sms|phone). NO la lanza — para eso usa launch_campaign tras revisarla.',
+    parameters: { type: 'object', properties: { name: { type: 'string' }, type: { type: 'string', description: 'email|whatsapp|sms|phone (default email)' } }, required: ['name'] },
+    handler: async (ctx, args) => {
+      const type = ['email', 'whatsapp', 'sms', 'phone'].includes(String(args.type ?? '').toLowerCase()) ? String(args.type).toLowerCase() : 'email';
+      const [row] = await ctx.db.query(
+        `INSERT INTO campaigns (tenant_id, name, type, status, created_at, updated_at) VALUES ($1,$2,$3,'draft',NOW(),NOW()) RETURNING id, name, type, status`,
+        [ctx.tenantId, String(args.name), type],
+      );
+      return { ok: true, campaign: row };
+    },
+  },
+  {
+    name: 'list_list_contacts',
+    description: 'Lista los contactos de una lista de contactos (usa list_contact_lists para el list_id). Hasta 50.',
+    parameters: { type: 'object', properties: { list_id: { type: 'string' } }, required: ['list_id'] },
+    handler: async (ctx, args) => {
+      const [l] = await ctx.db.query(`SELECT id FROM contact_lists WHERE id=$1 AND tenant_id=$2`, [args.list_id, ctx.tenantId]);
+      if (!l) return { ok: false, error: 'Lista no encontrada' };
+      const rows = await ctx.db.query(
+        `SELECT ct.id, ct.full_name, ct.phone, ct.email
+         FROM contact_list_contacts lc JOIN contacts ct ON ct.id = lc.contact_id
+         WHERE lc.list_id=$1 AND ct.tenant_id=$2 ORDER BY ct.full_name LIMIT 50`,
+        [args.list_id, ctx.tenantId],
+      );
+      return { ok: true, count: rows.length, contacts: rows };
+    },
+  },
+  {
+    name: 'remove_contact_from_list',
+    description: 'Quita un contacto de una lista.',
+    parameters: { type: 'object', properties: { list_id: { type: 'string' }, contact_id: { type: 'string' } }, required: ['list_id', 'contact_id'] },
+    handler: async (ctx, args) => {
+      const [l] = await ctx.db.query(`SELECT id FROM contact_lists WHERE id=$1 AND tenant_id=$2`, [args.list_id, ctx.tenantId]);
+      if (!l) return { ok: false, error: 'Lista no encontrada' };
+      await ctx.db.query(`DELETE FROM contact_list_contacts WHERE list_id=$1 AND contact_id=$2`, [args.list_id, args.contact_id]);
+      return { ok: true, removed: true };
+    },
+  },
+  {
+    name: 'list_queues',
+    description: 'Lista las colas de atención activas (id, nombre) para enrutar conversaciones.',
+    parameters: { type: 'object', properties: {}, required: [] },
+    handler: async (ctx) => {
+      const rows = await ctx.db.query(`SELECT id, name FROM queues WHERE tenant_id=$1 AND is_active=true ORDER BY name`, [ctx.tenantId]);
+      return { ok: true, count: rows.length, queues: rows };
+    },
+  },
+  {
+    name: 'list_teams',
+    description: 'Lista los equipos (id, nombre).',
+    parameters: { type: 'object', properties: {}, required: [] },
+    handler: async (ctx) => {
+      const rows = await ctx.db.query(`SELECT id, name FROM teams WHERE tenant_id=$1 ORDER BY name`, [ctx.tenantId]);
+      return { ok: true, count: rows.length, teams: rows };
+    },
+  },
 ];
