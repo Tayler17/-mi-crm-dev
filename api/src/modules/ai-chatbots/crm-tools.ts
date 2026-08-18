@@ -90,6 +90,19 @@ export async function runTool(tools: ToolDef[], name: string, ctx: ToolContext, 
   }
 }
 
+/** Whitelisted period → SQL "since" fragment (no user text ever reaches the query). */
+function periodSince(p?: string, fallback = 'month'): { period: string; since: string | null } {
+  const map: Record<string, string | null> = {
+    today: "date_trunc('day', now())",
+    week: "date_trunc('week', now())",
+    month: "date_trunc('month', now())",
+    all: null,
+  };
+  const key = String(p ?? fallback).toLowerCase();
+  const period = key in map ? key : fallback;
+  return { period, since: map[period] };
+}
+
 // ── CRM tools (starter set — expanded in Fase 2) ────────────────────────────
 
 export const CRM_TOOLS: ToolDef[] = [
@@ -175,6 +188,134 @@ export const CRM_TOOLS: ToolDef[] = [
         [ctx.tenantId],
       );
       return { ok: true, period: p in sinceSql ? p : 'today', total: row?.total ?? 0, open: row?.open ?? 0, pending: row?.pending ?? 0, resolved: row?.resolved ?? 0 };
+    },
+  },
+  {
+    name: 'get_deals_stats',
+    description: 'Estadísticas de ventas: pipeline abierto (valor y nº actual), y ganados/perdidos + valor ganado + tasa de cierre en el período. Úsalo para "¿cuánto vendimos este mes?", "¿cuál es mi pipeline?", "tasa de cierre".',
+    parameters: { type: 'object', properties: { period: { type: 'string', description: 'today|week|month|all para ganados/perdidos (default month). El pipeline abierto es actual, no depende del período.' } }, required: [] },
+    handler: async (ctx, args) => {
+      const { period, since } = periodSince(args.period, 'month');
+      const [pipe] = await ctx.db.query(
+        `SELECT COUNT(*)::int AS n, COALESCE(SUM(value),0)::numeric AS v
+         FROM deals WHERE tenant_id=$1 AND status NOT IN ('won','lost')`,
+        [ctx.tenantId],
+      );
+      const where = since ? `AND created_at >= ${since}` : '';
+      const [row] = await ctx.db.query(
+        `SELECT COUNT(*) FILTER (WHERE status='won')::int  AS won,
+                COUNT(*) FILTER (WHERE status='lost')::int AS lost,
+                COALESCE(SUM(value) FILTER (WHERE status='won'),0)::numeric AS won_value,
+                ROUND(100.0 * COUNT(*) FILTER (WHERE status='won') / NULLIF(COUNT(*) FILTER (WHERE status IN ('won','lost')),0),1)::numeric AS win_rate
+         FROM deals WHERE tenant_id=$1 ${where}`,
+        [ctx.tenantId],
+      );
+      return {
+        ok: true, period,
+        open_deals: pipe?.n ?? 0, open_pipeline_value: Number(pipe?.v ?? 0),
+        won: row?.won ?? 0, lost: row?.lost ?? 0, won_value: Number(row?.won_value ?? 0),
+        win_rate: row?.win_rate == null ? null : Number(row.win_rate),
+      };
+    },
+  },
+  {
+    name: 'get_tasks_due',
+    description: 'Tareas PENDIENTES por vencimiento: today (vencen hoy), overdue (atrasadas) o week (próximos 7 días). Úsalo para "¿qué tareas tengo hoy?", "¿tengo tareas atrasadas?".',
+    parameters: { type: 'object', properties: { filter: { type: 'string', description: 'today|overdue|week (default today)' } }, required: [] },
+    handler: async (ctx, args) => {
+      const cond: Record<string, string> = {
+        today: 't.due_date::date = current_date',
+        overdue: 't.due_date::date < current_date',
+        week: "t.due_date::date BETWEEN current_date AND current_date + interval '7 days'",
+      };
+      const f = String(args.filter ?? 'today').toLowerCase();
+      const c = f in cond ? cond[f] : cond.today;
+      const rows = await ctx.db.query(
+        `SELECT t.id, t.title, t.due_date, t.priority, ct.full_name AS contact
+         FROM tasks t LEFT JOIN contacts ct ON ct.id = t.contact_id
+         WHERE t.tenant_id=$1 AND t.status='pending' AND t.due_date IS NOT NULL AND ${c}
+         ORDER BY t.due_date ASC LIMIT 30`,
+        [ctx.tenantId],
+      );
+      return { ok: true, filter: f in cond ? f : 'today', count: rows.length, tasks: rows };
+    },
+  },
+  {
+    name: 'get_contacts_stats',
+    description: 'Cuántos contactos NUEVOS se agregaron en el período (hoy/semana/mes) y el total. Úsalo para "¿cuántos contactos nuevos esta semana?".',
+    parameters: { type: 'object', properties: { period: { type: 'string', description: 'today|week|month|all (default month)' } }, required: [] },
+    handler: async (ctx, args) => {
+      const { period, since } = periodSince(args.period, 'month');
+      const [tot] = await ctx.db.query(`SELECT COUNT(*)::int AS n FROM contacts WHERE tenant_id=$1`, [ctx.tenantId]);
+      let newInPeriod = tot?.n ?? 0;
+      if (since) {
+        const [a] = await ctx.db.query(`SELECT COUNT(*)::int AS n FROM contacts WHERE tenant_id=$1 AND created_at >= ${since}`, [ctx.tenantId]);
+        newInPeriod = a?.n ?? 0;
+      }
+      return { ok: true, period, total_contacts: tot?.n ?? 0, new_in_period: newInPeriod };
+    },
+  },
+  {
+    name: 'get_appointment_stats',
+    description: 'Cuántas citas hay en el período según su fecha programada (today/week/month), con la lista. Úsalo para "¿cuántas citas hay hoy?".',
+    parameters: { type: 'object', properties: { period: { type: 'string', description: 'today|week|month (default today)' } }, required: [] },
+    handler: async (ctx, args) => {
+      const range: Record<string, string> = {
+        today: 'a.scheduled_at::date = current_date',
+        week: "a.scheduled_at >= date_trunc('week', now()) AND a.scheduled_at < date_trunc('week', now()) + interval '7 days'",
+        month: "date_trunc('month', a.scheduled_at) = date_trunc('month', now())",
+      };
+      const key = String(args.period ?? 'today').toLowerCase();
+      const cond = key in range ? range[key] : range.today;
+      const rows = await ctx.db.query(
+        `SELECT a.id, a.title, a.scheduled_at, a.status, ct.full_name AS contact
+         FROM appointments a LEFT JOIN contacts ct ON ct.id = a.contact_id
+         WHERE a.tenant_id=$1 AND ${cond} ORDER BY a.scheduled_at ASC LIMIT 30`,
+        [ctx.tenantId],
+      );
+      return { ok: true, period: key in range ? key : 'today', count: rows.length, appointments: rows };
+    },
+  },
+  {
+    name: 'list_recent_conversations',
+    description: 'Lista las conversaciones más recientes (contacto, estado, canal, última actividad) para luego LEER una con get_conversation_messages. Opcional: filtrar por estado. Hasta 15.',
+    parameters: { type: 'object', properties: { status: { type: 'string', description: 'open|pending|resolved (opcional)' } }, required: [] },
+    handler: async (ctx, args) => {
+      const params: any[] = [ctx.tenantId];
+      let where = 'c.tenant_id=$1';
+      const st = String(args.status ?? '').trim().toLowerCase();
+      if (['open', 'pending', 'resolved'].includes(st)) { params.push(st); where += ` AND c.status=$${params.length}`; }
+      const rows = await ctx.db.query(
+        `SELECT c.id, c.status, c.channel_type, c.updated_at,
+                COALESCE(NULLIF(ct.full_name,''), ct.email, ct.phone, 'Sin contacto') AS contact
+         FROM conversations c LEFT JOIN contacts ct ON ct.id = c.contact_id
+         WHERE ${where} ORDER BY c.updated_at DESC LIMIT 15`,
+        params,
+      );
+      return { ok: true, count: rows.length, conversations: rows };
+    },
+  },
+  {
+    name: 'get_conversation_messages',
+    description: 'Lee los últimos mensajes de una conversación (usa list_recent_conversations para el id) para resumirla o responder sobre su contenido. Excluye notas privadas.',
+    parameters: {
+      type: 'object',
+      properties: { conversation_id: { type: 'string' }, limit: { type: 'number', description: 'Cuántos mensajes (default 20, máx 50)' } },
+      required: ['conversation_id'],
+    },
+    handler: async (ctx, args) => {
+      const lim = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
+      const [conv] = await ctx.db.query(`SELECT id FROM conversations WHERE id=$1 AND tenant_id=$2`, [args.conversation_id, ctx.tenantId]);
+      if (!conv) return { ok: false, error: 'Conversación no encontrada' };
+      const rows = await ctx.db.query(
+        `SELECT direction, sender_type, body, content_type, created_at
+         FROM messages
+         WHERE conversation_id=$1 AND is_private=false AND content_type <> 'activity'
+         ORDER BY created_at DESC LIMIT ${lim}`,
+        [args.conversation_id],
+      );
+      rows.reverse();
+      return { ok: true, count: rows.length, messages: rows };
     },
   },
   {
