@@ -148,6 +148,36 @@ export const CRM_TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'get_conversation_stats',
+    description: 'Conteo de conversaciones por PERÍODO y ESTADO. Úsalo para "¿cuántas conversaciones tenemos hoy?", "¿cuántas abiertas/en espera/resueltas?", "conversaciones de esta semana". Devuelve total + desglose (abiertas/pendientes/resueltas).',
+    parameters: {
+      type: 'object',
+      properties: { period: { type: 'string', description: 'today (hoy), week (esta semana), month (este mes) o all (todas). Por defecto: today.' } },
+      required: [],
+    },
+    handler: async (ctx, args) => {
+      const p = String(args.period ?? 'today').toLowerCase();
+      // Whitelisted period → fixed SQL fragment (no user text reaches the query).
+      const sinceSql: Record<string, string | null> = {
+        today: "date_trunc('day', now())",
+        week: "date_trunc('week', now())",
+        month: "date_trunc('month', now())",
+        all: null,
+      };
+      const since = p in sinceSql ? sinceSql[p] : sinceSql.today;
+      const where = since ? `AND created_at >= ${since}` : '';
+      const [row] = await ctx.db.query(
+        `SELECT COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE status='open')::int     AS open,
+                COUNT(*) FILTER (WHERE status='pending')::int  AS pending,
+                COUNT(*) FILTER (WHERE status='resolved')::int AS resolved
+         FROM conversations WHERE tenant_id=$1 ${where}`,
+        [ctx.tenantId],
+      );
+      return { ok: true, period: p in sinceSql ? p : 'today', total: row?.total ?? 0, open: row?.open ?? 0, pending: row?.pending ?? 0, resolved: row?.resolved ?? 0 };
+    },
+  },
+  {
     name: 'update_contact',
     description: 'Actualizar datos de un contacto (nombre, teléfono, email, puesto, notas). Usa search_contacts primero para el contact_id. Solo cambia los campos que envíes.',
     parameters: {
