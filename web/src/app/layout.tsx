@@ -24,9 +24,18 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // Umami web analytics — inert unless both env vars are set on the web server
+  // (runtime, server-side → no rebuild needed to enable/disable). See deploy/umami.
+  const umamiSrc = process.env.UMAMI_SRC;
+  const umamiId = process.env.UMAMI_WEBSITE_ID;
   return (
     <html lang="es">
-      <body>{children}</body>
+      <body>
+        {children}
+        {umamiSrc && umamiId && (
+          <script defer src={umamiSrc} data-website-id={umamiId}></script>
+        )}
+      </body>
     </html>
   );
 }
