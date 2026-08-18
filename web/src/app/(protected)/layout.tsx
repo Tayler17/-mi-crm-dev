@@ -711,7 +711,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
       <GlobalSearch />
 
       {/* Floating voice button for the Business AI Assistant (admin+, hidden on its own page) */}
-      {hasRole(user?.role, 'admin') && pathname !== '/ai-assistant' && <BusinessAssistantFab lang={lang} />}
+      {hasRole(user?.role, 'admin') && !['/ai-assistant', '/inbox', '/chat'].includes(pathname) && <BusinessAssistantFab lang={lang} />}
 
       {/* Profile modal */}
       {profileOpen && (
