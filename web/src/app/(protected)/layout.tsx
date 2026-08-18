@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { logout, getStoredUser, openNotificationsStream, setMyAvailability, getMyChats, getCurrentPlan, touchLastSeen } from '@/lib/api';
 import { LangContext } from '@/lib/lang-context';
 import { GlobalSearch } from '@/components/GlobalSearch';
+import { BusinessAssistantFab } from '@/components/BusinessAssistantFab';
 
 // ── Languages ─────────────────────────────────────────────────────────────────
 const LANGS = [
@@ -707,6 +708,9 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
 
       {/* Global Search modal */}
       <GlobalSearch />
+
+      {/* Floating voice button for the Business AI Assistant (admin+, hidden on its own page) */}
+      {hasRole(user?.role, 'admin') && pathname !== '/ai-assistant' && <BusinessAssistantFab lang={lang} />}
 
       {/* Profile modal */}
       {profileOpen && (
