@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { aiAgentChat, type AiAgentAction } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
+import { cleanForSpeech } from '@/lib/speech';
 
 interface Msg { role: 'user' | 'assistant'; content: string; actions?: AiAgentAction[] }
 
@@ -87,7 +88,9 @@ export default function AiAssistantPage() {
     const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
     if (!synth) { resumeListening(); return; }
     try { synth.cancel(); } catch {}
-    const u = new SpeechSynthesisUtterance(text);
+    const clean = cleanForSpeech(text);
+    if (!clean) { resumeListening(); return; }
+    const u = new SpeechSynthesisUtterance(clean);
     u.lang = voiceLangRef.current;
     try {
       const pref = synth.getVoices().find((v) => v.lang?.toLowerCase().startsWith(voiceLangRef.current.slice(0, 2)));
