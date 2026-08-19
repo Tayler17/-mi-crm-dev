@@ -182,7 +182,12 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     const token = localStorage.getItem('token');
     if (!token) { router.replace('/login'); return; }
     setUser(getStoredUser());
-    setAvailability(localStorage.getItem('availability') ?? 'online');
+    const storedAvail = localStorage.getItem('availability') ?? 'online';
+    setAvailability(storedAvail);
+    // Sync presence to the DB on load — otherwise availability only reaches the DB
+    // on a manual toggle, so call transfers (which ring agents WHERE availability='online')
+    // never find an agent who just opened the app.
+    setMyAvailability(storedAvail).catch(() => {});
     setMounted(true);
 
     // Heartbeat: record last activity now and every 2 minutes while the app is open
