@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Delete, Req, Headers, HttpCode,
-  UseGuards, Body, Query,
+  UseGuards, Body, Query, Param,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantId } from '../../common/decorators/tenant.decorator';
@@ -55,6 +55,12 @@ export class BillingController {
   @UseGuards(JwtAuthGuard)
   getPaymentLinks(@TenantId() tenantId: string, @Query('limit') limit?: string) {
     return this.billing.getPaymentLinks(tenantId, limit ? +limit : 100);
+  }
+
+  /** Public: resolve a short pay code → the Stripe checkout URL (used by /pay/:code). */
+  @Get('pay/resolve/:code')
+  async resolvePay(@Param('code') code: string) {
+    return { url: await this.billing.resolvePayCode(code) };
   }
 
   // ── Stripe Connect ────────────────────────────────────────────────────────

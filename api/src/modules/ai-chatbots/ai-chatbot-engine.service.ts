@@ -657,13 +657,13 @@ export class AiChatbotEngineService {
         await this.saveBotMessage(tenantId, conversationId, 'El monto mínimo para generar un link de pago es $1.');
       } else {
         try {
-          const { url } = await this.billing.createConnectPaymentLink(tenantId, {
+          const { url, shortUrl } = await this.billing.createConnectPaymentLink(tenantId, {
             amount: clampedAmount,
             currency: (currency || 'USD').toUpperCase(),
             description: description || 'Pago',
             contactId: conv.contact_id ?? undefined,
           });
-          await this.saveBotMessage(tenantId, conversationId, `💳 ${url}`);
+          await this.saveBotMessage(tenantId, conversationId, `💳 ${shortUrl || url}`);
           await this.saveActivityMessage(tenantId, conversationId,
             `🤖 Bot generó link de pago: ${clampedAmount} ${currency || 'USD'}`);
           this.logger.log(`[engine] Payment link generated for conv ${conversationId}: ${clampedAmount} ${currency}`);

@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { randomBytes } from 'crypto';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
 import { StripeProvider } from './providers/stripe.provider';
 import { PaymentProvider } from './providers/payment-provider.interface';
@@ -33,6 +34,9 @@ export class BillingService implements OnModuleInit {
         updated_at timestamptz NOT NULL DEFAULT now()
       )
     `).catch((e: any) => console.error(`[billing] payment_links init: ${e.message}`));
+    // Short code for a tidy pay link (app.automarkiq.com/pay/<code> instead of the long Stripe URL).
+    await this.db.query(`ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS code text`).catch(() => {});
+    await this.db.query(`CREATE UNIQUE INDEX IF NOT EXISTS payment_links_code_uidx ON payment_links(code) WHERE code IS NOT NULL`).catch(() => {});
   }
 
   // ── Provider factory ──────────────────────────────────────────────────────
@@ -377,7 +381,7 @@ export class BillingService implements OnModuleInit {
     description: string;
     dealId?: string;
     contactId?: string;
-  }): Promise<{ url: string; sessionId: string }> {
+  }): Promise<{ url: string; sessionId: string; code?: string; shortUrl?: string }> {
     const row = await this.getConnectAccount(tenantId);
     if (!row?.account_id) throw new BadRequestException('No tienes una cuenta de Stripe Connect activa. Ve a Configuración → Pagos para conectarla.');
     if (!row.charges_enabled) throw new BadRequestException('Tu cuenta de Stripe aún no tiene cobros habilitados. Completa el onboarding en Configuración → Pagos.');
@@ -397,15 +401,17 @@ export class BillingService implements OnModuleInit {
         successUrl:  `${base}${returnPath}?payment=success`,
         cancelUrl:   `${base}${returnPath}?payment=cancelled`,
       });
+      // Short code → a tidy pay link (base/pay/<code>) instead of the long Stripe URL.
+      const code = randomBytes(6).toString('base64url');
       // Record the link so the team can track its status in the CRM.
       await this.db.query(
-        `INSERT INTO payment_links (tenant_id, session_id, account_id, deal_id, contact_id, amount, currency, description, url, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending')
+        `INSERT INTO payment_links (tenant_id, session_id, account_id, deal_id, contact_id, amount, currency, description, url, code, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending')
          ON CONFLICT (session_id) DO NOTHING`,
         [tenantId, result.sessionId, row.account_id, params.dealId ?? null, params.contactId ?? null,
-         params.amount, (params.currency || 'usd').toLowerCase(), params.description ?? null, result.url],
+         params.amount, (params.currency || 'usd').toLowerCase(), params.description ?? null, result.url, code],
       ).catch((e: any) => console.error(`[billing] store payment_link: ${e.message}`));
-      return result;
+      return { ...result, code, shortUrl: `${base}/pay/${code}` };
     } catch (e: any) {
       if (e?.status) throw e; // re-throw our own HttpExceptions as-is
       const msg: string = e?.message ?? String(e);
@@ -427,6 +433,14 @@ export class BillingService implements OnModuleInit {
       `SELECT * FROM transactions WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2`,
       [tenantId, limit],
     );
+  }
+
+  /** Resolve a short pay code → the Stripe checkout URL (for the public /pay/:code redirect). */
+  async resolvePayCode(code: string): Promise<string | null> {
+    const [row] = await this.db.query(
+      `SELECT url FROM payment_links WHERE code=$1 LIMIT 1`, [code],
+    ).catch(() => []);
+    return row?.url ?? null;
   }
 
   // ── Payment links (bot/agent-generated Stripe Connect checkouts) ────────────
