@@ -154,6 +154,9 @@ export function Softphone() {
     if (!device || !readyRef.current || callRef.current) return;
     const To = number.replace(/[^\d+]/g, '');
     if (!To) return;
+    // WebRTC needs a microphone; without one the call can't be established.
+    try { await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch { alert('El softphone necesita un micrófono. Conecta uno y permite el acceso al micrófono en el navegador (candado 🔒 → Micrófono → Permitir) para poder llamar.'); return; }
     try {
       setFrom(name || number);
       setStatus('calling');
