@@ -531,10 +531,9 @@ export class CallBotTwilioService {
     // Initialize conversation history with enriched system prompt
     if (bot.system_prompt) {
       const pc = bot.provider_config ?? {};
-      const hasTransfer = !!(pc.transferToNumber ?? pc.transfer_to_number);
 
       // Load all context in parallel
-      const [crmCtx, transferableQueues, prevLogs, dentallyOn] = await Promise.all([
+      const [crmCtx, transferableQueues, prevLogs, dentallyOn, voiceSdk] = await Promise.all([
         this.getCrmCtx(bot.tenant_id),
         this.getQueues(botId, bot.tenant_id),
         (!isTransferredCall && from)
@@ -546,7 +545,10 @@ export class CallBotTwilioService {
             ).catch(() => [])
           : Promise.resolve([]),
         this.integrations.isConnected(bot.tenant_id, 'dentally').catch(() => false),
+        this.platformSettings.getVoiceSdk().catch(() => ({ accountSid: '', apiKey: '', apiSecret: '', twimlAppSid: '' })),
       ]);
+      // Human transfer available with an external number OR the in-CRM softphone.
+      const hasTransfer = !!(pc.transferToNumber ?? pc.transfer_to_number) || !!(voiceSdk?.apiKey && voiceSdk?.apiSecret);
 
       const contactLine = contact ? `CONTACTO IDENTIFICADO: ${contact.name}${contact.email ? ` (${contact.email})` : ''}.` : '';
 
@@ -945,14 +947,19 @@ ${addTagInstruction}
     const tenantId = meta?.tenantId ?? bot.tenant_id;
 
     const pc = bot.provider_config ?? {};
-    const hasHumanTransfer = !!(pc.transferToNumber ?? pc.transfer_to_number);
 
-    const [crmCtx, dentallyConnected, ai, transferableQueues] = await Promise.all([
+    const [crmCtx, dentallyConnected, ai, transferableQueues, voiceSdk] = await Promise.all([
       this.getCrmCtx(tenantId),
       this.integrations.isConnected(tenantId, 'dentally').catch(() => false),
       this.platformSettings.getAI().catch(() => ({ apiKey: '', provider: '', model: '' })),
       this.getQueues(bot.id, tenantId).catch(() => []),
+      this.platformSettings.getVoiceSdk().catch(() => ({ accountSid: '', apiKey: '', apiSecret: '', twimlAppSid: '' })),
     ]);
+    // Human transfer is available if there's a configured external number OR the in-CRM
+    // softphone is set up (agents can receive the call in the browser). Without either,
+    // the bot has no way to reach a person, so we don't offer the tool.
+    const softphoneConfigured = !!(voiceSdk?.apiKey && voiceSdk?.apiSecret);
+    const hasHumanTransfer = !!(pc.transferToNumber ?? pc.transfer_to_number) || softphoneConfigured;
     // Department options carry the destination bot's LANGUAGE so the agent can route
     // by the caller's language (not just guess by name) when several bots exist.
     const langName = (l?: string) => (l || '').startsWith('es') ? 'español' : (l || '').startsWith('en') ? 'English' : (l || 'idioma');
