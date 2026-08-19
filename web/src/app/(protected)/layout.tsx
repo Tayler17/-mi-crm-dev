@@ -7,6 +7,7 @@ import { logout, getStoredUser, openNotificationsStream, setMyAvailability, getM
 import { LangContext } from '@/lib/lang-context';
 import { GlobalSearch } from '@/components/GlobalSearch';
 import { BusinessAssistantFab } from '@/components/BusinessAssistantFab';
+import { Softphone } from '@/components/Softphone';
 
 // ── Languages ─────────────────────────────────────────────────────────────────
 const LANGS = [
@@ -709,6 +710,9 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
 
       {/* Global Search modal */}
       <GlobalSearch />
+
+      {/* In-CRM softphone (Twilio) — inert until configured; rings on bot→human transfer */}
+      <Softphone />
 
       {/* Floating voice button for the Business AI Assistant (admin+, hidden on its own page) */}
       {hasRole(user?.role, 'admin') && !['/ai-assistant', '/inbox', '/chat'].includes(pathname) && <BusinessAssistantFab lang={lang} />}

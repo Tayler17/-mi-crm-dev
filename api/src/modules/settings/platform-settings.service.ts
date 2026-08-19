@@ -12,6 +12,9 @@ export const PLATFORM_KEYS = [
   'voice.phone_numbers',
   'voice.bundle_sid',
   'voice.address_sid',
+  'voice.api_key',
+  'voice.api_secret',
+  'voice.twiml_app_sid',
   'meta.app_id',
   'meta.app_secret',
   'meta.verify_token',
@@ -48,7 +51,7 @@ export const PLATFORM_KEYS = [
 
 export type PlatformKey = (typeof PLATFORM_KEYS)[number];
 
-const SENSITIVE = new Set<PlatformKey>(['ai.api_key', 'voice.auth_token', 'meta.app_secret', 'meta.verify_token', 'elevenlabs.api_key', 'stripe.secret_key', 'stripe.webhook_secret', 'backup.s3_secret_key', 'smtp.password', 'twitter.api_secret', 'twitter.access_secret', 'linkedin.access_token', 'stability.api_key', 'fal.api_key', 'deepgram.api_key']);
+const SENSITIVE = new Set<PlatformKey>(['ai.api_key', 'voice.auth_token', 'voice.api_secret', 'meta.app_secret', 'meta.verify_token', 'elevenlabs.api_key', 'stripe.secret_key', 'stripe.webhook_secret', 'backup.s3_secret_key', 'smtp.password', 'twitter.api_secret', 'twitter.access_secret', 'linkedin.access_token', 'stability.api_key', 'fal.api_key', 'deepgram.api_key']);
 const MASK = '••••••••';
 
 /** Maps each platform key to its env-var fallback (for local dev / initial setup). */
@@ -62,6 +65,9 @@ const ENV_FALLBACKS: Record<PlatformKey, string> = {
   'voice.phone_numbers':  'TWILIO_PHONE_NUMBERS',
   'voice.bundle_sid':     'TWILIO_BUNDLE_SID',
   'voice.address_sid':    'TWILIO_ADDRESS_SID',
+  'voice.api_key':        'TWILIO_API_KEY',
+  'voice.api_secret':     'TWILIO_API_SECRET',
+  'voice.twiml_app_sid':  'TWILIO_TWIML_APP_SID',
   'meta.app_id':          'META_APP_ID',
   'meta.app_secret':      'META_APP_SECRET',
   'meta.verify_token':    'META_WEBHOOK_VERIFY_TOKEN',
@@ -168,6 +174,19 @@ export class PlatformSettingsService {
       provider:   (await this.get('voice.provider')) || 'twilio',
       accountSid: await this.get('voice.account_sid'),
       authToken:  await this.get('voice.auth_token'),
+    };
+  }
+
+  /** Twilio Voice SDK credentials for the in-CRM softphone (agents answer/make calls).
+   *  Needs an API Key SID + Secret (created in the Twilio console). The TwiML App SID
+   *  is only needed for OUTBOUND calls from the browser (Phase 2). */
+  async getVoiceSdk(): Promise<{ accountSid: string; apiKey: string; apiSecret: string; twimlAppSid: string }> {
+    await this.loadCache();
+    return {
+      accountSid:  await this.get('voice.account_sid'),
+      apiKey:      await this.get('voice.api_key'),
+      apiSecret:   await this.get('voice.api_secret'),
+      twimlAppSid: await this.get('voice.twiml_app_sid'),
     };
   }
 

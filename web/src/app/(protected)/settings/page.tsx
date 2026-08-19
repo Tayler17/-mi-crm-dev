@@ -870,6 +870,7 @@ export default function SettingsPage() {
     'ai.provider': 'openai', 'ai.api_key': '', 'ai.model': '',
     'voice.provider': 'twilio', 'voice.account_sid': '', 'voice.auth_token': '', 'voice.phone_numbers': '',
     'voice.bundle_sid': '', 'voice.address_sid': '',
+    'voice.api_key': '', 'voice.api_secret': '', 'voice.twiml_app_sid': '',
     'meta.app_id': '', 'meta.app_secret': '', 'meta.verify_token': '',
     'elevenlabs.api_key': '',
     'deepgram.api_key': '',
@@ -953,6 +954,9 @@ export default function SettingsPage() {
         'voice.phone_numbers':  p['voice.phone_numbers']?.value || '',
         'voice.bundle_sid':     p['voice.bundle_sid']?.value || '',
         'voice.address_sid':    p['voice.address_sid']?.value || '',
+        'voice.api_key':        p['voice.api_key']?.value || '',
+        'voice.api_secret':     p['voice.api_secret']?.masked ? '••••••••' : (p['voice.api_secret']?.value || ''),
+        'voice.twiml_app_sid':  p['voice.twiml_app_sid']?.value || '',
         'meta.app_id':          p['meta.app_id']?.value       || '',
         'meta.app_secret':      p['meta.app_secret']?.masked       ? '••••••••' : (p['meta.app_secret']?.value || ''),
         'meta.verify_token':    p['meta.verify_token']?.masked     ? '••••••••' : (p['meta.verify_token']?.value || ''),
@@ -1703,6 +1707,24 @@ export default function SettingsPage() {
               <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
                 Necesarios solo para comprar números de países regulados (US/Canadá no los requieren).
               </div>
+            </Row>
+            <Row label="API Key SID (softphone)" hint="Para el softphone del CRM (los agentes contestan/llaman desde el navegador). Twilio → Account → API keys & tokens → Create API key (Standard) → copia el SID (empieza con SK).">
+              <input className="form-input" style={{ maxWidth: 400 }}
+                value={platformForm['voice.api_key']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'voice.api_key': e.target.value }))}
+                placeholder="SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+            </Row>
+            <Row label="API Key Secret (softphone)" hint="El Secret que Twilio muestra UNA sola vez al crear el API Key.">
+              <input className="form-input" style={{ maxWidth: 400 }} type="password"
+                value={platformForm['voice.api_secret']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'voice.api_secret': e.target.value }))}
+                placeholder="••••••••" />
+            </Row>
+            <Row label="TwiML App SID (opcional — llamadas salientes)" hint="Solo para que los agentes hagan llamadas SALIENTES desde el CRM (Fase 2). No hace falta para recibir transferencias del bot. Twilio → Voice → TwiML → Apps → Voice URL = https://api.automarkiq.com/voice/twiml.">
+              <input className="form-input" style={{ maxWidth: 400 }}
+                value={platformForm['voice.twiml_app_sid']}
+                onChange={(e) => setPlatformForm((p) => ({ ...p, 'voice.twiml_app_sid': e.target.value }))}
+                placeholder="APxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
             </Row>
             <Row label="Webhook URLs" hint="Una sola URL global para todos los bots — enrutado automáticamente por número de teléfono">
               <div style={{ background: '#1e293b', borderRadius: 8, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>

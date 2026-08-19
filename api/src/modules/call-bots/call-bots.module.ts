@@ -9,6 +9,7 @@ import { CallBotMediaStreamService } from './call-bot-media-stream.service';
 import { CallBotWebhooksController } from './call-bot-webhooks.controller';
 import { ElevenLabsTtsService } from './elevenlabs-tts.service';
 import { SettingsModule } from '../settings/settings.module';
+import { VoiceModule } from '../voice/voice.module';
 import { BotActionsService } from './bot-actions.service';
 import { KnowledgeBaseModule } from '../knowledge-base/knowledge-base.module';
 import { PhoneNumbersService } from './phone-numbers.service';
@@ -16,7 +17,7 @@ import { PhoneNumbersController } from './phone-numbers.controller';
 import { IntegrationsModule } from '../integrations/integrations.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([CallBot, CallLog]), SettingsModule, KnowledgeBaseModule, IntegrationsModule],
+  imports: [TypeOrmModule.forFeature([CallBot, CallLog]), SettingsModule, KnowledgeBaseModule, IntegrationsModule, VoiceModule],
   controllers: [CallBotsController, CallBotWebhooksController, PhoneNumbersController],
   providers: [CallBotsService, CallBotTwilioService, CallBotMediaStreamService, BotActionsService, ElevenLabsTtsService, PhoneNumbersService],
   exports: [CallBotsService, CallBotMediaStreamService],

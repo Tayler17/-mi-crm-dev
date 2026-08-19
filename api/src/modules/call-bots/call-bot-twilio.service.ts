@@ -6,6 +6,7 @@ import { BotActionsService } from './bot-actions.service';
 import { ElevenLabsTtsService } from './elevenlabs-tts.service';
 import { KnowledgeBaseService } from '../knowledge-base/knowledge-base.service';
 import { IntegrationsService } from '../integrations/integrations.service';
+import { VoiceService } from '../voice/voice.service';
 import * as https from 'https';
 import * as http from 'http';
 
@@ -226,6 +227,7 @@ export class CallBotTwilioService {
     private readonly elevenLabs: ElevenLabsTtsService,
     private readonly kbSvc: KnowledgeBaseService,
     private readonly integrations: IntegrationsService,
+    private readonly voice: VoiceService,
   ) {
     // Evict stale call state every 10 min (handles calls where status callback never fires)
     setInterval(() => this.evictStaleCalls(), 10 * 60 * 1_000);
@@ -686,6 +688,11 @@ ${addTagInstruction}
       await this.db.query(`UPDATE call_bots SET transferred_calls=transferred_calls+1, updated_at=NOW() WHERE id=$1`, [botId]).catch(() => {});
       const transferMsg = bot.language.startsWith('es') ? 'Un momento, te transfiero con un agente.' : 'One moment, transferring you.';
       const transferEl = await this.ttsElement(transferMsg, bot, callSid, baseUrl);
+      // Prefer the in-CRM softphone (available agents); fall back to external number.
+      const agentsDial = await this.voice.dialAvailableAgentsTwiml(bot.tenant_id, bot.phone_number ?? '').catch(() => null);
+      if (agentsDial) {
+        return twiml(`${transferEl}${agentsDial}`);
+      }
       if (transferToNum) {
         return twiml(`${transferEl}<Dial timeout="30" callerId="${bot.phone_number ?? ''}">${xe(transferToNum)}</Dial>`);
       }
@@ -1162,12 +1169,21 @@ ${addTagInstruction}
         await this.db.query(`UPDATE call_bots SET transferred_calls=transferred_calls+1, updated_at=NOW() WHERE id=$1`, [bot.id]).catch(() => {});
         param = { key: 'Url', value: `${baseUrl}/call-bots/twilio/${destBotId}/voice` };
       } else if (target.kind === 'human') {
-        const pc = bot.provider_config ?? {};
-        const num = pc.transferToNumber ?? pc.transfer_to_number ?? '';
-        if (!num) { this.logger.warn('[callbot] transfer: no human number configured'); return false; }
-        await this.db.query(`UPDATE call_bots SET transferred_calls=transferred_calls+1, updated_at=NOW() WHERE id=$1`, [bot.id]).catch(() => {});
         const callerId = bot.phone_number ?? '';
-        param = { key: 'Twiml', value: `<Response><Dial timeout="30"${callerId ? ` callerId="${xe(callerId)}"` : ''}>${xe(num)}</Dial></Response>` };
+        // Prefer the in-CRM softphone: ring all available agents' browsers at once.
+        const agentsDial = await this.voice.dialAvailableAgentsTwiml(bot.tenant_id, callerId).catch(() => null);
+        if (agentsDial) {
+          await this.db.query(`UPDATE call_bots SET transferred_calls=transferred_calls+1, updated_at=NOW() WHERE id=$1`, [bot.id]).catch(() => {});
+          param = { key: 'Twiml', value: `<Response>${agentsDial}</Response>` };
+          this.logger.log('[callbot] transfer human → available agents (softphone)');
+        } else {
+          // Fallback: external number if configured.
+          const pc = bot.provider_config ?? {};
+          const num = pc.transferToNumber ?? pc.transfer_to_number ?? '';
+          if (!num) { this.logger.warn('[callbot] transfer: no agents available and no fallback number'); return false; }
+          await this.db.query(`UPDATE call_bots SET transferred_calls=transferred_calls+1, updated_at=NOW() WHERE id=$1`, [bot.id]).catch(() => {});
+          param = { key: 'Twiml', value: `<Response><Dial timeout="30"${callerId ? ` callerId="${xe(callerId)}"` : ''}>${xe(num)}</Dial></Response>` };
+        }
       }
       if (!param) return false;
 
