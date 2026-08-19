@@ -286,11 +286,15 @@ export class VoiceService {
 
   /** TwiML <Dial> that rings ALL available agents' browsers at once (first to answer wins).
    *  Returns null when nobody is available (caller falls back to voicemail/external number). */
-  async dialAvailableAgentsTwiml(tenantId: string, callerId?: string): Promise<string | null> {
+  async dialAvailableAgentsTwiml(tenantId: string, callerId?: string, caller?: { name?: string | null; number?: string | null }): Promise<string | null> {
     const ids = await this.getAvailableAgentIds(tenantId);
     if (!ids.length) return null;
-    const clients = ids.map((id) => `<Client>${id}</Client>`).join('');
-    const cid = callerId ? ` callerId="${callerId}"` : '';
+    // Pass the customer's name/number to the agent's browser so the incoming call is identified.
+    const params =
+      (caller?.name ? `<Parameter name="callerName" value="${this.xe(caller.name)}"/>` : '') +
+      (caller?.number ? `<Parameter name="callerNumber" value="${this.xe(caller.number)}"/>` : '');
+    const clients = ids.map((id) => `<Client><Identity>${this.xe(id)}</Identity>${params}</Client>`).join('');
+    const cid = callerId ? ` callerId="${this.xe(callerId)}"` : '';
     return `<Dial timeout="25" answerOnBridge="true"${cid}>${clients}</Dial>`;
   }
 }

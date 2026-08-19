@@ -521,7 +521,15 @@ export default function ContactProfilePage() {
                             {outbound ? (lang === 'en' ? '📤 Outbound' : '📤 Saliente') : (lang === 'en' ? '📥 Inbound' : '📥 Entrante')}
                           </span>
                         </td>
-                        <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>{num}</td>
+                        <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                          {num !== '—' ? (
+                            <button
+                              onClick={() => window.dispatchEvent(new CustomEvent('softphone:call', { detail: { number: num, name } }))}
+                              title={lang === 'en' ? 'Call back' : 'Rellamar'}
+                              style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: 13, padding: 0 }}
+                            >{num} 📞</button>
+                          ) : num}
+                        </td>
                         <td style={{ padding: '10px 14px' }}>{cl.duration ? `${mm}:${String(ss).padStart(2, '0')}` : '—'}</td>
                         <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>{who}</td>
                         <td style={{ padding: '10px 14px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{fmtTime(cl.startedAt, i.locale)}</td>

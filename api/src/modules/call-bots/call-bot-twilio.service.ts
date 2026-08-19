@@ -58,7 +58,7 @@ const TOOL_ACK: Record<string, Record<string, string>> = {
 };
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
-type CallMeta = { contactId: string | null; tenantId: string; contactName?: string | null; botId?: string; baseUrl?: string };
+type CallMeta = { contactId: string | null; tenantId: string; contactName?: string | null; from?: string; botId?: string; baseUrl?: string };
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
@@ -453,7 +453,7 @@ export class CallBotTwilioService {
       contact = existingMeta.contactId ? { id: existingMeta.contactId, name: existingMeta.contactName ?? '', email: null } : null;
     } else {
       contact = await this.botActions.lookupContactByPhone(bot.tenant_id, from);
-      this.callMeta.set(callSid, { contactId: contact?.id ?? null, tenantId: bot.tenant_id, contactName: contact?.name, botId, baseUrl });
+      this.callMeta.set(callSid, { contactId: contact?.id ?? null, tenantId: bot.tenant_id, contactName: contact?.name, from, botId, baseUrl });
     }
 
     // Auto-create contact for unknown callers so CRM actions work
@@ -488,7 +488,7 @@ export class CallBotTwilioService {
       }
 
       if (contact) {
-        this.callMeta.set(callSid, { contactId: contact.id, tenantId: bot.tenant_id, contactName: contact.name, botId, baseUrl });
+        this.callMeta.set(callSid, { contactId: contact.id, tenantId: bot.tenant_id, contactName: contact.name, from, botId, baseUrl });
         this.logger.log(`[callbot] Contact resolved for ${from}: ${contact.id}`);
       }
     }
@@ -691,7 +691,8 @@ ${addTagInstruction}
       const transferMsg = bot.language.startsWith('es') ? 'Un momento, te transfiero con un agente.' : 'One moment, transferring you.';
       const transferEl = await this.ttsElement(transferMsg, bot, callSid, baseUrl);
       // Prefer the in-CRM softphone (available agents); fall back to external number.
-      const agentsDial = await this.voice.dialAvailableAgentsTwiml(bot.tenant_id, bot.phone_number ?? '').catch(() => null);
+      const gMeta = this.callMeta.get(callSid);
+      const agentsDial = await this.voice.dialAvailableAgentsTwiml(bot.tenant_id, bot.phone_number ?? '', { name: gMeta?.contactName, number: gMeta?.from }).catch(() => null);
       if (agentsDial) {
         return twiml(`${transferEl}${agentsDial}`);
       }
@@ -1177,8 +1178,9 @@ ${addTagInstruction}
         param = { key: 'Url', value: `${baseUrl}/call-bots/twilio/${destBotId}/voice` };
       } else if (target.kind === 'human') {
         const callerId = bot.phone_number ?? '';
+        const meta = this.callMeta.get(callSid);
         // Prefer the in-CRM softphone: ring all available agents' browsers at once.
-        const agentsDial = await this.voice.dialAvailableAgentsTwiml(bot.tenant_id, callerId).catch(() => null);
+        const agentsDial = await this.voice.dialAvailableAgentsTwiml(bot.tenant_id, callerId, { name: meta?.contactName, number: meta?.from }).catch(() => null);
         if (agentsDial) {
           await this.db.query(`UPDATE call_bots SET transferred_calls=transferred_calls+1, updated_at=NOW() WHERE id=$1`, [bot.id]).catch(() => {});
           param = { key: 'Twiml', value: `<Response>${agentsDial}</Response>` };

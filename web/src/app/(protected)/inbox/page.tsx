@@ -1772,6 +1772,14 @@ export default function InboxPage() {
                 title="Ver detalles"
                 onClick={() => setMobilePanel('detail')}
               >ℹ️</button>
+              {!conv.isGroup && listConv?.contact?.phone && !listConv.contact.phone.startsWith('lid:') && (
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: 13, padding: '4px 9px' }}
+                  title={lang === 'en' ? 'Call from CRM' : 'Llamar desde el CRM'}
+                  onClick={() => window.dispatchEvent(new CustomEvent('softphone:call', { detail: { number: listConv!.contact!.phone, name: listConv?.contact?.fullName } }))}
+                >📞</button>
+              )}
               <button
                 className="btn btn-secondary"
                 style={{ fontSize: 13, padding: '4px 9px' }}

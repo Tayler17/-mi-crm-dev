@@ -18,10 +18,12 @@ type Status = 'off' | 'ready' | 'dialer' | 'incoming' | 'calling' | 'oncall' | '
 export function Softphone() {
   const [status, setStatus] = useState<Status>('off');
   const [from, setFrom] = useState('');
+  const [fromSub, setFromSub] = useState('');
   const [muted, setMuted] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [dialInput, setDialInput] = useState('');
   const [showTransfer, setShowTransfer] = useState(false);
+  const [showDtmf, setShowDtmf] = useState(false);
   const [targets, setTargets] = useState<TransferTargets | null>(null);
   const [transferring, setTransferring] = useState(false);
   const [warmRoom, setWarmRoom] = useState<string | null>(null);
@@ -32,6 +34,10 @@ export function Softphone() {
   const timerRef = useRef<any>(null);
   const readyRef = useRef(false);
   const warmingRef = useRef(false);
+  const audioCtxRef = useRef<any>(null);
+  const ringIntervalRef = useRef<any>(null);
+  const titleIntervalRef = useRef<any>(null);
+  const origTitleRef = useRef<string>('');
 
   useEffect(() => {
     let cancelled = false;
@@ -52,9 +58,14 @@ export function Softphone() {
         device.on('incoming', (call: any) => {
           if (callRef.current) { try { call.reject(); } catch {} return; } // already busy
           callRef.current = call;
-          setFrom(call.parameters?.From || 'Llamada entrante');
+          const cp = call.customParameters;
+          const cName = cp?.get?.('callerName');
+          const cNum = cp?.get?.('callerNumber') || call.parameters?.From || '';
+          setFrom(cName || cNum || 'Llamada entrante');
+          setFromSub(cName && cNum ? cNum : '');
           setStatus('incoming');
-          call.on('accept', () => { setStatus('oncall'); startTimer(); });
+          startRing(cName || cNum || 'Llamada entrante');
+          call.on('accept', () => { stopRing(); setStatus('oncall'); startTimer(); });
           call.on('disconnect', endCall);
           call.on('cancel', endCall);
           call.on('reject', endCall);
@@ -82,11 +93,45 @@ export function Softphone() {
 
   function startTimer() { setSeconds(0); stopTimer(); timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000); }
   function stopTimer() { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } }
+
+  // Audible ring + browser-tab flash for incoming calls (no external asset — WebAudio).
+  function startRing(label: string) {
+    origTitleRef.current = document.title;
+    let on = false;
+    titleIntervalRef.current = setInterval(() => { on = !on; document.title = on ? `📞 ${label}` : origTitleRef.current; }, 800);
+    try {
+      const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!AC) return;
+      const ctx = audioCtxRef.current || new AC();
+      audioCtxRef.current = ctx;
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      const beep = () => {
+        try {
+          const o = ctx.createOscillator(), g = ctx.createGain();
+          o.type = 'sine'; o.frequency.value = 480;
+          g.gain.setValueAtTime(0.0001, ctx.currentTime);
+          g.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.05);
+          g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.9);
+          o.connect(g); g.connect(ctx.destination);
+          o.start(); o.stop(ctx.currentTime + 0.95);
+        } catch {}
+      };
+      beep();
+      ringIntervalRef.current = setInterval(beep, 2500);
+    } catch {}
+  }
+  function stopRing() {
+    if (ringIntervalRef.current) { clearInterval(ringIntervalRef.current); ringIntervalRef.current = null; }
+    if (titleIntervalRef.current) { clearInterval(titleIntervalRef.current); titleIntervalRef.current = null; if (origTitleRef.current) document.title = origTitleRef.current; }
+  }
+
   function endCall() {
     if (warmingRef.current) return; // mid warm-transfer transition — don't reset
-    callRef.current = null; setMuted(false); stopTimer(); setShowTransfer(false);
+    stopRing();
+    callRef.current = null; setMuted(false); setShowDtmf(false); setFromSub(''); stopTimer(); setShowTransfer(false);
     setWarmRoom(null); setWarmName(''); setWarmStage(null); setStatus('ready');
   }
+  const sendDigit = (d: string) => { try { callRef.current?.sendDigits?.(d); } catch {} };
 
   // ── Warm (attended) transfer ──────────────────────────────────────────────
   async function doWarmTransfer(agentId: string, name: string) {
@@ -261,6 +306,7 @@ export function Softphone() {
       <div style={{ padding: '14px 18px', background: incoming ? 'linear-gradient(135deg,#16a34a,#22c55e)' : 'linear-gradient(135deg,#4f46e5,#6366f1)', color: '#fff' }}>
         <div style={{ fontSize: 12, opacity: 0.85 }}>{incoming ? '📞 Llamada entrante' : calling ? '📞 Llamando…' : '📞 En llamada'}</div>
         <div style={{ fontSize: 17, fontWeight: 700, marginTop: 2 }}>{from}</div>
+        {fromSub && <div style={{ fontSize: 12, opacity: 0.85, marginTop: 1 }}>{fromSub}</div>}
         {status === 'oncall' && <div style={{ fontSize: 13, opacity: 0.9, marginTop: 2 }}>{fmt(seconds)}</div>}
       </div>
       <div style={{ padding: 16, display: 'flex', justifyContent: 'center', gap: 14 }}>
@@ -273,12 +319,26 @@ export function Softphone() {
           <>
             <button onClick={toggleMute} title={muted ? 'Activar micrófono' : 'Silenciar'} style={btn(muted ? '#f59e0b' : '#6b7280')}>{muted ? '🔇' : '🎤'}</button>
             {status === 'oncall' && (
+              <button onClick={() => setShowDtmf((v) => !v)} title="Teclado" style={btn(showDtmf ? '#4f46e5' : '#6b7280')}>⌨</button>
+            )}
+            {status === 'oncall' && (
               <button onClick={openTransfer} title="Transferir" style={btn('#4f46e5')}>↪</button>
             )}
             <button onClick={hangup} title="Colgar" style={btn('#ef4444')}>📴</button>
           </>
         )}
       </div>
+
+      {showDtmf && status === 'oncall' && (
+        <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>Marca tonos (menús IVR)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'].map((k) => (
+              <button key={k} onClick={() => sendDigit(k)} style={{ padding: '12px 0', fontSize: 18, fontWeight: 600, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }}>{k}</button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {showTransfer && (
         <div style={{ borderTop: '1px solid var(--border)', padding: 14, maxHeight: 240, overflowY: 'auto' }}>
