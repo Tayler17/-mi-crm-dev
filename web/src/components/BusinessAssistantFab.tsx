@@ -43,25 +43,37 @@ export function BusinessAssistantFab({ lang }: { lang: string }) {
   useEffect(() => {
     const SR = typeof window !== 'undefined' ? ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) : null;
     if (!SR) setVoiceSupported(false);
+    loadHistory(); // restore the shared conversation (survives close/reopen + navigation)
     return () => {
       try { recognitionRef.current?.abort(); } catch {}
       try { window.speechSynthesis?.cancel(); } catch {}
     };
   }, []);
 
+  // Shared history with the /ai-assistant page (same localStorage key) so context
+  // survives closing the button, navigating, or switching between the two views.
+  function loadHistory() {
+    try { const saved = localStorage.getItem('aiAssistantChat'); if (saved) messagesRef.current = JSON.parse(saved); } catch {}
+  }
+  function saveHistory() {
+    try { localStorage.setItem('aiAssistantChat', JSON.stringify(messagesRef.current.slice(-40))); } catch {}
+  }
+
   async function send(textArg?: string) {
     const text = (textArg ?? input).trim();
     if (!text || sending) return;
     const next: Msg[] = [...messagesRef.current, { role: 'user', content: text }];
     messagesRef.current = next;
+    saveHistory();
     setInput('');
     setInterim('');
     setSending(true);
     setError('');
     try {
-      const r = await aiAgentChat(next.map((m) => ({ role: m.role, content: m.content })));
+      const r = await aiAgentChat(next.slice(-20).map((m) => ({ role: m.role, content: m.content })));
       if (r.ok) {
         messagesRef.current = [...next, { role: 'assistant', content: r.reply || '…' }];
+        saveHistory();
         setLastReply(r.reply || '…');
         // Speak the reply in voice mode, or in text mode when auto-read is on.
         if (r.reply && (voiceModeRef.current || autoReadRef.current)) { speak(r.reply); return; }
@@ -152,6 +164,7 @@ export function BusinessAssistantFab({ lang }: { lang: string }) {
 
   function togglePanel() {
     if (open) { stopVoice(); setOpen(false); return; }
+    loadHistory(); // pick up anything added from the /ai-assistant page meanwhile
     setOpen(true);
     setError('');
     // Opening from a click is a user gesture → we can start the mic right away.
