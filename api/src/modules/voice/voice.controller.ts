@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { VoiceService } from './voice.service';
@@ -25,7 +25,7 @@ export class VoiceController {
   @Post('twiml')
   @HttpCode(200)
   @Header('Content-Type', 'text/xml')
-  async twiml(@Body() body: any, @Res() res: Response) {
+  async twiml(@Body() body: any, @Req() req: any, @Res() res: Response) {
     const to = String(body?.To ?? '').trim();
     const caller = String(body?.Caller ?? body?.From ?? '');
     const userId = caller.startsWith('client:') ? caller.slice('client:'.length) : '';
@@ -36,12 +36,44 @@ export class VoiceController {
       res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Say language="es-ES">No se puede completar la llamada.</Say><Hangup/></Response>');
       return;
     }
+    // Log the agent's outbound call (finalized with duration/status by /voice/status).
+    let actionAttr = '';
+    const isPstn = !to.startsWith('client:');
+    if (userId && isPstn) {
+      const tenantId = await this.voice.getTenantId(userId);
+      if (tenantId) {
+        const logId = await this.voice.logOutboundCall({ tenantId, userId, from: callerId, to });
+        if (logId) {
+          const base = this.baseUrl(req);
+          actionAttr = ` action="${xe(`${base}/voice/status?logId=${logId}`)}" method="POST"`;
+        }
+      }
+    }
     // Allow agent→agent (client:) as well as PSTN numbers.
-    const target = to.startsWith('client:')
-      ? `<Client>${xe(to.slice('client:'.length))}</Client>`
-      : `<Number>${xe(to)}</Number>`;
+    const target = isPstn ? `<Number>${xe(to)}</Number>` : `<Client>${xe(to.slice('client:'.length))}</Client>`;
     res.send(
-      `<?xml version="1.0" encoding="UTF-8"?><Response><Dial callerId="${xe(callerId)}" answerOnBridge="true">${target}</Dial></Response>`,
+      `<?xml version="1.0" encoding="UTF-8"?><Response><Dial callerId="${xe(callerId)}" answerOnBridge="true"${actionAttr}>${target}</Dial></Response>`,
+    );
+  }
+
+  /** Dial action callback — Twilio POSTs here when the outbound leg ends. Finalizes the log. */
+  @Post('status')
+  @HttpCode(200)
+  @Header('Content-Type', 'text/xml')
+  async status(@Query('logId') logId: string, @Body() body: any, @Res() res: Response) {
+    if (logId) {
+      const duration = Number(body?.DialCallDuration ?? body?.CallDuration ?? 0);
+      const dialStatus = String(body?.DialCallStatus ?? body?.CallStatus ?? 'completed');
+      await this.voice.finishCallLog(logId, duration, dialStatus);
+    }
+    // Empty response ends the call cleanly.
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  }
+
+  private baseUrl(req: any): string {
+    return (
+      process.env.TWILIO_WEBHOOK_BASE_URL ??
+      `${req?.headers?.['x-forwarded-proto'] ?? 'https'}://${req?.headers?.['x-forwarded-host'] ?? req?.headers?.host ?? 'api.automarkiq.com'}`
     );
   }
 }

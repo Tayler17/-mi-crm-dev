@@ -76,6 +76,50 @@ export class VoiceService {
     return nums[0] ?? null;
   }
 
+  /** Tenant id for a user. */
+  async getTenantId(userId: string): Promise<string | null> {
+    if (!userId) return null;
+    const [u] = await this.db.query(`SELECT tenant_id FROM users WHERE id=$1`, [userId]).catch(() => []);
+    return u ? String(u.tenant_id) : null;
+  }
+
+  /** Best-effort contact match by phone (last 9 digits), scoped to the tenant. */
+  async matchContactByPhone(tenantId: string, phone: string): Promise<string | null> {
+    const digits = String(phone ?? '').replace(/\D/g, '');
+    if (digits.length < 7) return null;
+    const [c] = await this.db.query(
+      `SELECT id FROM contacts
+         WHERE tenant_id::text=$1 AND phone IS NOT NULL AND phone <> ''
+           AND right(regexp_replace(phone, '\\D', '', 'g'), 9) = $2
+         ORDER BY updated_at DESC NULLS LAST LIMIT 1`,
+      [tenantId, digits.slice(-9)],
+    ).catch(() => []);
+    return c?.id ?? null;
+  }
+
+  /** Record an agent's outbound softphone call; returns the log id to finalize later. */
+  async logOutboundCall(p: { tenantId: string; userId: string; from: string; to: string }): Promise<string | null> {
+    const contactId = await this.matchContactByPhone(p.tenantId, p.to);
+    const [row] = await this.db.query(
+      `INSERT INTO call_logs
+         (tenant_id, user_id, direction, from_number, to_number, duration, status, outcome, contact_id, started_at, created_at)
+       VALUES ($1, $2, 'outbound', $3, $4, 0, 'initiated', 'handled', $5, NOW(), NOW())
+       RETURNING id`,
+      [p.tenantId, p.userId, p.from, p.to, contactId],
+    ).catch(() => []);
+    return row?.id ?? null;
+  }
+
+  /** Finalize a call log with the dialed-leg duration + status. */
+  async finishCallLog(logId: string, durationSeconds: number, dialStatus: string): Promise<void> {
+    // Map Twilio DialCallStatus → our status. answered→completed, else keep the raw reason.
+    const status = dialStatus === 'answered' || dialStatus === 'completed' ? 'completed' : (dialStatus || 'completed');
+    await this.db.query(
+      `UPDATE call_logs SET duration=$2, status=$3, ended_at=NOW() WHERE id=$1`,
+      [logId, Math.max(0, Math.floor(Number(durationSeconds) || 0)), status],
+    ).catch(() => {});
+  }
+
   /** Escape a string for XML attribute/text. */
   xe(s: string): string {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

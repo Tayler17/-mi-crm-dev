@@ -32,8 +32,9 @@ export class CallBotsController {
     @TenantId() tenantId: string,
     @Query('botId') botId?: string,
     @Query('limit') limit?: string,
+    @Query('contactId') contactId?: string,
   ) {
-    return this.svc.getLogs(tenantId, botId, limit ? +limit : 50);
+    return this.svc.getLogs(tenantId, botId, limit ? +limit : 50, contactId);
   }
 
   @Get()

@@ -729,6 +729,8 @@ export interface CallLog {
   transcript?: string;
   startedAt: string;
   endedAt?: string;
+  agentName?: string;
+  contactId?: string;
 }
 
 export interface CallBotStats {
@@ -749,6 +751,8 @@ export const deleteCallBot = (id: string) => apiDelete(`/call-bots/${id}`);
 export const toggleCallBot = (id: string) => apiPost<CallBot>(`/call-bots/${id}/toggle`, {});
 export const getCallLogs = (botId?: string) =>
   apiGet<CallLog[]>(`/call-bots/logs${botId ? `?botId=${botId}` : ''}`);
+export const getContactCalls = (contactId: string, limit = 30) =>
+  apiGet<CallLog[]>(`/call-bots/logs?contactId=${contactId}&limit=${limit}`);
 export const getCallBotStats = () => apiGet<CallBotStats>('/call-bots/stats');
 export const initiateCall = (botId: string, toNumber: string) =>
   apiPost<{ callSid: string; status: string }>(`/call-bots/${botId}/call`, { toNumber });

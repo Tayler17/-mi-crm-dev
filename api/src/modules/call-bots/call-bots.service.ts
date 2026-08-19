@@ -22,6 +22,8 @@ export class CallBotsService implements OnModuleInit {
   async onModuleInit() {
     // Real-time voice (Twilio Media Streams) toggle — no migrations in this project.
     await this.db.query(`ALTER TABLE call_bots ADD COLUMN IF NOT EXISTS streaming_mode BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
+    // Attribute a call to the human agent (softphone). Null for bot-handled calls.
+    await this.db.query(`ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS user_id uuid`).catch(() => {});
   }
 
   /** Convert a raw snake_case DB row to the camelCase shape the frontend expects. */
@@ -96,24 +98,24 @@ export class CallBotsService implements OnModuleInit {
 
   // ── Call Logs ─────────────────────────────────────────────────────────────────
 
-  async getLogs(tenantId: string, botId?: string, limit = 50) {
-    const where: any = { tenantId };
-    if (botId) where.botId = botId;
+  async getLogs(tenantId: string, botId?: string, limit = 50, contactId?: string) {
+    const params: any[] = [tenantId];
+    let where = 'cl.tenant_id::text = $1';
+    if (botId) { params.push(botId); where += ` AND cl.bot_id = $${params.length}`; }
+    if (contactId) { params.push(contactId); where += ` AND cl.contact_id = $${params.length}`; }
+    params.push(Math.min(limit, 200));
 
-    const logs = await this.logRepo.find({
-      where,
-      order: { startedAt: 'DESC' },
-      take: limit,
-    });
-
-    // Enrich with bot name
-    const botIds = [...new Set(logs.map((l) => l.botId).filter(Boolean))];
-    const bots = botIds.length
-      ? await this.botRepo.findByIds(botIds)
-      : [];
-    const botMap = Object.fromEntries(bots.map((b) => [b.id, b.name]));
-
-    return logs.map((l) => ({ ...l, botName: l.botId ? botMap[l.botId] : null }));
+    const rows = await this.db.query(
+      `SELECT cl.*, cb.name AS bot_name, u.full_name AS agent_name
+       FROM call_logs cl
+       LEFT JOIN call_bots cb ON cb.id = cl.bot_id
+       LEFT JOIN users u ON u.id = cl.user_id
+       WHERE ${where}
+       ORDER BY cl.started_at DESC
+       LIMIT $${params.length}`,
+      params,
+    );
+    return rows.map((r: any) => this.toCamel(r));
   }
 
   // ── Outbound Calls ────────────────────────────────────────────────────────────

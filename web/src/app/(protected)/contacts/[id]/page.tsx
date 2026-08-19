@@ -5,7 +5,8 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   getContactProfile, updateContact, deleteContact, getTags,
   addContactTag, removeContactTag, getCompanies, formatMessagePreview,
-  type ContactProfile, type Tag,
+  getContactCalls,
+  type ContactProfile, type Tag, type CallLog,
 } from '@/lib/api';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { useLangCtx } from '@/lib/lang-context';
@@ -176,9 +177,10 @@ export default function ContactProfilePage() {
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'deals' | 'conversations' | 'notes' | 'activity'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'deals' | 'conversations' | 'calls' | 'notes' | 'activity'>('overview');
   const [showEdit, setShowEdit] = useState(false);
   const [showTagPicker, setShowTagPicker] = useState(false);
+  const [calls, setCalls] = useState<CallLog[]>([]);
 
   const dealStatusLabels: Record<string, string> = {
     open: i.ctctDealActive, active: i.ctctDealActive,
@@ -193,6 +195,7 @@ export default function ContactProfilePage() {
       .then(([p, t]) => { setProfile(p); setAllTags(t); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+    getContactCalls(id).then(setCalls).catch(() => {});
   }, [id]);
 
   async function handleUpdate(data: any) {
@@ -355,6 +358,7 @@ export default function ContactProfilePage() {
           ['overview', i.ctctTabOverview],
           ['deals', `Deals (${profile.deals.length})`],
           ['conversations', `${i.conversations} (${profile.conversations.length})`],
+          ['calls', `${lang === 'en' ? 'Calls' : 'Llamadas'} (${calls.length})`],
           ['notes', `${i.ctctTabNotes} (${profile.notes.length})`],
           ['activity', `${i.ctctTabActivity} (${profile.activities.length})`],
         ] as const).map(([key, label]) => (
@@ -481,6 +485,53 @@ export default function ContactProfilePage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Tab: Calls */}
+      {activeTab === 'calls' && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 12px', borderBottom: calls.length ? '1px solid var(--border)' : 'none' }}>
+            <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => getContactCalls(id).then(setCalls).catch(() => {})}>↻ {lang === 'en' ? 'Refresh' : 'Actualizar'}</button>
+          </div>
+          {calls.length === 0 ? (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>{lang === 'en' ? 'No calls yet' : 'Aún no hay llamadas'}</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase' }}>
+                    <th style={{ padding: '10px 14px' }}>{lang === 'en' ? 'Direction' : 'Dirección'}</th>
+                    <th style={{ padding: '10px 14px' }}>{lang === 'en' ? 'Number' : 'Número'}</th>
+                    <th style={{ padding: '10px 14px' }}>{lang === 'en' ? 'Duration' : 'Duración'}</th>
+                    <th style={{ padding: '10px 14px' }}>{lang === 'en' ? 'Handled by' : 'Atendida por'}</th>
+                    <th style={{ padding: '10px 14px' }}>{lang === 'en' ? 'Date' : 'Fecha'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {calls.map((cl) => {
+                    const outbound = cl.direction === 'outbound';
+                    const num = (outbound ? cl.toNumber : cl.fromNumber) || '—';
+                    const who = cl.agentName ? `👤 ${cl.agentName}` : cl.botName ? `🤖 ${cl.botName}` : '—';
+                    const mm = Math.floor((cl.duration || 0) / 60), ss = (cl.duration || 0) % 60;
+                    return (
+                      <tr key={cl.id} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                          <span style={{ color: outbound ? '#6366f1' : '#22c55e', fontWeight: 600 }}>
+                            {outbound ? (lang === 'en' ? '📤 Outbound' : '📤 Saliente') : (lang === 'en' ? '📥 Inbound' : '📥 Entrante')}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>{num}</td>
+                        <td style={{ padding: '10px 14px' }}>{cl.duration ? `${mm}:${String(ss).padStart(2, '0')}` : '—'}</td>
+                        <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>{who}</td>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{fmtTime(cl.startedAt, i.locale)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
