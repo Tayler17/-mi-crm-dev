@@ -400,6 +400,7 @@ export const getConversations = (filters?: {
   inboxId?: string;
   tagId?: string;
   queueId?: string;
+  search?: string;
 }) => {
   const params = new URLSearchParams();
   if (filters?.status)     params.set('status',     filters.status);
@@ -407,6 +408,7 @@ export const getConversations = (filters?: {
   if (filters?.inboxId)    params.set('inboxId',    filters.inboxId);
   if (filters?.tagId)      params.set('tagId',      filters.tagId);
   if (filters?.queueId)    params.set('queueId',    filters.queueId);
+  if (filters?.search)     params.set('search',     filters.search);
   const qs = params.toString();
   return apiGet<Conversation[]>(`/conversations${qs ? `?${qs}` : ''}`);
 };

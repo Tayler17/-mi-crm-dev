@@ -655,6 +655,14 @@ export default function InboxPage() {
     return () => { document.title = 'CRM'; };
   }, [unreadMap]);
 
+  // Debounced search → the backend searches by contact AND by message content
+  // (like WhatsApp), so we reload the list a moment after the user stops typing.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => clearTimeout(t);
+  }, [search]);
+
   // ── Load list ────────────────────────────────────────────────────────────────
   // silent=true → refresh data in background without replacing the list with a spinner
   const loadList = useCallback((silent = false) => {
@@ -666,11 +674,12 @@ export default function InboxPage() {
       inboxId:    filterInbox  || undefined,
       tagId:      filterTag    || undefined,
       queueId:    filterQueue  || undefined,
+      search:     debouncedSearch || undefined,
     })
       .then(setConversations)
       .catch((e) => setListError(e.message))
       .finally(() => setLoadingList(false));
-  }, [tab, filterStatus, filterAgent, filterInbox, filterTag, filterQueue]);
+  }, [tab, filterStatus, filterAgent, filterInbox, filterTag, filterQueue, debouncedSearch]);
 
   // Stable ref so the SSE handler can call the latest loadList without being
   // listed as a dependency (which would reopen the SSE connection on every filter change)
@@ -832,15 +841,11 @@ export default function InboxPage() {
     try { return JSON.parse(localStorage.getItem('user') ?? '{}').id ?? ''; } catch { return ''; }
   })();
 
+  // Search is handled server-side (contact + message content); here we only apply
+  // the "only mine" toggle.
   const filtered = conversations.filter((c) => {
     if (onlyMine && c.assignedTo !== currentUserId) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      (c.subject ?? '').toLowerCase().includes(q) ||
-      (c.contact?.fullName ?? '').toLowerCase().includes(q) ||
-      (c.contact?.email ?? '').toLowerCase().includes(q)
-    );
+    return true;
   });
 
   const activeFiltersCount = [filterTag, filterInbox, filterStatus, filterAgent, filterQueue].filter(Boolean).length;

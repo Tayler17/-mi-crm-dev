@@ -70,11 +70,22 @@ export class ConversationsService extends BaseTenantService<Conversation> {
     tagId?: string,
     queueId?: string,
     viewer?: { id: string; role: string },
+    search?: string,
   ) {
     const params: any[] = [tenantId];
     const clauses: string[] = [];
 
     if (status)     { params.push(status);     clauses.push(`c.status = $${params.length}`); }
+    if (search && search.trim()) {
+      // Search by contact (name/email/phone) OR by the CONTENT of any message
+      // in the conversation (like WhatsApp) — so agents can find a chat by a word said in it.
+      params.push(`%${search.trim()}%`);
+      const n = params.length;
+      clauses.push(`(
+        ct.full_name ILIKE $${n} OR ct.email ILIKE $${n} OR ct.phone ILIKE $${n}
+        OR EXISTS (SELECT 1 FROM messages ms WHERE ms.conversation_id = c.id AND ms.is_private = false AND ms.body ILIKE $${n})
+      )`);
+    }
     if (assignedTo) { params.push(assignedTo); clauses.push(`c.assigned_to = $${params.length}`); }
     if (inboxId)    { params.push(inboxId);    clauses.push(`c.inbox_id = $${params.length}`); }
     if (queueId)    { params.push(queueId);    clauses.push(`c.queue_id = $${params.length}`); }

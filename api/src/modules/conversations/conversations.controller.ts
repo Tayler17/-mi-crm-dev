@@ -32,9 +32,10 @@ export class ConversationsController {
     @Query('inboxId')    inboxId?: string,
     @Query('tagId')      tagId?: string,
     @Query('queueId')    queueId?: string,
+    @Query('search')     search?: string,
   ) {
     const viewer = req?.user ? { id: req.user.id, role: req.user.role ?? 'agent' } : undefined;
-    return this.service.findAllEnriched(tenantId, status, assignedTo, inboxId, tagId, queueId, viewer);
+    return this.service.findAllEnriched(tenantId, status, assignedTo, inboxId, tagId, queueId, viewer, search);
   }
 
   @Get(':id')
