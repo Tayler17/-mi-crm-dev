@@ -5,9 +5,10 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   getConnectAccount, createConnectOnboarding, syncConnectAccount, getCurrentPlan,
-  disconnectConnectAccount,
+  disconnectConnectAccount, getStoredUser,
   type ConnectAccount,
 } from '@/lib/api';
+import { PaymentLinksList } from '@/components/PaymentLinksList';
 
 // Stripe Connect Express — supported countries (subset). Country is fixed at account
 // creation and cannot be changed later, so the tenant picks it before connecting.
@@ -29,6 +30,8 @@ function PaymentsSettingsContent() {
   const [successMsg, setSuccessMsg] = useState('');
   const [hasFeature, setHasFeature] = useState<boolean | null>(null);
   const [country, setCountry]       = useState('GB');
+  // Only admins/owners configure Stripe Connect; agents see just the payment links.
+  const [isAdmin] = useState<boolean>(() => { const u = getStoredUser(); return u?.role === 'admin' || u?.role === 'owner'; });
 
   useEffect(() => {
     const success = params.get('success');
@@ -41,7 +44,7 @@ function PaymentsSettingsContent() {
       .then((data: any) => {
         const enabled = !!(data?.tenant?.has_stripe_connect);
         setHasFeature(enabled);
-        if (enabled) {
+        if (enabled && isAdmin) {
           load().then(() => {
             if (success === '1') handleSync();
             if (refresh === '1') handleOnboard();
@@ -53,10 +56,14 @@ function PaymentsSettingsContent() {
       .catch(() => {
         // If plan fetch fails, allow access (fail open)
         setHasFeature(true);
-        load().then(() => {
-          if (success === '1') handleSync();
-          if (refresh === '1') handleOnboard();
-        });
+        if (isAdmin) {
+          load().then(() => {
+            if (success === '1') handleSync();
+            if (refresh === '1') handleOnboard();
+          });
+        } else {
+          setLoading(false);
+        }
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -168,11 +175,18 @@ function PaymentsSettingsContent() {
 
   return (
     <div style={{ padding: 32, maxWidth: 680, margin: '0 auto' }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>💳 Pagos — Stripe Connect</h1>
+      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>💳 Pagos</h1>
       <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 28 }}>
-        Conecta tu cuenta de Stripe para recibir pagos de tus clientes directamente desde el CRM.
+        {isAdmin ? 'Consulta los links de pago y configura tu cuenta de Stripe.' : 'Consulta los links de pago generados por el bot y el equipo, con su estado.'}
       </p>
 
+      {/* Payment links — visible to everyone so the team can verify payment status */}
+      <div style={{ marginBottom: 32 }}>
+        <PaymentLinksList />
+      </div>
+
+      {/* Stripe Connect configuration — admins/owners only */}
+      {isAdmin && (<>
       {successMsg && (
         <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 10, padding: '12px 16px', marginBottom: 20, fontSize: 14, color: '#166534' }}>
           {successMsg}
@@ -321,6 +335,7 @@ function PaymentsSettingsContent() {
           </p>
         </div>
       )}
+      </>)}
     </div>
   );
 }

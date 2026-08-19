@@ -101,7 +101,6 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   // ── Comunicación ──
   { group: '💬 COMUNICACIÓN',  href: '/inbox',            label: 'Inbox',                icon: '✉' },
   { group: '💬 COMUNICACIÓN',  href: '/chat',             label: 'Chat Interno',         icon: '💬' },
-  { group: '💬 COMUNICACIÓN',  href: '/payments',         label: 'Links de pago',        icon: '💳' },
   { group: '💬 COMUNICACIÓN',  href: '/queues',           label: 'Colas',                icon: '📬' },
   { group: '💬 COMUNICACIÓN',  href: '/teams',            label: 'Equipos',              icon: '🏆' },
   // ── Automatización ──
@@ -128,7 +127,7 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   { group: '⚙️ CONFIGURACIÓN', href: '/appointments',     label: 'Schedules',            icon: '📅' },
   // ── Admin ──
   { group: '🏢 ADMIN',         href: '/billing',           label: 'Mi Plan & Uso',       icon: '💳', minRole: 'admin' },
-  { group: '🏢 ADMIN',         href: '/settings/payments', label: 'Pagos Stripe',         icon: '🔗', minRole: 'admin', planFeature: 'has_stripe_connect' },
+  { group: '💬 COMUNICACIÓN',  href: '/settings/payments', label: 'Pagos',                icon: '💳', planFeature: 'has_stripe_connect' },
   { group: '🏢 ADMIN',         href: '/users',             label: 'Usuarios',             icon: '👤', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/plans',            label: 'Planes & Billing',     icon: '🏦', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/backups',          label: 'Backups',              icon: '💾', minRole: 'admin' },
