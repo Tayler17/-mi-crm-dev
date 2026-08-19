@@ -1,9 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { getVoiceToken, getTransferTargets, transferSoftphoneCall, type TransferTargets } from '@/lib/api';
+import {
+  getVoiceToken, getTransferTargets, transferSoftphoneCall,
+  warmTransferStart, warmTransferConsult, warmTransferComplete, warmTransferCancel,
+  type TransferTargets,
+} from '@/lib/api';
 
-type Status = 'off' | 'ready' | 'dialer' | 'incoming' | 'calling' | 'oncall';
+type Status = 'off' | 'ready' | 'dialer' | 'incoming' | 'calling' | 'oncall' | 'warm';
 
 /**
  * In-CRM softphone (Twilio Voice SDK). Registers the agent's browser as a Twilio
@@ -20,10 +24,14 @@ export function Softphone() {
   const [showTransfer, setShowTransfer] = useState(false);
   const [targets, setTargets] = useState<TransferTargets | null>(null);
   const [transferring, setTransferring] = useState(false);
+  const [warmRoom, setWarmRoom] = useState<string | null>(null);
+  const [warmName, setWarmName] = useState('');
+  const [warmStage, setWarmStage] = useState<'starting' | 'consulting' | null>(null);
   const deviceRef = useRef<any>(null);
   const callRef = useRef<any>(null);
   const timerRef = useRef<any>(null);
   const readyRef = useRef(false);
+  const warmingRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,7 +82,56 @@ export function Softphone() {
 
   function startTimer() { setSeconds(0); stopTimer(); timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000); }
   function stopTimer() { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } }
-  function endCall() { callRef.current = null; setMuted(false); stopTimer(); setShowTransfer(false); setStatus('ready'); }
+  function endCall() {
+    if (warmingRef.current) return; // mid warm-transfer transition — don't reset
+    callRef.current = null; setMuted(false); stopTimer(); setShowTransfer(false);
+    setWarmRoom(null); setWarmName(''); setWarmStage(null); setStatus('ready');
+  }
+
+  // ── Warm (attended) transfer ──────────────────────────────────────────────
+  async function doWarmTransfer(agentId: string, name: string) {
+    const callSid = callRef.current?.parameters?.CallSid;
+    if (!callSid) { alert('No se pudo obtener la llamada activa.'); return; }
+    setShowTransfer(false);
+    warmingRef.current = true;
+    setWarmName(name); setWarmStage('starting'); setStatus('warm');
+    let r: any;
+    try { r = await warmTransferStart(callSid, agentId); } catch (e: any) { r = { ok: false, error: e?.message }; }
+    if (!r?.ok || !r.room) {
+      warmingRef.current = false; setWarmStage(null); setStatus('oncall');
+      alert(r?.error || 'No se pudo iniciar la consulta.');
+      return;
+    }
+    const room = r.room as string;
+    setWarmRoom(room);
+    try { callRef.current?.disconnect?.(); } catch {} // old customer-bridge leg is dropping
+    try {
+      const call = await deviceRef.current.connect({ params: { To: 'conference:' + room } });
+      callRef.current = call;
+      call.on('accept', async () => {
+        setWarmStage('consulting');
+        try { const c = await warmTransferConsult(room); if (!c?.ok) alert(c?.error || 'No se pudo conectar la consulta.'); } catch {}
+      });
+      call.on('disconnect', () => { warmingRef.current = false; endCall(); });
+      call.on('error', () => { warmingRef.current = false; endCall(); });
+    } catch {
+      warmingRef.current = false; setWarmStage(null); setStatus('oncall');
+      alert('No se pudo unir a la conferencia.');
+    }
+  }
+  async function warmDoComplete() {
+    if (!warmRoom) return;
+    try { await warmTransferComplete(warmRoom); } catch {}
+    warmingRef.current = false;
+    try { callRef.current?.disconnect?.(); } catch {} // A leaves → target + customer remain
+  }
+  async function warmDoCancel() {
+    if (!warmRoom) return;
+    const callSid = callRef.current?.parameters?.CallSid;
+    try { await warmTransferCancel(warmRoom, callSid); } catch {}
+    warmingRef.current = false;
+    setWarmRoom(null); setWarmName(''); setWarmStage(null); setStatus('oncall'); // resume with customer
+  }
 
   async function openTransfer() {
     setShowTransfer(true); setTargets(null);
@@ -172,6 +229,28 @@ export function Softphone() {
     );
   }
 
+  if (status === 'warm') {
+    return (
+      <div style={{ position: 'fixed', bottom: 24, left: 24, zIndex: 950, width: 300, maxWidth: 'calc(100vw - 32px)', background: 'var(--surface, var(--bg))', border: '1px solid var(--border)', borderRadius: 16, boxShadow: '0 16px 48px rgba(0,0,0,0.32)', overflow: 'hidden' }}>
+        <div style={{ padding: '14px 18px', background: 'linear-gradient(135deg,#7c3aed,#a855f7)', color: '#fff' }}>
+          <div style={{ fontSize: 12, opacity: 0.85 }}>{warmStage === 'consulting' ? '👥 Consulta privada' : '⏳ Poniendo en espera…'}</div>
+          <div style={{ fontSize: 17, fontWeight: 700, marginTop: 2 }}>{warmName || 'Agente'}</div>
+          <div style={{ fontSize: 12, opacity: 0.9, marginTop: 2 }}>El cliente espera con música</div>
+        </div>
+        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {warmStage !== 'consulting' ? (
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, padding: 8 }}>Conectando la consulta…</div>
+          ) : (
+            <>
+              <button onClick={warmDoComplete} style={fullBtn('#22c55e')}>✓ Completar transferencia</button>
+              <button onClick={warmDoCancel} style={fullBtn('#6b7280')}>↩ Cancelar y volver al cliente</button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const incoming = status === 'incoming';
   const calling = status === 'calling';
   return (
@@ -212,7 +291,11 @@ export function Softphone() {
               {targets.agents.length === 0 ? (
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '2px 0 8px' }}>Ningún otro agente en línea</div>
               ) : targets.agents.map((a) => (
-                <button key={a.id} disabled={transferring} onClick={() => doTransfer('agent', a.id)} style={rowBtn}>👤 {a.name}</button>
+                <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <span style={{ flex: 1, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>👤 {a.name}</span>
+                  <button disabled={transferring} title="Consultar antes de pasar" onClick={() => doWarmTransfer(a.id, a.name)} style={miniBtn('#4f46e5')}>Consulta</button>
+                  <button disabled={transferring} title="Pasar directo (en frío)" onClick={() => doTransfer('agent', a.id)} style={miniBtn('#6b7280')}>Frío</button>
+                </div>
               ))}
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', margin: '10px 0 4px' }}>Bots</div>
               {targets.bots.length === 0 ? (
@@ -233,6 +316,13 @@ const rowBtn: React.CSSProperties = {
   border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg)', color: 'var(--text)',
   fontSize: 13, cursor: 'pointer',
 };
+
+function miniBtn(bg: string): React.CSSProperties {
+  return { flexShrink: 0, padding: '5px 9px', border: 'none', borderRadius: 6, background: bg, color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' };
+}
+function fullBtn(bg: string): React.CSSProperties {
+  return { width: '100%', padding: '12px 0', border: 'none', borderRadius: 10, background: bg, color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' };
+}
 
 function btn(bg: string): React.CSSProperties {
   return { width: 52, height: 52, borderRadius: '50%', border: 'none', cursor: 'pointer', fontSize: 22, color: '#fff', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' };

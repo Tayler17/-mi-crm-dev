@@ -537,6 +537,14 @@ export interface TransferTargets { agents: { id: string; name: string }[]; bots:
 export const getTransferTargets = () => apiGet<TransferTargets>('/voice/transfer-targets');
 export const transferSoftphoneCall = (callSid: string, targetType: 'agent' | 'bot', targetId: string) =>
   apiPost<{ ok: boolean; error?: string }>('/voice/transfer', { callSid, targetType, targetId });
+export const warmTransferStart = (callSid: string, targetId: string) =>
+  apiPost<{ ok: boolean; room?: string; error?: string }>('/voice/warm/start', { callSid, targetId });
+export const warmTransferConsult = (room: string) =>
+  apiPost<{ ok: boolean; error?: string }>('/voice/warm/consult', { room });
+export const warmTransferComplete = (room: string) =>
+  apiPost<{ ok: boolean; error?: string }>('/voice/warm/complete', { room });
+export const warmTransferCancel = (room: string, callSid?: string) =>
+  apiPost<{ ok: boolean; error?: string }>('/voice/warm/cancel', { room, callSid });
 export const getMcpTokens = () => apiGet<McpToken[]>('/mcp/tokens');
 export const createMcpToken = (label?: string) => apiPost<{ id: string; label: string; role: string; created_at: string; token: string }>('/mcp/tokens', { label });
 export const revokeMcpToken = (id: string) => apiDelete(`/mcp/tokens/${id}`);

@@ -19,6 +19,9 @@ export class VoiceService {
     private readonly platformSettings: PlatformSettingsService,
   ) {}
 
+  // Active warm-transfer sessions, keyed by conference room name.
+  private warmSessions = new Map<string, { tenantId: string; agentUserId: string; customerLeg: string; targetId: string; bCallSid?: string; confSid?: string }>();
+
   private b64url(obj: any): string {
     return Buffer.from(JSON.stringify(obj)).toString('base64url');
   }
@@ -187,6 +190,98 @@ export class VoiceService {
     } catch (e: any) {
       return { ok: false, error: e?.message || 'Error al transferir.' };
     }
+  }
+
+  // ── Warm (attended) transfer via conference ────────────────────────────────
+
+  /** TwiML for an agent's browser joining a warm-transfer room (served by /voice/twiml). */
+  warmJoinTwiml(room: string): string {
+    return `<Response><Dial answerOnBridge="true"><Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false">${this.xe(room)}</Conference></Dial></Response>`;
+  }
+
+  private async twilioForm(url: string, auth: string, params: Record<string, string>): Promise<any> {
+    const body = new URLSearchParams(params).toString();
+    return fetch(url, { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' }, body })
+      .then((r) => (r.ok ? r.json().catch(() => ({})) : null)).catch(() => null);
+  }
+
+  private async confSid(base: string, auth: string, room: string): Promise<string | null> {
+    const r = await fetch(`${base}/Conferences.json?FriendlyName=${encodeURIComponent(room)}&Status=in-progress`, { headers: { Authorization: auth } })
+      .then((x) => (x.ok ? x.json() : null)).catch(() => null);
+    return r?.conferences?.[0]?.sid ?? null;
+  }
+
+  /** Step 1: park the customer in a conference (hold music) so the agent can consult privately. */
+  async warmStart(p: { tenantId: string; userId: string; clientCallSid: string; targetId: string }): Promise<{ ok: boolean; room?: string; error?: string }> {
+    const { accountSid, authToken } = await this.platformSettings.getVoice();
+    if (!accountSid || !authToken) return { ok: false, error: 'La voz no está configurada.' };
+    if (!p.clientCallSid || !p.targetId) return { ok: false, error: 'Faltan datos de la transferencia.' };
+    const { auth, base } = this.twilioAuth(accountSid, authToken);
+    try {
+      const call = await fetch(`${base}/Calls/${p.clientCallSid}.json`, { headers: { Authorization: auth } }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (!call) return { ok: false, error: 'No se encontró la llamada activa.' };
+      let customerLeg: string | undefined = call.parent_call_sid || undefined;
+      if (!customerLeg) {
+        const kids = await fetch(`${base}/Calls.json?ParentCallSid=${p.clientCallSid}&Status=in-progress`, { headers: { Authorization: auth } }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        customerLeg = kids?.calls?.[0]?.sid;
+      }
+      if (!customerLeg) return { ok: false, error: 'No se encontró la otra pierna de la llamada (¿ya colgó?).' };
+
+      const room = `wt-${customerLeg}`;
+      const twiml = `<Response><Dial><Conference startConferenceOnEnter="false" endConferenceOnExit="false" beep="false">${this.xe(room)}</Conference></Dial></Response>`;
+      const upd = await this.twilioForm(`${base}/Calls/${customerLeg}.json`, auth, { Twiml: twiml });
+      if (!upd) return { ok: false, error: 'No se pudo poner al cliente en espera.' };
+      this.warmSessions.set(room, { tenantId: p.tenantId, agentUserId: p.userId, customerLeg, targetId: p.targetId });
+      return { ok: true, room };
+    } catch (e: any) { return { ok: false, error: e?.message || 'Error al iniciar la consulta.' }; }
+  }
+
+  /** Step 2: hold the customer and ring the target agent into the room (A ↔ B private). */
+  async warmConsult(room: string): Promise<{ ok: boolean; error?: string }> {
+    const s = this.warmSessions.get(room);
+    if (!s) return { ok: false, error: 'Sesión de transferencia no encontrada.' };
+    const { accountSid, authToken } = await this.platformSettings.getVoice();
+    const { auth, base } = this.twilioAuth(accountSid, authToken);
+    try {
+      const confSid = await this.confSid(base, auth, room);
+      if (!confSid) return { ok: false, error: 'La conferencia aún no está activa.' };
+      s.confSid = confSid;
+      await this.twilioForm(`${base}/Conferences/${confSid}/Participants/${s.customerLeg}.json`, auth, { Hold: 'true' });
+      const callerId = await this.getTenantCallerId(s.agentUserId);
+      const bTwiml = `<Response><Dial answerOnBridge="true"><Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false">${this.xe(room)}</Conference></Dial></Response>`;
+      const created = await this.twilioForm(`${base}/Calls.json`, auth, { To: `client:${s.targetId}`, From: callerId || s.targetId, Twiml: bTwiml });
+      if (!created?.sid) return { ok: false, error: 'No se pudo llamar al agente destino.' };
+      s.bCallSid = created.sid;
+      return { ok: true };
+    } catch (e: any) { return { ok: false, error: e?.message || 'Error en la consulta.' }; }
+  }
+
+  /** Complete: un-hold the customer; the initiating agent then hangs up → target + customer remain. */
+  async warmComplete(room: string): Promise<{ ok: boolean; error?: string }> {
+    const s = this.warmSessions.get(room);
+    if (!s) return { ok: false, error: 'Sesión no encontrada.' };
+    const { accountSid, authToken } = await this.platformSettings.getVoice();
+    const { auth, base } = this.twilioAuth(accountSid, authToken);
+    const confSid = s.confSid || await this.confSid(base, auth, room);
+    if (confSid) await this.twilioForm(`${base}/Conferences/${confSid}/Participants/${s.customerLeg}.json`, auth, { Hold: 'false' });
+    this.warmSessions.delete(room);
+    return { ok: true };
+  }
+
+  /** Cancel: kick the target agent, un-hold the customer, and let the initiating agent's hangup end the call. */
+  async warmCancel(room: string, agentCallSid?: string): Promise<{ ok: boolean; error?: string }> {
+    const s = this.warmSessions.get(room);
+    if (!s) return { ok: false, error: 'Sesión no encontrada.' };
+    const { accountSid, authToken } = await this.platformSettings.getVoice();
+    const { auth, base } = this.twilioAuth(accountSid, authToken);
+    const confSid = s.confSid || await this.confSid(base, auth, room);
+    if (confSid) {
+      if (s.bCallSid) await fetch(`${base}/Conferences/${confSid}/Participants/${s.bCallSid}.json`, { method: 'DELETE', headers: { Authorization: auth } }).catch(() => null);
+      await this.twilioForm(`${base}/Conferences/${confSid}/Participants/${s.customerLeg}.json`, auth, { Hold: 'false' });
+      if (agentCallSid) await this.twilioForm(`${base}/Conferences/${confSid}/Participants/${agentCallSid}.json`, auth, { EndConferenceOnExit: 'true' });
+    }
+    this.warmSessions.delete(room);
+    return { ok: true };
   }
 
   /** TwiML <Dial> that rings ALL available agents' browsers at once (first to answer wins).

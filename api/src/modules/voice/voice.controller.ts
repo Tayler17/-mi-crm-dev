@@ -36,6 +36,39 @@ export class VoiceController {
     });
   }
 
+  /** Warm transfer step 1: park the customer, return the conference room to rejoin. */
+  @Post('warm/start')
+  @UseGuards(JwtAuthGuard)
+  async warmStart(@Req() req: any, @Body() body: any) {
+    return this.voice.warmStart({
+      tenantId: req.user.tenantId,
+      userId: req.user.id,
+      clientCallSid: String(body?.callSid ?? ''),
+      targetId: String(body?.targetId ?? ''),
+    });
+  }
+
+  /** Warm transfer step 2: hold the customer and ring the target agent into the room. */
+  @Post('warm/consult')
+  @UseGuards(JwtAuthGuard)
+  async warmConsult(@Body() body: any) {
+    return this.voice.warmConsult(String(body?.room ?? ''));
+  }
+
+  /** Warm transfer: complete — target agent stays with the customer. */
+  @Post('warm/complete')
+  @UseGuards(JwtAuthGuard)
+  async warmComplete(@Body() body: any) {
+    return this.voice.warmComplete(String(body?.room ?? ''));
+  }
+
+  /** Warm transfer: cancel — drop the target agent, resume with the customer. */
+  @Post('warm/cancel')
+  @UseGuards(JwtAuthGuard)
+  async warmCancel(@Body() body: any) {
+    return this.voice.warmCancel(String(body?.room ?? ''), String(body?.callSid ?? '') || undefined);
+  }
+
   /**
    * TwiML App voice endpoint — Twilio hits this when an agent's browser dials out
    * (device.connect). We bridge the outbound leg to the dialed PSTN number using the
@@ -47,6 +80,11 @@ export class VoiceController {
   @Header('Content-Type', 'text/xml')
   async twiml(@Body() body: any, @Req() req: any, @Res() res: Response) {
     const to = String(body?.To ?? '').trim();
+    // Warm transfer: the agent's browser dials into a conference room.
+    if (to.startsWith('conference:')) {
+      res.send('<?xml version="1.0" encoding="UTF-8"?>' + this.voice.warmJoinTwiml(to.slice('conference:'.length)));
+      return;
+    }
     const caller = String(body?.Caller ?? body?.From ?? '');
     const userId = caller.startsWith('client:') ? caller.slice('client:'.length) : '';
     const callerId = await this.voice.getTenantCallerId(userId);
