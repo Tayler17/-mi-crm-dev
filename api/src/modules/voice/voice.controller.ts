@@ -16,6 +16,26 @@ export class VoiceController {
     return { ok: true, ...result };
   }
 
+  /** Available transfer targets (other online agents + active bots) for an in-call agent. */
+  @Get('transfer-targets')
+  @UseGuards(JwtAuthGuard)
+  async transferTargets(@Req() req: any) {
+    return this.voice.getTransferTargets(req.user.tenantId, req.user.id);
+  }
+
+  /** Cold-transfer the agent's current call to another agent or a bot. */
+  @Post('transfer')
+  @UseGuards(JwtAuthGuard)
+  async transfer(@Req() req: any, @Body() body: any) {
+    return this.voice.transferAgentCall({
+      tenantId: req.user.tenantId,
+      userId: req.user.id,
+      clientCallSid: String(body?.callSid ?? ''),
+      targetType: body?.targetType === 'bot' ? 'bot' : 'agent',
+      targetId: String(body?.targetId ?? ''),
+    });
+  }
+
   /**
    * TwiML App voice endpoint — Twilio hits this when an agent's browser dials out
    * (device.connect). We bridge the outbound leg to the dialed PSTN number using the

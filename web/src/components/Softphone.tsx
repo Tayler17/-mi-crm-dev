@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { getVoiceToken } from '@/lib/api';
+import { getVoiceToken, getTransferTargets, transferSoftphoneCall, type TransferTargets } from '@/lib/api';
 
 type Status = 'off' | 'ready' | 'dialer' | 'incoming' | 'calling' | 'oncall';
 
@@ -17,6 +17,9 @@ export function Softphone() {
   const [muted, setMuted] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [dialInput, setDialInput] = useState('');
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [targets, setTargets] = useState<TransferTargets | null>(null);
+  const [transferring, setTransferring] = useState(false);
   const deviceRef = useRef<any>(null);
   const callRef = useRef<any>(null);
   const timerRef = useRef<any>(null);
@@ -71,7 +74,23 @@ export function Softphone() {
 
   function startTimer() { setSeconds(0); stopTimer(); timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000); }
   function stopTimer() { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } }
-  function endCall() { callRef.current = null; setMuted(false); stopTimer(); setStatus('ready'); }
+  function endCall() { callRef.current = null; setMuted(false); stopTimer(); setShowTransfer(false); setStatus('ready'); }
+
+  async function openTransfer() {
+    setShowTransfer(true); setTargets(null);
+    try { setTargets(await getTransferTargets()); } catch { setTargets({ agents: [], bots: [] }); }
+  }
+  async function doTransfer(type: 'agent' | 'bot', id: string) {
+    const callSid = callRef.current?.parameters?.CallSid;
+    if (!callSid) { alert('No se pudo obtener la llamada activa.'); return; }
+    setTransferring(true);
+    try {
+      const r = await transferSoftphoneCall(callSid, type, id);
+      if (r?.ok) setShowTransfer(false); // our leg drops when the customer is redirected
+      else alert(r?.error || 'No se pudo transferir la llamada.');
+    } catch (e: any) { alert(e?.message || 'Error al transferir.'); }
+    finally { setTransferring(false); }
+  }
 
   async function startCall(number: string, name?: string) {
     const device = deviceRef.current;
@@ -171,13 +190,49 @@ export function Softphone() {
         ) : (
           <>
             <button onClick={toggleMute} title={muted ? 'Activar micrófono' : 'Silenciar'} style={btn(muted ? '#f59e0b' : '#6b7280')}>{muted ? '🔇' : '🎤'}</button>
+            {status === 'oncall' && (
+              <button onClick={openTransfer} title="Transferir" style={btn('#4f46e5')}>↪</button>
+            )}
             <button onClick={hangup} title="Colgar" style={btn('#ef4444')}>📴</button>
           </>
         )}
       </div>
+
+      {showTransfer && (
+        <div style={{ borderTop: '1px solid var(--border)', padding: 14, maxHeight: 240, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Transferir llamada</span>
+            <button onClick={() => setShowTransfer(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+          </div>
+          {!targets ? (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 12 }}>Cargando…</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', margin: '6px 0 4px' }}>Agentes en línea</div>
+              {targets.agents.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '2px 0 8px' }}>Ningún otro agente en línea</div>
+              ) : targets.agents.map((a) => (
+                <button key={a.id} disabled={transferring} onClick={() => doTransfer('agent', a.id)} style={rowBtn}>👤 {a.name}</button>
+              ))}
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', margin: '10px 0 4px' }}>Bots</div>
+              {targets.bots.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '2px 0' }}>Sin bots activos</div>
+              ) : targets.bots.map((b) => (
+                <button key={b.id} disabled={transferring} onClick={() => doTransfer('bot', b.id)} style={rowBtn}>🤖 {b.name}</button>
+              ))}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
+const rowBtn: React.CSSProperties = {
+  display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', marginBottom: 4,
+  border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg)', color: 'var(--text)',
+  fontSize: 13, cursor: 'pointer',
+};
 
 function btn(bg: string): React.CSSProperties {
   return { width: 52, height: 52, borderRadius: '50%', border: 'none', cursor: 'pointer', fontSize: 22, color: '#fff', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' };

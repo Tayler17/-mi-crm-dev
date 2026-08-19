@@ -125,6 +125,70 @@ export class VoiceService {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  /** Transfer targets for an in-call agent: other online agents + active call bots. */
+  async getTransferTargets(tenantId: string, excludeUserId: string): Promise<{ agents: { id: string; name: string }[]; bots: { id: string; name: string }[] }> {
+    const [agents, bots] = await Promise.all([
+      this.db.query(
+        `SELECT id, full_name AS name FROM users
+           WHERE tenant_id=$1 AND is_active=true AND availability='online' AND id <> $2
+           ORDER BY full_name ASC`,
+        [tenantId, excludeUserId],
+      ).catch(() => []),
+      this.db.query(
+        `SELECT id, name FROM call_bots WHERE tenant_id::text=$1 AND status='active' ORDER BY name ASC`,
+        [tenantId],
+      ).catch(() => []),
+    ]);
+    return {
+      agents: agents.map((a: any) => ({ id: a.id, name: a.name || 'Agente' })),
+      bots: bots.map((b: any) => ({ id: b.id, name: b.name || 'Bot' })),
+    };
+  }
+
+  private twilioAuth(accountSid: string, authToken: string) {
+    return { auth: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'), base: `https://api.twilio.com/2010-04-01/Accounts/${accountSid}` };
+  }
+
+  /** Cold-transfer the live customer leg of an agent's call to another agent or a bot. */
+  async transferAgentCall(p: { tenantId: string; userId: string; clientCallSid: string; targetType: 'agent' | 'bot'; targetId: string }): Promise<{ ok: boolean; error?: string }> {
+    const { accountSid, authToken } = await this.platformSettings.getVoice();
+    if (!accountSid || !authToken) return { ok: false, error: 'La voz no está configurada.' };
+    if (!p.clientCallSid || !p.targetId) return { ok: false, error: 'Faltan datos de la transferencia.' };
+    const { auth, base } = this.twilioAuth(accountSid, authToken);
+
+    try {
+      // The agent's browser leg: inbound → its parent is the customer; outbound → its child is the customer.
+      const call = await fetch(`${base}/Calls/${p.clientCallSid}.json`, { headers: { Authorization: auth } }).then((r) => r.ok ? r.json() : null).catch(() => null);
+      if (!call) return { ok: false, error: 'No se encontró la llamada activa.' };
+      let customerLeg: string | undefined = call.parent_call_sid || undefined;
+      if (!customerLeg) {
+        const kids = await fetch(`${base}/Calls.json?ParentCallSid=${p.clientCallSid}&Status=in-progress`, { headers: { Authorization: auth } }).then((r) => r.ok ? r.json() : null).catch(() => null);
+        customerLeg = kids?.calls?.[0]?.sid;
+      }
+      if (!customerLeg) return { ok: false, error: 'No se encontró la otra pierna de la llamada (¿ya colgó?).' };
+
+      let twiml: string;
+      if (p.targetType === 'agent') {
+        const callerId = await this.getTenantCallerId(p.userId);
+        twiml = `<Response><Dial answerOnBridge="true"${callerId ? ` callerId="${this.xe(callerId)}"` : ''}><Client>${this.xe(p.targetId)}</Client></Dial></Response>`;
+      } else {
+        const baseUrl = process.env.TWILIO_WEBHOOK_BASE_URL || 'https://api.automarkiq.com';
+        twiml = `<Response><Redirect method="POST">${this.xe(`${baseUrl}/call-bots/twilio/${p.targetId}/voice`)}</Redirect></Response>`;
+      }
+
+      const body = new URLSearchParams({ Twiml: twiml }).toString();
+      const upd = await fetch(`${base}/Calls/${customerLeg}.json`, {
+        method: 'POST',
+        headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+      });
+      if (!upd.ok) return { ok: false, error: `Twilio rechazó la redirección (${upd.status}).` };
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || 'Error al transferir.' };
+    }
+  }
+
   /** TwiML <Dial> that rings ALL available agents' browsers at once (first to answer wins).
    *  Returns null when nobody is available (caller falls back to voicemail/external number). */
   async dialAvailableAgentsTwiml(tenantId: string, callerId?: string): Promise<string | null> {
