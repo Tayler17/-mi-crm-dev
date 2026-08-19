@@ -87,7 +87,9 @@ export class AiAgentService implements OnModuleInit {
     const tools = toOpenAITools(CRM_TOOLS);
 
     // Keep only user/assistant turns from the client; we add the system prompt ourselves.
-    const convo: any[] = [{ role: 'system', content: SYSTEM_PROMPT }];
+    const now = new Date();
+    const dateNote = `FECHA Y HORA ACTUAL: ${now.toISOString().slice(0, 16).replace('T', ' ')} UTC (${now.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}). Usa SIEMPRE esta fecha para "hoy", "ayer", "esta semana", etc. Para listar contactos/conversaciones "de hoy" usa la herramienta correspondiente con period="today" (el filtro de fecha lo hace la base de datos).`;
+    const convo: any[] = [{ role: 'system', content: `${SYSTEM_PROMPT}\n\n${dateNote}` }];
     for (const m of history.slice(-20)) {
       if (m.role === 'user' || m.role === 'assistant') convo.push({ role: m.role, content: String(m.content ?? '') });
     }

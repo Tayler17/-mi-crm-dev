@@ -14,6 +14,11 @@ export function cleanForSpeech(text: string): string {
     .replace(/^\s*[-*+•]\s+/gm, '')             // bullet markers
     .replace(/^\s*\d+[.)]\s+/gm, '')            // numbered list markers "1. " / "1) "
     .replace(/[*_#`>~|]/g, '')                  // leftover markdown symbols
+    // Read phone-like digit runs one digit at a time (else TTS says "ninety-four thousand…").
+    .replace(/\+?[\d][\d\s().-]{5,}[\d]/g, (m) => {
+      const digits = m.replace(/\D/g, '');
+      return digits.length >= 7 ? ' ' + digits.split('').join(' ') + ' ' : m;
+    })
     .replace(/\n{2,}/g, '. ')                   // paragraph breaks → pause
     .replace(/\n/g, '. ')                        // line breaks → pause
     .replace(/\.\s*\.\s*(\.\s*)+/g, '. ')        // collapse repeated dots

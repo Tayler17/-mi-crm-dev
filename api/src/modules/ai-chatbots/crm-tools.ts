@@ -127,6 +127,30 @@ export const CRM_TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'list_recent_contacts',
+    description: 'Listar los contactos MÁS RECIENTES creados en el CRM. Úsalo cuando pregunten "quiénes son los contactos nuevos/de hoy", "los últimos contactos" o "quiénes son esos". Devuelve nombre, teléfono, email y fecha de creación.',
+    parameters: {
+      type: 'object',
+      properties: {
+        period: { type: 'string', description: 'today (hoy), week (esta semana), month (este mes) o all (todos, los más recientes). Por defecto: all.' },
+        limit: { type: 'number', description: 'Máximo de contactos a devolver (default 10, máx 50).' },
+      },
+      required: [],
+    },
+    handler: async (ctx, args) => {
+      const lim = Math.min(Math.max(Number(args.limit) || 10, 1), 50);
+      const { period, since } = periodSince(args.period, 'all');
+      const where = since ? `AND created_at >= ${since}` : '';
+      const rows = await ctx.db.query(
+        `SELECT id, full_name, phone, email, created_at
+         FROM contacts WHERE tenant_id=$1 ${where}
+         ORDER BY created_at DESC LIMIT ${lim}`,
+        [ctx.tenantId],
+      );
+      return { ok: true, count: rows.length, period, contacts: rows };
+    },
+  },
+  {
     name: 'create_contact',
     description: 'Crear un nuevo contacto en el CRM.',
     parameters: {
