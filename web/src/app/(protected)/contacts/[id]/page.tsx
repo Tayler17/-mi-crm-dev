@@ -274,7 +274,14 @@ export default function ContactProfilePage() {
                 <a href={`mailto:${c.email}`} style={{ fontSize: 13, color: 'var(--primary)', display: 'flex', gap: 5, alignItems: 'center', textDecoration: 'none' }}>📧 {c.email}</a>
               )}
               {c.phone && !c.phone.startsWith('lid:') && (
-                <a href={`tel:${c.phone}`} style={{ fontSize: 13, color: 'var(--primary)', display: 'flex', gap: 5, alignItems: 'center', textDecoration: 'none' }}>📞 {c.phone}</a>
+                <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <a href={`tel:${c.phone}`} style={{ fontSize: 13, color: 'var(--primary)', display: 'flex', gap: 5, alignItems: 'center', textDecoration: 'none' }}>📞 {c.phone}</a>
+                  <button
+                    onClick={() => window.dispatchEvent(new CustomEvent('softphone:call', { detail: { number: c.phone, name } }))}
+                    title="Llamar desde el CRM"
+                    style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: '#22c55e', border: 'none', borderRadius: 6, padding: '3px 8px', cursor: 'pointer' }}
+                  >📞 Llamar</button>
+                </span>
               )}
               {c.phone?.startsWith('lid:') && (
                 <span style={{ fontSize: 12, color: '#92400e', background: '#fef3c7', borderRadius: 4, padding: '2px 6px', display: 'flex', gap: 4, alignItems: 'center' }}>

@@ -61,6 +61,26 @@ export class VoiceService {
     return rows.map((r: any) => r.id);
   }
 
+  /** The business caller ID for an agent's outbound call: the tenant's Twilio number
+   *  (from a call bot) or the first platform voice number. */
+  async getTenantCallerId(userId: string): Promise<string | null> {
+    if (!userId) return null;
+    const [u] = await this.db.query(`SELECT tenant_id FROM users WHERE id=$1`, [userId]).catch(() => []);
+    if (!u) return null;
+    const [b] = await this.db.query(
+      `SELECT phone_number FROM call_bots WHERE tenant_id::text=$1 AND phone_number IS NOT NULL AND phone_number <> '' ORDER BY created_at ASC LIMIT 1`,
+      [String(u.tenant_id)],
+    ).catch(() => []);
+    if (b?.phone_number) return b.phone_number;
+    const nums = String(await this.platformSettings.get('voice.phone_numbers')).split(/[,\s]+/).filter(Boolean);
+    return nums[0] ?? null;
+  }
+
+  /** Escape a string for XML attribute/text. */
+  xe(s: string): string {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
   /** TwiML <Dial> that rings ALL available agents' browsers at once (first to answer wins).
    *  Returns null when nobody is available (caller falls back to voicemail/external number). */
   async dialAvailableAgentsTwiml(tenantId: string, callerId?: string): Promise<string | null> {
