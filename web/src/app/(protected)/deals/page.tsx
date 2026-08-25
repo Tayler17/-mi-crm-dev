@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import {
-  getDeals, createDeal, deleteDeal, getPipelines, getPipelineStages, getContacts,
+  getDeals, createDeal, deleteDeal, updateDeal, getPipelines, getPipelineStages, getContacts,
   type Deal, type Pipeline, type PipelineStage, type Contact,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
@@ -125,6 +125,18 @@ export default function DealsPage() {
   async function handleDelete(d: Deal) {
     if (!confirm(`${i.delete} "${d.title}"?`)) return;
     try { await deleteDeal(d.id); load(); } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Error'); }
+  }
+
+  // Change a deal's status inline from the list (optimistic, reverts on error).
+  async function changeStatus(d: Deal, status: string) {
+    if (status === d.status) return;
+    const prev = d.status;
+    setDeals((ds) => ds.map((x) => (x.id === d.id ? { ...x, status } : x)));
+    try { await updateDeal(d.id, { status } as Partial<Deal>); }
+    catch (e: unknown) {
+      setDeals((ds) => ds.map((x) => (x.id === d.id ? { ...x, status: prev } : x)));
+      alert(e instanceof Error ? e.message : 'Error');
+    }
   }
 
   // ─── render
@@ -297,7 +309,19 @@ export default function DealsPage() {
                         {d.contact?.fullName || '—'}
                       </td>
                       <td>{d.currency} {Number(d.value).toLocaleString(i.locale, { minimumFractionDigits: 2 })}</td>
-                      <td><span className={`badge badge-${d.status}`}>{STATUS_LABELS[d.status] ?? d.status}</span></td>
+                      <td>
+                        <select
+                          value={d.status}
+                          onChange={(e) => changeStatus(d, e.target.value)}
+                          className={`badge badge-${d.status}`}
+                          title={lang === 'en' ? 'Change status' : 'Cambiar estado'}
+                          style={{ border: 'none', cursor: 'pointer', fontWeight: 600, padding: '3px 8px', borderRadius: 8 }}
+                        >
+                          <option value="open">{STATUS_LABELS.open}</option>
+                          <option value="won">{STATUS_LABELS.won}</option>
+                          <option value="lost">{STATUS_LABELS.lost}</option>
+                        </select>
+                      </td>
                       <td><span className={`badge badge-${d.priority}`}>{PRIORITY_LABELS[d.priority] ?? d.priority}</span></td>
                       <td style={{ color: 'var(--text-muted)' }}>{d.stage?.name || '—'}</td>
                       <td style={{ color: 'var(--text-muted)' }}>{new Date(d.createdAt).toLocaleDateString(i.locale)}</td>
