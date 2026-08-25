@@ -251,8 +251,8 @@ export default function ContactProfilePage() {
         {i.ctctBackToList}
       </button>
 
-      {/* Header card */}
-      <div className="card" style={{ marginBottom: 20 }}>
+      {/* Header card — overflow visible so the tag dropdown isn't clipped */}
+      <div className="card" style={{ marginBottom: 20, overflow: 'visible' }}>
         <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
           <Avatar name={name} size={64} />
           <div style={{ flex: 1 }}>
@@ -309,7 +309,7 @@ export default function ContactProfilePage() {
               <div style={{ position: 'relative' }}>
                 <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setShowTagPicker(!showTagPicker)}>+ Tag</button>
                 {showTagPicker && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', padding: 8, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', padding: 8, minWidth: 180, maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {unassignedTags.length > 0 ? unassignedTags.map((tag) => (
                       <button key={tag.id} onClick={() => handleAddTag(tag)}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', padding: '4px 8px', borderRadius: 6, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
