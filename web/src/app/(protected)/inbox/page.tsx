@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import Link from 'next/link';
 import { APP } from '@/lib/i18n/app';
 import { useLangCtx } from '@/lib/lang-context';
@@ -1286,7 +1286,7 @@ export default function InboxPage() {
     setTimeout(() => textareaRef.current?.focus(), 0);
   }
 
-  function renderBody(text: string) {
+  function renderBody(text: string): ReactNode {
     if (!text) return null;
 
     // Call transcript format: body contains **Transcript:** with [Usuario]/[Bot] lines
@@ -1333,6 +1333,18 @@ export default function InboxPage() {
           </div>
         );
       }
+    }
+
+    // Agent signature prefix "_Name_\n…" → small muted label above the message.
+    const sigMatch = text.match(/^_([^_\n]{1,40})_\n([\s\S]+)$/);
+    if (sigMatch) {
+      const [, agent, rest] = sigMatch;
+      return (
+        <>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 3 }}>{agent}</div>
+          {renderBody(rest)}
+        </>
+      );
     }
 
     // Default: make URLs clickable and highlight @mentions. Line breaks are
