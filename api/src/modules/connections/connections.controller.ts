@@ -46,6 +46,12 @@ export class ConnectionsController {
     return this.svc.sendWhatsappInteractive(tenantId, dto);
   }
 
+  // Mark a WhatsApp conversation's latest inbound message as read (blue ticks).
+  @Post('whatsapp/mark-read')
+  markWhatsappRead(@Body('conversationId') conversationId: string, @TenantId() tenantId: string) {
+    return this.svc.markWhatsappRead(tenantId, conversationId);
+  }
+
   // Delete a WhatsApp message template by name.
   @Delete('whatsapp/templates/:name')
   deleteWhatsappTemplate(@Param('name') name: string, @TenantId() tenantId: string, @Query('connectionId') connectionId?: string) {

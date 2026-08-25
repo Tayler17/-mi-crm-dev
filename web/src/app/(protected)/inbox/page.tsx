@@ -17,6 +17,7 @@ import {
   getConvBotSession, updateConvBotSession,
   getContactTimeline, requestCsat,
   getWhatsappTemplates, sendWhatsappTemplate, sendWhatsappInteractive, type WhatsappTemplate,
+  markWhatsappRead,
   API_URL,
   type Conversation, type Message, type Contact, type Inbox,
   type CannedResponse, type Tag, type Agent, type Team, type Queue,
@@ -859,6 +860,9 @@ export default function InboxPage() {
     setMobilePanel('chat');
     // Clear unread badge for this conversation
     if (unreadMap[id]) setUnreadMap((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    // Mark the WhatsApp conversation as read via the Cloud API (blue ticks; syncs the
+    // phone app in coexistence). No-op on the server for non-WhatsApp conversations.
+    markWhatsappRead(id).catch(() => {});
   }
 
   async function resolveQuick(e: React.MouseEvent, convId: string) {

@@ -80,6 +80,44 @@ export class ConnectionsService {
     return { wabaId: creds.wabaId, token: creds.accessToken, phoneId: creds.phoneNumberId, appId: creds.appId };
   }
 
+  /** Mark a WhatsApp conversation's latest inbound message as READ via the Cloud API
+   *  (blue ticks for the customer; also syncs the "read" state on the phone app when
+   *  the number runs in coexistence). No-op for non-WhatsApp conversations. */
+  async markWhatsappRead(tenantId: string, conversationId: string): Promise<{ ok: boolean; error?: string }> {
+    if (!conversationId) return { ok: false, error: 'conversationId requerido' };
+    const [conv] = await this.db.query(
+      `SELECT COALESCE(cc.channel_type, c.channel_type) AS ch
+         FROM conversations c LEFT JOIN channel_connections cc ON cc.id = c.connection_id
+        WHERE c.id=$1 AND c.tenant_id=$2 LIMIT 1`,
+      [conversationId, tenantId],
+    );
+    if (conv?.ch !== 'whatsapp') return { ok: true }; // only WhatsApp Cloud API
+    const { phoneId, token } = await this.getWhatsappCredsFor(tenantId, { conversationId });
+    if (!phoneId || !token) return { ok: false, error: 'Sin credenciales de WhatsApp API' };
+    const [msg] = await this.db.query(
+      `SELECT external_id FROM messages
+         WHERE conversation_id=$1 AND tenant_id=$2 AND direction='inbound'
+           AND external_id IS NOT NULL AND external_id <> ''
+         ORDER BY created_at DESC LIMIT 1`,
+      [conversationId, tenantId],
+    );
+    if (!msg?.external_id) return { ok: true }; // nothing to mark
+    try {
+      const res = await (globalThis as any).fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', status: 'read', message_id: msg.external_id }),
+        signal: AbortSignal.timeout(10000),
+      });
+      const data: any = await res.json().catch(() => ({}));
+      if (data?.error) return { ok: false, error: data.error.message };
+      return { ok: true };
+    } catch (e: any) {
+      this.logger.warn(`[wa-read] mark read failed: ${e.message}`);
+      return { ok: false, error: e.message };
+    }
+  }
+
   /** Upload a sample image to Meta's Resumable Upload API and return its handle,
    *  used as the example for an IMAGE-header template. Requires the app's App ID. */
   private async uploadResumable(appId: string, token: string, buffer: Buffer, mime: string): Promise<string | null> {
