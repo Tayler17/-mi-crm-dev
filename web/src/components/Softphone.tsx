@@ -29,6 +29,7 @@ export function Softphone() {
   const [warmRoom, setWarmRoom] = useState<string | null>(null);
   const [warmName, setWarmName] = useState('');
   const [warmStage, setWarmStage] = useState<'starting' | 'consulting' | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
   const deviceRef = useRef<any>(null);
   const callRef = useRef<any>(null);
   const timerRef = useRef<any>(null);
@@ -78,6 +79,16 @@ export function Softphone() {
     })();
     return () => { cancelled = true; stopTimer(); try { device?.destroy(); } catch {} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // On mobile the softphone anchors to the TOP so it doesn't cover the inbox composer
+  // buttons (mic, quick replies, attach) at the bottom of the screen.
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const on = () => setIsMobile(mq.matches);
+    on();
+    try { mq.addEventListener('change', on); } catch { mq.addListener(on); }
+    return () => { try { mq.removeEventListener('change', on); } catch { mq.removeListener(on); } };
   }, []);
 
   // Let "Llamar" buttons anywhere fire: window.dispatchEvent(new CustomEvent('softphone:call',{detail:{number,name}}))
@@ -223,6 +234,8 @@ export function Softphone() {
   if (status === 'off') return null; // not configured / not registered
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  // Anchor: bottom-left on desktop; top-left on mobile (clears the inbox composer bar).
+  const anchor: React.CSSProperties = isMobile ? { top: 64, left: 12 } : { bottom: 24, left: 24 };
 
   // Idle: clickable "online" pill that opens the dialer.
   if (status === 'ready') {
@@ -230,7 +243,7 @@ export function Softphone() {
       <button
         onClick={() => { setDialInput(''); setStatus('dialer'); }}
         title="Marcar un número"
-        style={{ position: 'fixed', bottom: 24, left: 24, zIndex: 900, background: 'var(--surface, var(--bg))', border: '1px solid var(--border)', borderRadius: 20, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, boxShadow: '0 4px 14px rgba(0,0,0,0.15)', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}
+        style={{ position: 'fixed', ...anchor, zIndex: 900, background: 'var(--surface, var(--bg))', border: '1px solid var(--border)', borderRadius: 20, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, boxShadow: '0 4px 14px rgba(0,0,0,0.15)', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}
       >
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e' }} />
         📞 Softphone · marcar
@@ -243,7 +256,7 @@ export function Softphone() {
     const press = (d: string) => setDialInput((v) => (v + d).slice(0, 20));
     const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '0', '⌫'];
     return (
-      <div style={{ position: 'fixed', bottom: 24, left: 24, zIndex: 950, width: 300, maxWidth: 'calc(100vw - 32px)', background: 'var(--surface, var(--bg))', border: '1px solid var(--border)', borderRadius: 16, boxShadow: '0 16px 48px rgba(0,0,0,0.32)', overflow: 'hidden' }}>
+      <div style={{ position: 'fixed', ...anchor, zIndex: 950, width: 300, maxWidth: 'calc(100vw - 32px)', background: 'var(--surface, var(--bg))', border: '1px solid var(--border)', borderRadius: 16, boxShadow: '0 16px 48px rgba(0,0,0,0.32)', overflow: 'hidden' }}>
         <div style={{ padding: '12px 16px', background: 'linear-gradient(135deg,#4f46e5,#6366f1)', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontSize: 13, fontWeight: 700 }}>📞 Nueva llamada</div>
           <button onClick={() => setStatus('ready')} title="Cerrar" style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>✕</button>
@@ -279,7 +292,7 @@ export function Softphone() {
 
   if (status === 'warm') {
     return (
-      <div style={{ position: 'fixed', bottom: 24, left: 24, zIndex: 950, width: 300, maxWidth: 'calc(100vw - 32px)', background: 'var(--surface, var(--bg))', border: '1px solid var(--border)', borderRadius: 16, boxShadow: '0 16px 48px rgba(0,0,0,0.32)', overflow: 'hidden' }}>
+      <div style={{ position: 'fixed', ...anchor, zIndex: 950, width: 300, maxWidth: 'calc(100vw - 32px)', background: 'var(--surface, var(--bg))', border: '1px solid var(--border)', borderRadius: 16, boxShadow: '0 16px 48px rgba(0,0,0,0.32)', overflow: 'hidden' }}>
         <div style={{ padding: '14px 18px', background: 'linear-gradient(135deg,#7c3aed,#a855f7)', color: '#fff' }}>
           <div style={{ fontSize: 12, opacity: 0.85 }}>{warmStage === 'consulting' ? '👥 Consulta privada' : '⏳ Poniendo en espera…'}</div>
           <div style={{ fontSize: 17, fontWeight: 700, marginTop: 2 }}>{warmName || 'Agente'}</div>
@@ -302,7 +315,7 @@ export function Softphone() {
   const incoming = status === 'incoming';
   const calling = status === 'calling';
   return (
-    <div style={{ position: 'fixed', bottom: 24, left: 24, zIndex: 950, width: 300, maxWidth: 'calc(100vw - 32px)', background: 'var(--surface, var(--bg))', border: '1px solid var(--border)', borderRadius: 16, boxShadow: '0 16px 48px rgba(0,0,0,0.32)', overflow: 'hidden' }}>
+    <div style={{ position: 'fixed', ...anchor, zIndex: 950, width: 300, maxWidth: 'calc(100vw - 32px)', background: 'var(--surface, var(--bg))', border: '1px solid var(--border)', borderRadius: 16, boxShadow: '0 16px 48px rgba(0,0,0,0.32)', overflow: 'hidden' }}>
       <div style={{ padding: '14px 18px', background: incoming ? 'linear-gradient(135deg,#16a34a,#22c55e)' : 'linear-gradient(135deg,#4f46e5,#6366f1)', color: '#fff' }}>
         <div style={{ fontSize: 12, opacity: 0.85 }}>{incoming ? '📞 Llamada entrante' : calling ? '📞 Llamando…' : '📞 En llamada'}</div>
         <div style={{ fontSize: 17, fontWeight: 700, marginTop: 2 }}>{from}</div>
