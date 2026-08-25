@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getUsers, createUser, updateUser, deactivateUser, getStoredUser, type User } from '@/lib/api';
+import { getUsers, createUser, updateUser, deactivateUser, getStoredUser, setSignaturesForAll, type User } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
 import { APP } from '@/lib/i18n/app';
 
@@ -44,18 +44,19 @@ function isOnline(lastSeenAt?: string | null) {
   return Date.now() - new Date(lastSeenAt).getTime() < 3 * 60_000;
 }
 
-function Avatar({ name, size = 36, availability }: { name: string; size?: number; availability?: string }) {
+function Avatar({ name, size = 36, availability, avatarUrl }: { name: string; size?: number; availability?: string; avatarUrl?: string | null }) {
   const initials = name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
   const colors = ['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f97316', '#22c55e', '#06b6d4', '#3b82f6'];
   const color = colors[name.charCodeAt(0) % colors.length];
+  const src = avatarUrl ? (avatarUrl.startsWith('http') ? avatarUrl : (process.env.NEXT_PUBLIC_API_URL || '') + avatarUrl) : '';
   return (
     <div style={{ position: 'relative', flexShrink: 0, width: size, height: size }}>
       <div style={{
-        width: size, height: size, borderRadius: '50%', background: color,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: size, height: size, borderRadius: '50%', background: src ? 'transparent' : color,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
         color: '#fff', fontWeight: 700, fontSize: size * 0.35,
       }}>
-        {initials || '?'}
+        {src ? <img src={src} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (initials || '?')}
       </div>
       {availability && (
         <span style={{
@@ -115,6 +116,15 @@ export default function UsersPage() {
   }, []);
 
   function resetCreate() { setCEmail(''); setCName(''); setCPassword(''); setCRole('agent'); setCreateError(''); }
+
+  async function applyAllSignatures(enabled: boolean) {
+    const msg = enabled
+      ? '¿Activar la firma automática (nombre del agente) para TODOS los usuarios? En chat/WhatsApp firmarán con su nombre; el que ya tenga su propia firma la conserva.'
+      : '¿Quitar la firma automática para TODOS los usuarios?';
+    if (!confirm(msg)) return;
+    try { await setSignaturesForAll(enabled); load(); alert(enabled ? '✓ Firma activada para todos.' : 'Firma desactivada para todos.'); }
+    catch (e: any) { alert(e?.message || 'Error'); }
+  }
 
   function openEdit(u: User) {
     setEditUser(u); setEName(u.fullName); setERole(u.role as Role); setEActive(u.isActive); setEPassword(''); setEditError('');
@@ -178,9 +188,21 @@ export default function UsersPage() {
             {activeCount} {i.active.toLowerCase()} · {inactiveCount} {i.inactive.toLowerCase()}
           </div>
         </div>
-        <button className="btn btn-primary" onClick={() => { resetCreate(); setShowCreate(true); }}>
-          + {lang === 'en' ? 'New user' : lang === 'pt' ? 'Novo usuário' : lang === 'tr' ? 'Yeni kullanıcı' : lang === 'ar' ? 'مستخدم جديد' : 'Nuevo usuario'}
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {['admin', 'owner'].includes(myRole) && (
+            <>
+              <button className="btn btn-secondary" style={{ fontSize: 12 }} title="Activar la firma automática para todos" onClick={() => applyAllSignatures(true)}>
+                ✍ {lang === 'en' ? 'Signature: all on' : 'Firma: activar a todos'}
+              </button>
+              <button className="btn btn-ghost" style={{ fontSize: 12 }} title="Quitar la firma automática para todos" onClick={() => applyAllSignatures(false)}>
+                {lang === 'en' ? 'all off' : 'quitar a todos'}
+              </button>
+            </>
+          )}
+          <button className="btn btn-primary" onClick={() => { resetCreate(); setShowCreate(true); }}>
+            + {lang === 'en' ? 'New user' : lang === 'pt' ? 'Novo usuário' : lang === 'tr' ? 'Yeni kullanıcı' : lang === 'ar' ? 'مستخدم جديد' : 'Nuevo usuario'}
+          </button>
+        </div>
       </div>
 
       <div className="page-body">
@@ -231,7 +253,7 @@ export default function UsersPage() {
                   borderBottom: idx < filtered.length - 1 ? '1px solid var(--border)' : 'none',
                   opacity: u.isActive ? 1 : 0.55,
                 }}>
-                  <Avatar name={u.fullName || u.email} availability={isOnline(u.lastSeenAt) ? 'online' : 'offline'} />
+                  <Avatar name={u.fullName || u.email} availability={isOnline(u.lastSeenAt) ? 'online' : 'offline'} avatarUrl={u.avatarUrl} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 600, fontSize: 14 }}>{u.fullName}</span>
@@ -326,7 +348,7 @@ export default function UsersPage() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Avatar name={editUser.fullName || editUser.email} size={32} availability={editUser.availability} />
+                <Avatar name={editUser.fullName || editUser.email} size={32} availability={editUser.availability} avatarUrl={editUser.avatarUrl} />
                 <h2 className="modal-title">{editUser.fullName}</h2>
               </div>
               <button className="modal-close" onClick={() => setEditUser(null)}>×</button>

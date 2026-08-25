@@ -340,9 +340,13 @@ export interface User {
   createdAt: string;
   availability?: string;
   lastSeenAt?: string | null;
+  avatarUrl?: string | null;
+  signatureEnabled?: boolean;
 }
 
 export const getUsers = () => apiGet<User[]>('/auth/users');
+export const setSignaturesForAll = (enabled: boolean) =>
+  apiPost<{ ok: boolean; enabled: boolean }>('/auth/users/signatures', { enabled });
 export const touchLastSeen = () => apiPost('/auth/me/seen', {});
 export const createUser = (data: { email: string; fullName: string; password: string; role?: string }) =>
   apiPost<User>('/auth/users', data);

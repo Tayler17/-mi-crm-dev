@@ -89,7 +89,7 @@ export class MessagesController {
   private async applySignature(conversationId: string, tenantId: string, userId: string | undefined, body: string): Promise<string> {
     if (!userId) return body;
     const [u] = await this.db.query(
-      `SELECT signature_enabled, signature_email, signature_chat FROM users WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+      `SELECT signature_enabled, signature_email, signature_chat, full_name FROM users WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
       [userId, tenantId],
     );
     if (!u?.signature_enabled) return body;
@@ -100,7 +100,10 @@ export class MessagesController {
       [conversationId, tenantId],
     );
     const channel = conv?.channel_type ?? '';
-    const sig: string = (channel === 'email' ? u.signature_email : u.signature_chat) ?? '';
+    // For chat, fall back to the agent's first name when no chat signature is set
+    // (so an admin's bulk "enable for all" signs with each agent's name automatically).
+    const firstName = String(u.full_name ?? '').trim().split(/\s+/)[0] ?? '';
+    const sig: string = (channel === 'email' ? u.signature_email : (u.signature_chat || firstName)) ?? '';
     if (!sig.trim()) return body;
     if (body.trimEnd().endsWith(sig.trim())) return body; // already signed
     const sep = channel === 'email' ? '\n\n--\n' : '\n\n';

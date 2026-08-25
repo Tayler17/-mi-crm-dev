@@ -117,6 +117,14 @@ export class AuthController {
     return this.authService.getUser(id, tenantId);
   }
 
+  /** Admin: enable/disable the auto-signature for all users at once. */
+  @Post('users/signatures')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  setSignatureForAll(@Body('enabled') enabled: boolean, @TenantId() tenantId: string) {
+    return this.authService.setSignatureForAll(tenantId, enabled !== false);
+  }
+
   @Post('users')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')

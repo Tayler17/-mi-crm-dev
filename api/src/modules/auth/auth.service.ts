@@ -295,15 +295,21 @@ export class AuthService {
   getUsers(tenantId: string) {
     return this.userRepo.find({
       where: { tenantId },
-      select: ['id', 'fullName', 'email', 'role', 'isActive', 'createdAt', 'availability', 'lastSeenAt'],
+      select: ['id', 'fullName', 'email', 'role', 'isActive', 'createdAt', 'availability', 'lastSeenAt', 'avatarUrl', 'signatureEnabled'],
       order: { fullName: 'ASC' },
     });
+  }
+
+  /** Admin: turn the auto-signature on/off for every user in the tenant at once. */
+  async setSignatureForAll(tenantId: string, enabled: boolean) {
+    await this.userRepo.update({ tenantId }, { signatureEnabled: enabled } as any);
+    return { ok: true, enabled };
   }
 
   async getUser(id: string, tenantId: string) {
     const user = await this.userRepo.findOne({
       where: { id, tenantId },
-      select: ['id', 'fullName', 'email', 'role', 'isActive', 'createdAt', 'availability', 'lastSeenAt'],
+      select: ['id', 'fullName', 'email', 'role', 'isActive', 'createdAt', 'availability', 'lastSeenAt', 'avatarUrl', 'signatureEnabled'],
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
     return user;
