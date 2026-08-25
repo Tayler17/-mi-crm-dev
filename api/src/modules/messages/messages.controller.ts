@@ -100,16 +100,11 @@ export class MessagesController {
       [conversationId, tenantId],
     );
     const channel = conv?.channel_type ?? '';
-    const sig: string = ((channel === 'email' ? u.signature_email : u.signature_chat) ?? '').trim();
-    if (!sig) return body;
-    if (channel === 'email') {
-      if (body.trimEnd().endsWith(sig)) return body; // already signed
-      return `${body}\n\n--\n${sig}`;
-    }
-    // Chat channels (WhatsApp, etc.): agent name as a subtle first line (italic),
-    // so the customer sees who is writing without a bulky bottom signature.
-    if (body.trimStart().startsWith(`_${sig}_`) || body.trimStart().startsWith(sig)) return body; // already prefixed
-    return `_${sig}_\n${body}`;
+    const sig: string = (channel === 'email' ? u.signature_email : u.signature_chat) ?? '';
+    if (!sig.trim()) return body;
+    if (body.trimEnd().endsWith(sig.trim())) return body; // already signed
+    const sep = channel === 'email' ? '\n\n--\n' : '\n\n';
+    return `${body}${sep}${sig}`;
   }
 
   /** Enforce team-based conversation scoping for agents (when the tenant enables it). */
