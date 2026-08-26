@@ -2146,6 +2146,26 @@ export default function InboxPage() {
                   </div>
                 </div>
               )}
+              {/* WhatsApp 24h window: free text won't be delivered — steer to a template. */}
+              {composerTab === 'message' && conv?.channelType === 'whatsapp' && (() => {
+                const lastIn = [...messages].reverse().find((m) => m.direction === 'inbound' && m.contentType !== 'activity');
+                const closed = !lastIn || (Date.now() - new Date(lastIn.createdAt).getTime() > 24 * 60 * 60 * 1000);
+                if (!closed) return null;
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, padding: '8px 12px', borderRadius: 8, border: '1px solid #f59e0b', background: 'var(--bg-hover, #fffbeb)' }}>
+                    <span style={{ fontSize: 16 }}>⚠️</span>
+                    <span style={{ fontSize: 12, color: 'var(--text)', flex: 1 }}>
+                      {en
+                        ? 'Outside the 24h window — a free text message will NOT be delivered by WhatsApp. Send an approved template to reach the customer.'
+                        : 'Fuera de la ventana de 24h — un mensaje de texto libre NO lo entregará WhatsApp. Envía una plantilla aprobada para llegar al cliente.'}
+                    </span>
+                    <button type="button" onClick={openTemplates}
+                      style={{ flexShrink: 0, background: '#f59e0b', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                      📑 {en ? 'Send template' : 'Enviar plantilla'}
+                    </button>
+                  </div>
+                );
+              })()}
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                 {/* Hidden file input */}
                 <input ref={fileInputRef} type="file" accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt" style={{ display: 'none' }} onChange={handleFileUpload} />
