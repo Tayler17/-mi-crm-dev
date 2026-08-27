@@ -3,6 +3,7 @@ import { ConnectionsService } from './connections.service';
 import { WhatsappWebService } from './whatsapp-web.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantId } from '../../common/decorators/tenant.decorator';
+import { PlatformSettingsService } from '../settings/platform-settings.service';
 
 @Controller('connections')
 @UseGuards(JwtAuthGuard)
@@ -10,6 +11,7 @@ export class ConnectionsController {
   constructor(
     private readonly svc: ConnectionsService,
     private readonly waSvc: WhatsappWebService,
+    private readonly platformSettings: PlatformSettingsService,
   ) {}
 
   @Get()
@@ -50,6 +52,19 @@ export class ConnectionsController {
   @Post('whatsapp/mark-read')
   markWhatsappRead(@Body('conversationId') conversationId: string, @TenantId() tenantId: string) {
     return this.svc.markWhatsappRead(tenantId, conversationId);
+  }
+
+  // WhatsApp Embedded Signup: the frontend SDK needs the app id + config id to launch.
+  @Get('whatsapp/embedded-config')
+  async embeddedConfig() {
+    const { appId, waConfigId } = await this.platformSettings.getMeta();
+    return { appId, configId: waConfigId, enabled: !!(appId && waConfigId) };
+  }
+
+  // WhatsApp Embedded Signup: finish onboarding (exchange code, subscribe, store).
+  @Post('whatsapp/embedded-signup')
+  embeddedSignup(@Body() dto: any, @TenantId() tenantId: string) {
+    return this.svc.embeddedSignup(tenantId, dto);
   }
 
   // Delete a WhatsApp message template by name.

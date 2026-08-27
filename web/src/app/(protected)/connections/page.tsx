@@ -10,6 +10,7 @@ import {
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
 import { APP } from '@/lib/i18n/app';
+import { WhatsappEmbeddedSignup } from '@/components/WhatsappEmbeddedSignup';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -393,10 +394,20 @@ function ConnectionModal({ conn, defaultType, inboxes, onClose, onSaved }: Conne
             </div>
           )}
 
+          {channelType === 'whatsapp' && !conn && (
+            <div style={{ padding: '14px 16px', background: '#f0fdf4', borderRadius: 8, border: '1px solid #86efac', marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, color: '#15803d', marginBottom: 6, fontSize: 14 }}>⚡ Conexión rápida (recomendada)</div>
+              <p style={{ fontSize: 12, color: '#166534', margin: '0 0 10px' }}>
+                Conecta tu WhatsApp con Meta en unos clics — inicias sesión, eliges o creas tu cuenta y número, y el resto (webhook, permisos) se configura solo. Debajo puedes hacerlo manual si prefieres.
+              </p>
+              <WhatsappEmbeddedSignup onDone={onSaved} />
+            </div>
+          )}
+
           {(fields.length > 0 || channelType === 'sms') && (
             <div>
               <div className="form-label" style={{ marginBottom: 10, color: ch?.color }}>
-                {ch?.icon} Credenciales de {ch?.label}
+                {ch?.icon} Credenciales de {ch?.label} {channelType === 'whatsapp' && <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 12 }}>(manual)</span>}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '12px 14px', background: ch?.bg, borderRadius: 8, border: `1px solid ${ch?.color}33` }}>
                 {channelType === 'sms' && (

@@ -18,6 +18,7 @@ export const PLATFORM_KEYS = [
   'meta.app_id',
   'meta.app_secret',
   'meta.verify_token',
+  'meta.wa_config_id',
   'elevenlabs.api_key',
   'stripe.secret_key',
   'stripe.webhook_secret',
@@ -70,6 +71,7 @@ const ENV_FALLBACKS: Record<PlatformKey, string> = {
   'voice.twiml_app_sid':  'TWILIO_TWIML_APP_SID',
   'meta.app_id':          'META_APP_ID',
   'meta.app_secret':      'META_APP_SECRET',
+  'meta.wa_config_id':    'META_WA_CONFIG_ID',
   'meta.verify_token':    'META_WEBHOOK_VERIFY_TOKEN',
   'elevenlabs.api_key':   'ELEVENLABS_API_KEY',
   'stripe.secret_key':     'STRIPE_SECRET_KEY',
@@ -130,12 +132,13 @@ export class PlatformSettingsService {
   }
 
   /** Get Meta (Facebook/Instagram) credentials in one shot. */
-  async getMeta(): Promise<{ appId: string; appSecret: string; verifyToken: string }> {
+  async getMeta(): Promise<{ appId: string; appSecret: string; verifyToken: string; waConfigId: string }> {
     await this.loadCache();
     return {
       appId:       await this.get('meta.app_id'),
       appSecret:   await this.get('meta.app_secret'),
       verifyToken: (await this.get('meta.verify_token')) || 'automarkiq_meta_webhook',
+      waConfigId:  await this.get('meta.wa_config_id'),
     };
   }
 

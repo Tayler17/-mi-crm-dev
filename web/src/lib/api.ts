@@ -538,6 +538,10 @@ export const getTeamsReport = () => apiGet<any>('/reports/teams');
 export interface McpToken { id: string; label: string; role: string; last_used_at: string | null; revoked_at: string | null; created_at: string; token_hint: string }
 export const markWhatsappRead = (conversationId: string) =>
   apiPost<{ ok: boolean; error?: string }>('/connections/whatsapp/mark-read', { conversationId });
+export const getWaEmbeddedConfig = () =>
+  apiGet<{ appId: string; configId: string; enabled: boolean }>('/connections/whatsapp/embedded-config');
+export const whatsappEmbeddedSignup = (dto: { code: string; wabaId: string; phoneNumberId: string; inboxId?: string }) =>
+  apiPost<{ ok: boolean; error?: string; connection?: unknown }>('/connections/whatsapp/embedded-signup', dto);
 export const getVoiceToken = () => apiGet<{ ok: boolean; token?: string; identity?: string; error?: string }>('/voice/token');
 export interface TransferTargets { agents: { id: string; name: string }[]; bots: { id: string; name: string }[]; }
 export const getTransferTargets = () => apiGet<TransferTargets>('/voice/transfer-targets');

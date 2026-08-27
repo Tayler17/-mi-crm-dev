@@ -871,7 +871,7 @@ export default function SettingsPage() {
     'voice.provider': 'twilio', 'voice.account_sid': '', 'voice.auth_token': '', 'voice.phone_numbers': '',
     'voice.bundle_sid': '', 'voice.address_sid': '',
     'voice.api_key': '', 'voice.api_secret': '', 'voice.twiml_app_sid': '',
-    'meta.app_id': '', 'meta.app_secret': '', 'meta.verify_token': '',
+    'meta.app_id': '', 'meta.app_secret': '', 'meta.verify_token': '', 'meta.wa_config_id': '',
     'elevenlabs.api_key': '',
     'deepgram.api_key': '',
     'call.streaming_global': 'off',
@@ -960,6 +960,7 @@ export default function SettingsPage() {
         'meta.app_id':          p['meta.app_id']?.value       || '',
         'meta.app_secret':      p['meta.app_secret']?.masked       ? '••••••••' : (p['meta.app_secret']?.value || ''),
         'meta.verify_token':    p['meta.verify_token']?.masked     ? '••••••••' : (p['meta.verify_token']?.value || ''),
+        'meta.wa_config_id':    p['meta.wa_config_id']?.value      || '',
         'elevenlabs.api_key':   p['elevenlabs.api_key']?.masked    ? '••••••••' : (p['elevenlabs.api_key']?.value || ''),
         'deepgram.api_key':     p['deepgram.api_key']?.masked      ? '••••••••' : (p['deepgram.api_key']?.value || ''),
         'call.streaming_global': p['call.streaming_global']?.value || 'off',
@@ -1618,6 +1619,17 @@ export default function SettingsPage() {
                   onChange={(e) => setPlatformForm((p) => ({ ...p, 'meta.app_secret': e.target.value }))}
                   placeholder="••••••••••••••••••••••••••••••••" />
                 {platformCfg['meta.app_secret']?.masked && platformForm['meta.app_secret'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
+                )}
+              </div>
+            </Row>
+            <Row label="WhatsApp Config ID" hint="Meta → WhatsApp → Configuración de Embedded Signup (para el botón 'Conectar WhatsApp')">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" style={{ maxWidth: 300 }}
+                  value={platformForm['meta.wa_config_id']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'meta.wa_config_id': e.target.value }))}
+                  placeholder="1519410016624609" />
+                {platformCfg['meta.wa_config_id']?.value && (
                   <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
                 )}
               </div>

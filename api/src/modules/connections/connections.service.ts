@@ -118,6 +118,58 @@ export class ConnectionsService {
     }
   }
 
+  /** WhatsApp Embedded Signup: exchange the auth code for a business token, subscribe
+   *  our app to the customer's WABA (so webhooks reach us), register the number for the
+   *  Cloud API, and store the connection. Automates what was done by hand for the "65". */
+  async embeddedSignup(
+    tenantId: string,
+    dto: { code: string; wabaId: string; phoneNumberId: string; name?: string; inboxId?: string },
+  ): Promise<{ ok: boolean; error?: string; connection?: any }> {
+    const { appId, appSecret } = await this.platformSettings.getMeta();
+    if (!appId || !appSecret) return { ok: false, error: 'Falta configurar Meta (App ID / App Secret) en Ajustes → Plataforma.' };
+    if (!dto.code || !dto.wabaId || !dto.phoneNumberId) return { ok: false, error: 'Faltan datos del onboarding (code / WABA / número).' };
+    const GRAPH = 'https://graph.facebook.com/v21.0';
+    const f = (globalThis as any).fetch;
+    try {
+      // 1) Exchange the code for a (long-lived business) access token.
+      const tokRes = await f(`${GRAPH}/oauth/access_token?client_id=${appId}&client_secret=${encodeURIComponent(appSecret)}&code=${encodeURIComponent(dto.code)}`, { signal: AbortSignal.timeout(15000) });
+      const tok: any = await tokRes.json();
+      if (!tok?.access_token) return { ok: false, error: `Meta: ${tok?.error?.message || 'no se pudo obtener el token'}` };
+      const token = tok.access_token;
+
+      // 2) Subscribe our app to the customer's WABA (webhooks → CRM).
+      const subRes = await f(`${GRAPH}/${dto.wabaId}/subscribed_apps`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) });
+      const sub: any = await subRes.json().catch(() => ({}));
+      if (sub?.error) this.logger.warn(`[wa-embedded] subscribe warn: ${sub.error.message}`);
+
+      // 3) Register the number for Cloud API (best-effort; already-registered is fine).
+      try {
+        await f(`${GRAPH}/${dto.phoneNumberId}/register`, {
+          method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messaging_product: 'whatsapp', pin: '000000' }), signal: AbortSignal.timeout(15000),
+        });
+      } catch { /* ignore */ }
+
+      // 4) Friendly label from the number's display name.
+      let label = dto.name || 'WhatsApp';
+      try {
+        const pnRes = await f(`${GRAPH}/${dto.phoneNumberId}?fields=display_phone_number,verified_name&access_token=${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(10000) });
+        const pn: any = await pnRes.json();
+        if (pn?.verified_name || pn?.display_phone_number) label = `WhatsApp ${pn.verified_name || ''} ${pn.display_phone_number || ''}`.trim();
+      } catch { /* ignore */ }
+
+      // 5) Store the connection.
+      const connection = await this.create(
+        { name: label, channelType: 'whatsapp', credentials: { wabaId: dto.wabaId, phoneNumberId: dto.phoneNumberId, accessToken: token, appId }, inboxId: dto.inboxId },
+        tenantId,
+      );
+      return { ok: true, connection };
+    } catch (e: any) {
+      this.logger.error(`[wa-embedded] failed: ${e.message}`);
+      return { ok: false, error: e.message };
+    }
+  }
+
   /** Upload a sample image to Meta's Resumable Upload API and return its handle,
    *  used as the example for an IMAGE-header template. Requires the app's App ID. */
   private async uploadResumable(appId: string, token: string, buffer: Buffer, mime: string): Promise<string | null> {
