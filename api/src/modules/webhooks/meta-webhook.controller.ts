@@ -62,6 +62,22 @@ export class MetaWebhookController {
       const object: string = body?.object ?? '';
       this.logger.log(`Meta webhook received: object=${object} entries=${body?.entry?.length ?? 0}`);
 
+      // WhatsApp Cloud API (Embedded Signup): object='whatsapp_business_account'.
+      // Route by phone_number_id (all WABAs share this one app-level webhook).
+      if (object === 'whatsapp_business_account') {
+        for (const entry of body?.entry ?? []) {
+          for (const change of entry?.changes ?? []) {
+            const phoneNumberId = change?.value?.metadata?.phone_number_id;
+            if (!phoneNumberId) continue;
+            const conn = await this.findWhatsappConnection(String(phoneNumberId));
+            if (!conn) { this.logger.warn(`No WhatsApp connection for phone_number_id=${phoneNumberId}`); continue; }
+            this.logger.log(`WhatsApp routing: phone_number_id=${phoneNumberId} → conn=${conn.id} tenant=${conn.tenant_id}`);
+            await this.webhooks.processWhatsApp(conn.id, { object, entry: [{ ...entry, changes: [change] }] });
+          }
+        }
+        return { ok: true };
+      }
+
       // Facebook Messenger sends object='page', Instagram sends object='instagram'
       const channel = object === 'instagram' ? 'instagram' : 'facebook';
 
@@ -100,6 +116,16 @@ export class MetaWebhookController {
     }
     // Always return 200 so Meta doesn't retry
     return { ok: true };
+  }
+
+  private async findWhatsappConnection(phoneNumberId: string) {
+    const [conn] = await this.db.query(
+      `SELECT id, tenant_id, inbox_id FROM channel_connections
+       WHERE channel_type='whatsapp' AND is_active=true AND credentials->>'phoneNumberId' = $1
+       LIMIT 1`,
+      [phoneNumberId],
+    );
+    return conn ?? null;
   }
 
   private async findConnectionByPageId(pageId: string, channel: string) {
