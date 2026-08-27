@@ -645,6 +645,8 @@ export default function InboxPage() {
   const [unreadMap, setUnreadMap] = useState<Record<string, number>>({});
 
   const threadRef = useRef<HTMLDivElement>(null);
+  const atBottomRef = useRef(true);       // is the thread scrolled near the bottom?
+  const lastScrolledConv = useRef<string | null>(null);
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [peekId, setPeekId] = useState<string | null>(null);
@@ -720,9 +722,17 @@ export default function InboxPage() {
   }, [activeId, conversations]);
 
   // ── Scroll to bottom ─────────────────────────────────────────────────────────
+  // Only auto-scroll when opening a conversation or when the user is already near the
+  // bottom — so reading older messages up top isn't interrupted by a reload/new message.
   useEffect(() => {
-    if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
-  }, [messages, notes, composerTab]);
+    const el = threadRef.current;
+    if (!el) return;
+    const isNewConv = lastScrolledConv.current !== activeId;
+    if (isNewConv || atBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+    lastScrolledConv.current = activeId;
+  }, [messages, notes, composerTab, activeId]);
 
   // ── Aux data ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1854,7 +1864,11 @@ export default function InboxPage() {
           )}
 
           {/* Thread */}
-          <div className="inbox-chat-body" ref={threadRef}>
+          <div
+            className="inbox-chat-body"
+            ref={threadRef}
+            onScroll={() => { const el = threadRef.current; if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120; }}
+          >
             {loadingChat ? (
               <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{i.loading}</div>
             ) : chatItems.length === 0 && scheduledMsgs.length === 0 ? (
