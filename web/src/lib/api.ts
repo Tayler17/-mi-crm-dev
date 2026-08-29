@@ -405,6 +405,7 @@ export const getConversations = (filters?: {
   tagId?: string;
   queueId?: string;
   search?: string;
+  channel?: string;
 }) => {
   const params = new URLSearchParams();
   if (filters?.status)     params.set('status',     filters.status);
@@ -413,6 +414,7 @@ export const getConversations = (filters?: {
   if (filters?.tagId)      params.set('tagId',      filters.tagId);
   if (filters?.queueId)    params.set('queueId',    filters.queueId);
   if (filters?.search)     params.set('search',     filters.search);
+  if (filters?.channel)    params.set('channel',    filters.channel);
   const qs = params.toString();
   return apiGet<Conversation[]>(`/conversations${qs ? `?${qs}` : ''}`);
 };

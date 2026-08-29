@@ -161,19 +161,22 @@ interface FilterBarProps {
   filterStatus: string;
   filterAgent: string;
   filterQueue: string;
+  filterChannel: string;
   onTag: (v: string) => void;
   onInbox: (v: string) => void;
   onStatus: (v: string) => void;
   onAgent: (v: string) => void;
   onQueue: (v: string) => void;
+  onChannel: (v: string) => void;
   onClear: () => void;
 }
 
-function FilterBar({ show, tags, inboxes, agents, queues, filterTag, filterInbox, filterStatus, filterAgent, filterQueue, onTag, onInbox, onStatus, onAgent, onQueue, onClear }: FilterBarProps) {
+function FilterBar({ show, tags, inboxes, agents, queues, filterTag, filterInbox, filterStatus, filterAgent, filterQueue, filterChannel, onTag, onInbox, onStatus, onAgent, onQueue, onChannel, onClear }: FilterBarProps) {
   if (!show) return null;
   const { lang } = useLangCtx();
   const i = APP[lang];
-  const active = filterTag || filterInbox || filterStatus || filterAgent || filterQueue;
+  const en = lang === 'en';
+  const active = filterTag || filterInbox || filterStatus || filterAgent || filterQueue || filterChannel;
   return (
     <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', background: '#f8fafc', display: 'flex', flexDirection: 'column', gap: 6 }}>
       <select className="form-input" style={{ fontSize: 12 }} value={filterTag} onChange={(e) => onTag(e.target.value)}>
@@ -185,6 +188,18 @@ function FilterBar({ show, tags, inboxes, agents, queues, filterTag, filterInbox
       <select className="form-input" style={{ fontSize: 12 }} value={filterInbox} onChange={(e) => onInbox(e.target.value)}>
         <option value="">{i.inbxFilterInbox}</option>
         {inboxes.map((inb) => <option key={inb.id} value={inb.id}>{inb.name}</option>)}
+      </select>
+      <select className="form-input" style={{ fontSize: 12 }} value={filterChannel} onChange={(e) => onChannel(e.target.value)}>
+        <option value="">{en ? 'All channels' : 'Todos los canales'}</option>
+        <option value="phone">📞 {en ? 'Calls' : 'Llamadas'}</option>
+        <option value="whatsapp">💬 WhatsApp</option>
+        <option value="whatsapp_web">🔗 WhatsApp Web</option>
+        <option value="email">📧 Email</option>
+        <option value="facebook">👤 Facebook</option>
+        <option value="instagram">📸 Instagram</option>
+        <option value="telegram">✈ Telegram</option>
+        <option value="web">🌐 Web Chat</option>
+        <option value="sms">✉ SMS</option>
       </select>
       <select className="form-input" style={{ fontSize: 12 }} value={filterStatus} onChange={(e) => onStatus(e.target.value)}>
         <option value="">⚡ {i.status}</option>
@@ -513,6 +528,7 @@ export default function InboxPage() {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterAgent, setFilterAgent] = useState('');
   const [filterQueue, setFilterQueue] = useState('');
+  const [filterChannel, setFilterChannel] = useState('');
 
   // auxiliary data
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -678,11 +694,12 @@ export default function InboxPage() {
       tagId:      filterTag    || undefined,
       queueId:    filterQueue  || undefined,
       search:     debouncedSearch || undefined,
+      channel:    filterChannel || undefined,
     })
       .then(setConversations)
       .catch((e) => setListError(e.message))
       .finally(() => setLoadingList(false));
-  }, [tab, filterStatus, filterAgent, filterInbox, filterTag, filterQueue, debouncedSearch]);
+  }, [tab, filterStatus, filterAgent, filterInbox, filterTag, filterQueue, debouncedSearch, filterChannel]);
 
   // Stable ref so the SSE handler can call the latest loadList without being
   // listed as a dependency (which would reopen the SSE connection on every filter change)
@@ -859,7 +876,7 @@ export default function InboxPage() {
     return true;
   });
 
-  const activeFiltersCount = [filterTag, filterInbox, filterStatus, filterAgent, filterQueue].filter(Boolean).length;
+  const activeFiltersCount = [filterTag, filterInbox, filterStatus, filterAgent, filterQueue, filterChannel].filter(Boolean).length;
 
   // ── Actions ──────────────────────────────────────────────────────────────────
   const [mobilePanel, setMobilePanel] = useState<'list' | 'chat' | 'detail'>('list');
@@ -1166,7 +1183,7 @@ export default function InboxPage() {
   }
 
   function clearFilters() {
-    setFilterTag(''); setFilterInbox(''); setFilterStatus(''); setFilterAgent(''); setFilterQueue('');
+    setFilterTag(''); setFilterInbox(''); setFilterStatus(''); setFilterAgent(''); setFilterQueue(''); setFilterChannel('');
   }
 
   function toggleSelectMode() {
@@ -1564,11 +1581,13 @@ export default function InboxPage() {
           filterStatus={filterStatus}
           filterAgent={filterAgent}
           filterQueue={filterQueue}
+          filterChannel={filterChannel}
           onTag={setFilterTag}
           onInbox={setFilterInbox}
           onStatus={setFilterStatus}
           onAgent={setFilterAgent}
           onQueue={setFilterQueue}
+          onChannel={setFilterChannel}
           onClear={clearFilters}
         />
 

@@ -71,11 +71,13 @@ export class ConversationsService extends BaseTenantService<Conversation> {
     queueId?: string,
     viewer?: { id: string; role: string },
     search?: string,
+    channel?: string,
   ) {
     const params: any[] = [tenantId];
     const clauses: string[] = [];
 
     if (status)     { params.push(status);     clauses.push(`c.status = $${params.length}`); }
+    if (channel)    { params.push(channel);    clauses.push(`c.channel_type = $${params.length}`); }
     if (search && search.trim()) {
       // Search by contact (name/email/phone) OR by the CONTENT of any message
       // in the conversation (like WhatsApp) — so agents can find a chat by a word said in it.
