@@ -39,35 +39,41 @@ export class ContentPublishProcessor extends WorkerHost {
       this.logger.warn(`[content-publish] Post ${postId} not found — skipping`);
       return;
     }
-    if (post.status !== 'approved') {
+    // Cross-post jobs carry a channel override and run even after the main job flips
+    // the post to 'published'; the main job (no override) is the one gated on 'approved'.
+    const isCrosspost = !!job.data.channel;
+    const channel = job.data.channel ?? post.channel;
+    if (!isCrosspost && post.status !== 'approved') {
       this.logger.warn(`[content-publish] Post ${postId} status is "${post.status}" (not approved) — skipping`);
       return;
     }
 
     // Find an active connection for tenant-level channels (Instagram, Facebook)
-    const connectionType = CHANNEL_TO_CONNECTION[post.channel];
+    const connectionType = CHANNEL_TO_CONNECTION[channel];
     const connection = connectionType
       ? await this.connections.findOne({
           where: { tenantId, channelType: connectionType, isActive: true, status: 'connected' },
         })
       : null;
 
-    await this.publishToChannel(post, connection);
+    await this.publishToChannel(post, connection, channel);
 
-    // Mark as published and clear any previous error message
-    await this.posts.update(postId, {
-      status:       'published',
-      publishedAt:  new Date(),
-      errorMessage: undefined,
-    } as Partial<ContentPost>);
+    // Only the main job marks the post as published (clears any previous error).
+    if (!isCrosspost) {
+      await this.posts.update(postId, {
+        status:       'published',
+        publishedAt:  new Date(),
+        errorMessage: undefined,
+      } as Partial<ContentPost>);
+    }
 
-    this.logger.log(`[content-publish] Post ${postId} → published (channel: ${post.channel})`);
+    this.logger.log(`[content-publish] Post ${postId} → published (channel: ${channel})`);
   }
 
   // ── Channel dispatch ─────────────────────────────────────────────────────────
 
-  private async publishToChannel(post: ContentPost, connection: Connection | null): Promise<void> {
-    switch (post.channel) {
+  private async publishToChannel(post: ContentPost, connection: Connection | null, channel: string): Promise<void> {
+    switch (channel) {
       case 'instagram':
         if (!connection) throw new Error(`No hay una conexión de Instagram activa para este workspace`);
         await publishToInstagram(post, connection.credentials);

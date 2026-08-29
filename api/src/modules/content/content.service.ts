@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
@@ -46,7 +46,7 @@ const IMAGE_UPLOAD_DIR = join(process.cwd(), 'uploads', 'content');
 const JOB_ID = (postId: string) => `content-${postId}`;
 
 @Injectable()
-export class ContentService {
+export class ContentService implements OnModuleInit {
   private readonly logger = new Logger(ContentService.name);
 
   constructor(
@@ -55,6 +55,11 @@ export class ContentService {
     private readonly platformSettings: PlatformSettingsService,
     @InjectDataSource() private readonly db: DataSource,
   ) {}
+
+  async onModuleInit() {
+    // Extra channels to publish the same post to at once (no migrations in this project).
+    await this.db.query(`ALTER TABLE content_posts ADD COLUMN IF NOT EXISTS crosspost_channels text`).catch(() => {});
+  }
 
   findAll(tenantId: string, status?: string, channel?: string) {
     const where: any = { tenantId };
@@ -90,6 +95,7 @@ export class ContentService {
       mediaUrl:     dto.mediaUrl,
       mediaType:    dto.mediaType,
       altText:      dto.altText,
+      crosspostChannels: dto.crosspostChannels,
     });
     const saved = await this.repo.save(post);
     if (saved.status === 'approved') await this.scheduleJob(saved);
@@ -112,6 +118,7 @@ export class ContentService {
       ...(dto.mediaUrl     !== undefined && { mediaUrl:     dto.mediaUrl }),
       ...(dto.mediaType    !== undefined && { mediaType:    dto.mediaType }),
       ...(dto.altText      !== undefined && { altText:      dto.altText }),
+      ...(dto.crosspostChannels !== undefined && { crosspostChannels: dto.crosspostChannels }),
     });
     if (dto.status === 'published' && !post.publishedAt) {
       post.publishedAt = new Date();
@@ -139,23 +146,31 @@ export class ContentService {
       ? scheduledAt.getTime() - Date.now()
       : 0;
 
-    await this.queue.add(
-      'publish',
-      { postId: post.id, tenantId: post.tenantId },
-      {
-        jobId:    JOB_ID(post.id),
-        delay,
-        attempts: 3,
-        backoff:  { type: 'exponential', delay: 60_000 }, // 1 min → 2 min → 4 min
-        removeOnComplete: true,
-        removeOnFail:     50,
-      },
-    );
+    const opts = {
+      delay,
+      attempts: 3,
+      backoff: { type: 'exponential' as const, delay: 60_000 }, // 1 min → 2 min → 4 min
+      removeOnComplete: true,
+      removeOnFail: 50,
+    };
+    // Main channel (this job also marks the post as published when done).
+    await this.queue.add('publish', { postId: post.id, tenantId: post.tenantId }, { jobId: JOB_ID(post.id), ...opts });
+
+    // Extra channels — publish the same content to each at once (one job per channel).
+    const extras = String(post.crosspostChannels ?? '')
+      .split(',').map((c) => c.trim().toLowerCase()).filter(Boolean)
+      .filter((c) => c !== post.channel);
+    for (const channel of [...new Set(extras)]) {
+      await this.queue.add('publish', { postId: post.id, tenantId: post.tenantId, channel }, { jobId: `${JOB_ID(post.id)}-${channel}`, ...opts });
+    }
   }
 
   private async cancelJob(postId: string): Promise<void> {
-    const job = await this.queue.getJob(JOB_ID(postId));
-    if (job) await job.remove();
+    const ids = [JOB_ID(postId), ...['instagram', 'facebook', 'twitter', 'linkedin', 'youtube', 'blog'].map((c) => `${JOB_ID(postId)}-${c}`)];
+    for (const jid of ids) {
+      const job = await this.queue.getJob(jid);
+      if (job) await job.remove().catch(() => {});
+    }
   }
 
   // ── Scheduling status (used by controller) ────────────────────────────────────

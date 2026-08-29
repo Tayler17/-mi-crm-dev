@@ -279,6 +279,9 @@ function PostModal({
   const [body,         setBody]        = useState(post?.body         ?? '');
   const [status,       setStatus]      = useState<ContentPost['status']>(post?.status ?? 'draft');
   const [channel,      setChannel]     = useState(post?.channel      ?? 'blog');
+  const [crosspost,    setCrosspost]   = useState<string[]>(
+    (post?.crosspostChannels ?? '').split(',').map((c) => c.trim()).filter(Boolean),
+  );
   const [tagInput,     setTagInput]    = useState((post?.tags ?? []).join(', '));
   const [assignedTo,   setAssignedTo]  = useState(post?.assignedTo   ?? '');
   const [assignedTeam, setAssignedTeam]= useState(post?.assignedTeam ?? '');
@@ -395,6 +398,7 @@ function PostModal({
         mediaUrl:     mediaUrl.trim()     || undefined,
         mediaType:    mediaUrl.trim() ? mediaType : undefined,
         altText:      altText.trim()      || undefined,
+        crosspostChannels: crosspost.filter((c) => c !== channel).join(','),
       });
       onClose();
     } catch (e: unknown) {
@@ -494,6 +498,34 @@ function PostModal({
                   />
                 </div>
               </div>
+
+              {/* Cross-post: publish the same content to more networks at once */}
+              {['instagram', 'facebook', 'twitter', 'linkedin'].filter((c) => c !== channel).length > 0 && (
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">{lang === 'en' ? 'Also publish to' : 'Publicar también en'}</label>
+                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '6px 0' }}>
+                    {['instagram', 'facebook', 'twitter', 'linkedin'].filter((c) => c !== channel).map((c) => {
+                      const meta = CHANNELS.find((x) => x.key === c);
+                      const checked = crosspost.includes(c);
+                      return (
+                        <label key={c} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => setCrosspost((prev) => e.target.checked ? [...new Set([...prev, c])] : prev.filter((x) => x !== c))}
+                          />
+                          {meta?.icon} {meta?.label ?? c}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    {lang === 'en'
+                      ? 'When approved, the same post is published to these channels too (each needs its connection active).'
+                      : 'Al aprobar, el mismo post se publica también en estos canales (cada uno necesita su conexión activa).'}
+                  </div>
+                </div>
+              )}
 
               {/* Assign */}
               <div style={{ display: 'flex', gap: 10 }}>

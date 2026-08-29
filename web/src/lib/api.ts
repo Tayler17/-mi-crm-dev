@@ -2087,6 +2087,7 @@ export interface ContentPost {
   mediaUrl?: string;
   mediaType?: string;
   altText?: string;
+  crosspostChannels?: string; // comma-separated extra channels to publish to at once
   errorMessage?: string;
   createdAt: string;
   updatedAt: string;

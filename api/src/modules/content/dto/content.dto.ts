@@ -39,6 +39,9 @@ export class CreateContentPostDto {
 
   @IsOptional() @IsString()
   altText?: string;
+
+  @IsOptional() @IsString()
+  crosspostChannels?: string;
 }
 
 export class UpdateContentPostDto {
@@ -80,6 +83,9 @@ export class UpdateContentPostDto {
 
   @IsOptional() @IsString()
   altText?: string;
+
+  @IsOptional() @IsString()
+  crosspostChannels?: string;
 }
 
 export class GenerateContentDto {

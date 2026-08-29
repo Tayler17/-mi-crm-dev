@@ -20,6 +20,9 @@ export class ContentPost {
   @Column({ default: 'blog' })
   channel: string; // blog | instagram | facebook | linkedin | twitter | youtube | other
 
+  @Column({ name: 'crosspost_channels', type: 'text', nullable: true })
+  crosspostChannels?: string; // extra channels to publish to at once (comma-separated)
+
   @Column({ type: 'text', array: true, default: [] })
   tags: string[];
 
