@@ -1,15 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { AiChatbot } from './ai-chatbot.entity';
 
 @Injectable()
-export class AiChatbotsService {
+export class AiChatbotsService implements OnModuleInit {
   constructor(
     @InjectRepository(AiChatbot) private readonly repo: Repository<AiChatbot>,
     @InjectDataSource() private readonly db: DataSource,
   ) {}
+
+  async onModuleInit() {
+    // Optional signature appended to the bot's messages (no migrations in this project).
+    await this.db.query(`ALTER TABLE ai_chatbots ADD COLUMN IF NOT EXISTS signature text`).catch(() => {});
+  }
 
   async findAll(tenantId: string) {
     const rows = await this.db.query(

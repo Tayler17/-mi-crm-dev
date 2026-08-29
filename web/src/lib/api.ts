@@ -1699,6 +1699,7 @@ export interface AiChatbot {
   fallback_message?: string;
   handoff_keyword?: string;
   handoff_message?: string;
+  signature?: string;
   max_tokens: number;
   temperature: number;
   memory_conversations: number;

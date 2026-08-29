@@ -1197,11 +1197,25 @@ export class AiChatbotEngineService {
   }
 
   private async saveBotMessage(tenantId: string, conversationId: string, body: string) {
+    // Append the bot's signature (if configured) so the customer sees who is writing.
+    let finalBody = body;
+    try {
+      const [row] = await this.db.query(
+        `SELECT b.signature FROM ai_chatbot_sessions s
+           JOIN ai_chatbots b ON b.id = s.chatbot_id
+          WHERE s.conversation_id = $1 AND s.status = 'active'
+          ORDER BY s.created_at DESC LIMIT 1`,
+        [conversationId],
+      );
+      const sig = String(row?.signature ?? '').trim();
+      if (sig && body && !String(body).trimEnd().endsWith(sig)) finalBody = `${body}\n\n${sig}`;
+    } catch { /* signature is best-effort */ }
+
     const [msg] = await this.db.query(
       `INSERT INTO messages
          (tenant_id, conversation_id, body, content_type, direction, sender_type, is_private, created_at, updated_at)
        VALUES ($1,$2,$3,'text','outbound','bot',false,NOW(),NOW()) RETURNING *`,
-      [tenantId, conversationId, body],
+      [tenantId, conversationId, finalBody],
     );
     await this.db.query(
       `UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1`, [conversationId]);
@@ -1209,7 +1223,7 @@ export class AiChatbotEngineService {
       tenantId, type: 'message_created',
       payload: { conversationId, message: msg },
     });
-    await this.deliverOutbound(conversationId, tenantId, body, msg.id).catch((e) =>
+    await this.deliverOutbound(conversationId, tenantId, finalBody, msg.id).catch((e) =>
       this.logger.error(`[bot deliverOutbound] ${e.message}`));
   }
 

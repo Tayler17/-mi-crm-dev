@@ -97,7 +97,7 @@ const DEFAULT_VISUAL_CONFIG: VisualConfig = {
 type BotForm = {
   name: string; description: string; provider: string; model: string;
   system_prompt: string; welcome_message: string; fallback_message: string;
-  handoff_keyword: string; handoff_message: string; max_tokens: number;
+  handoff_keyword: string; handoff_message: string; signature?: string; max_tokens: number;
   temperature: number; memory_conversations: number;
   inbox_ids: string[]; queue_ids: string[]; team_ids: string[];
   respond_in_groups: boolean;
@@ -411,6 +411,7 @@ function BotModal({
     fallback_message: bot?.fallback_message ?? t("Sorry, I didn't understand your message. Could you rephrase it?", 'Lo siento, no entendí tu mensaje. ¿Puedes reformularlo?'),
     handoff_keyword: bot?.handoff_keyword ?? t('agent', 'agente'),
     handoff_message: bot?.handoff_message ?? t('I\'ll connect you with a human agent right away.', 'Enseguida te conecto con un agente humano.'),
+    signature: bot?.signature ?? '',
     max_tokens: bot?.max_tokens ?? 500,
     temperature: bot?.temperature ?? 0.7,
     memory_conversations: bot?.memory_conversations ?? 5,
@@ -917,6 +918,13 @@ function BotModal({
                     <div className="form-group" style={{ margin: 0 }}>
                       <label className="form-label">{t('Transfer message', 'Mensaje al transferir')}</label>
                       <input className="form-input" value={form.handoff_message} onChange={(e) => upd({ handoff_message: e.target.value })} placeholder={t("I'll connect you with an agent right away.", 'Enseguida te conecto con un agente.')} />
+                    </div>
+                  </div>
+                  <div className="form-group" style={{ margin: '10px 0 0' }}>
+                    <label className="form-label">{t('Bot signature (optional)', 'Firma del bot (opcional)')}</label>
+                    <input className="form-input" value={form.signature ?? ''} onChange={(e) => upd({ signature: e.target.value })} placeholder={t('e.g. — Virtual assistant of {company}', 'ej. — Asistente virtual de Taylor Services')} />
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                      {t('Added at the end of every bot message, so the customer knows it is the bot.', 'Se añade al final de cada mensaje del bot, para que el cliente sepa que es el bot.')}
                     </div>
                   </div>
                 </div>

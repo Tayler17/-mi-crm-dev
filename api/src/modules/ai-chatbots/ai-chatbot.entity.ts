@@ -14,6 +14,7 @@ export class AiChatbot {
   @Column({ nullable: true }) fallback_message: string;
   @Column({ nullable: true }) handoff_keyword: string;
   @Column({ nullable: true }) handoff_message: string;
+  @Column({ nullable: true, type: 'text' }) signature: string;
   @Column({ default: 500 }) max_tokens: number;
   @Column({ type: 'numeric', default: 0.7 }) temperature: number;
   @Column({ default: 5 }) memory_conversations: number;
