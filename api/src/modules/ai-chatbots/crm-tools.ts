@@ -185,6 +185,38 @@ export const CRM_TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'get_business_snapshot',
+    description: 'Resumen COMPLETO del negocio para un período (por defecto HOY): contactos nuevos, conversaciones (nuevas/resueltas en el período + abiertas/pendientes ahora), deals creados y ganados con su valor, pipeline abierto, tareas (vencen hoy/vencidas/completadas hoy), citas de hoy, y llamadas. Úsalo SIEMPRE que pregunten "cómo va el negocio hoy", "resumen del día", "detalles de hoy", "qué ha pasado hoy" o similar. Da los números REALES de cada área, no generalices.',
+    parameters: { type: 'object', properties: { period: { type: 'string', description: 'today (hoy, por defecto), week (esta semana) o month (este mes).' } }, required: [] },
+    handler: async (ctx, args) => {
+      const { period, since } = periodSince(args.period, 'today');
+      const w = since ? `AND created_at >= ${since}` : '';
+      const wCalls = since ? `AND started_at >= ${since}` : '';
+      const q = (sql: string): Promise<any[]> => ctx.db.query(sql, [ctx.tenantId]).catch(() => []);
+      const [cNew, cTot, conv, convNow, dNew, dWon, pipe, tasks, appts, calls] = await Promise.all([
+        q(`SELECT COUNT(*)::int n FROM contacts WHERE tenant_id=$1 ${w}`),
+        q(`SELECT COUNT(*)::int n FROM contacts WHERE tenant_id=$1`),
+        q(`SELECT COUNT(*)::int total, COUNT(*) FILTER (WHERE status='resolved')::int resolved FROM conversations WHERE tenant_id=$1 ${w}`),
+        q(`SELECT COUNT(*) FILTER (WHERE status='open')::int open, COUNT(*) FILTER (WHERE status='pending')::int pending FROM conversations WHERE tenant_id=$1`),
+        q(`SELECT COUNT(*)::int n, COALESCE(SUM(value),0)::numeric v FROM deals WHERE tenant_id=$1 ${w}`),
+        q(`SELECT COUNT(*) FILTER (WHERE status='won')::int n, COALESCE(SUM(value) FILTER (WHERE status='won'),0)::numeric v FROM deals WHERE tenant_id=$1 ${w}`),
+        q(`SELECT COUNT(*)::int n, COALESCE(SUM(value),0)::numeric v FROM deals WHERE tenant_id=$1 AND status NOT IN ('won','lost')`),
+        q(`SELECT COUNT(*) FILTER (WHERE status='pending' AND due_date::date=current_date)::int due_today, COUNT(*) FILTER (WHERE status='pending' AND due_date::date<current_date)::int overdue, COUNT(*) FILTER (WHERE status='completed' AND updated_at::date=current_date)::int done_today FROM tasks WHERE tenant_id=$1`),
+        q(`SELECT COUNT(*)::int n FROM appointments WHERE tenant_id=$1 AND scheduled_at::date=current_date`),
+        q(`SELECT COUNT(*)::int n, COALESCE(SUM(duration),0)::int secs FROM call_logs WHERE tenant_id=$1 ${wCalls}`),
+      ]);
+      return {
+        ok: true, period,
+        contacts: { new_in_period: cNew[0]?.n ?? 0, total: cTot[0]?.n ?? 0 },
+        conversations: { new_in_period: conv[0]?.total ?? 0, resolved_in_period: conv[0]?.resolved ?? 0, open_now: convNow[0]?.open ?? 0, pending_now: convNow[0]?.pending ?? 0 },
+        deals: { created_in_period: dNew[0]?.n ?? 0, created_value: Number(dNew[0]?.v ?? 0), won_in_period: dWon[0]?.n ?? 0, won_value: Number(dWon[0]?.v ?? 0), open_pipeline_count: pipe[0]?.n ?? 0, open_pipeline_value: Number(pipe[0]?.v ?? 0) },
+        tasks: { due_today: tasks[0]?.due_today ?? 0, overdue: tasks[0]?.overdue ?? 0, completed_today: tasks[0]?.done_today ?? 0 },
+        appointments_today: appts[0]?.n ?? 0,
+        calls: { in_period: calls[0]?.n ?? 0, total_seconds: calls[0]?.secs ?? 0 },
+      };
+    },
+  },
+  {
     name: 'get_conversation_stats',
     description: 'Conteo de conversaciones por PERÍODO y ESTADO. Úsalo para "¿cuántas conversaciones tenemos hoy?", "¿cuántas abiertas/en espera/resueltas?", "conversaciones de esta semana". Devuelve total + desglose (abiertas/pendientes/resueltas).',
     parameters: {
