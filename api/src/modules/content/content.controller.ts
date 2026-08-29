@@ -36,6 +36,12 @@ export class ContentController {
     return this.svc.generateImage(req.user.tenantId, req.user.userId, dto);
   }
 
+  // Agent (Fase 1): generate a campaign of draft posts from a theme.
+  @Post('generate-campaign')
+  generateCampaign(@Request() req: any, @Body() dto: any) {
+    return this.svc.generateCampaign(req.user.tenantId, { id: req.user.userId, fullName: req.user.fullName ?? '' }, dto);
+  }
+
   @Get('image-gen/history')
   getImageHistory(@Request() req: any) {
     return this.svc.getImageHistory(req.user.tenantId);

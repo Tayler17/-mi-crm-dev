@@ -2114,6 +2114,11 @@ export const deleteContentPost = (id: string) => apiDelete(`/content/${id}`);
 export const generateContentPost = (data: { title: string; channel: string; keywords?: string; tone?: string; promptId?: string }) =>
   apiPost<{ body: string; aiGenerated: boolean; promptName?: string }>('/content/generate', data);
 
+export const generateContentCampaign = (data: {
+  theme: string; count?: number; channel?: string; crosspostChannels?: string;
+  tone?: string; startDate?: string; spacingDays?: number; withImages?: boolean;
+}) => apiPost<{ created: number; posts: ContentPost[] }>('/content/generate-campaign', data);
+
 export const getContentPostSchedule = (id: string) =>
   apiGet<{ scheduled: boolean; state?: string; runAt?: string | null }>(`/content/${id}/schedule`);
 

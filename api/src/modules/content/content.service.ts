@@ -203,6 +203,57 @@ export class ContentService implements OnModuleInit {
     return { body: this.generateFromTemplate(dto), aiGenerated: false };
   }
 
+  /** Agent (Fase 1): generate a whole campaign of DRAFT posts from a theme. The user
+   *  reviews/approves each one (which then publishes). Optional AI images per post. */
+  async generateCampaign(
+    tenantId: string,
+    user: { id: string; fullName: string },
+    dto: { theme: string; count?: number; channel?: string; crosspostChannels?: string; tone?: string; startDate?: string; spacingDays?: number; withImages?: boolean },
+  ): Promise<{ created: number; posts: ContentPost[] }> {
+    const theme = String(dto.theme ?? '').trim();
+    if (!theme) throw new Error('Falta el tema de la campaña');
+    const count = Math.min(Math.max(Number(dto.count) || 3, 1), 12);
+    const channel = dto.channel || 'instagram';
+    const spacing = Math.max(Number(dto.spacingDays) ?? 2, 0);
+    const start = dto.startDate ? new Date(dto.startDate) : new Date();
+
+    const posts: ContentPost[] = [];
+    for (let i = 0; i < count; i++) {
+      const gen = await this.generate(
+        { title: theme, channel, keywords: `Publicación ${i + 1} de ${count} de una campaña sobre: ${theme}. Usa un ángulo/gancho DISTINTO a las demás.`, tone: dto.tone } as GenerateContentDto,
+        tenantId,
+      ).catch(() => ({ body: '', aiGenerated: false }));
+
+      let mediaUrl: string | undefined;
+      let mediaType: string | undefined;
+      if (dto.withImages) {
+        try {
+          const img = await this.generateImage(tenantId, user.id, { prompt: theme } as GenerateImageDto);
+          if (img?.url) { mediaUrl = img.url; mediaType = 'image'; }
+        } catch (e: any) { this.logger.warn(`[campaign] image gen failed: ${e.message}`); }
+      }
+
+      const scheduledAt = spacing > 0 ? new Date(start.getTime() + i * spacing * 86_400_000) : undefined;
+      const post = await this.create(
+        tenantId,
+        {
+          title: `${theme} (${i + 1}/${count})`,
+          body: gen.body,
+          status: 'draft',
+          channel,
+          tags: [theme],
+          crosspostChannels: dto.crosspostChannels,
+          scheduledAt: scheduledAt ? scheduledAt.toISOString() : undefined,
+          mediaUrl,
+          mediaType,
+        } as any,
+        user,
+      );
+      posts.push(post);
+    }
+    return { created: posts.length, posts };
+  }
+
   // ── AI generation ─────────────────────────────────────────────────────────────
 
   private async generateWithAI(

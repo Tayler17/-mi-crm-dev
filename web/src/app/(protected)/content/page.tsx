@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ContentPost, AiImageGeneration, AiPrompt,
   getContentPosts, createContentPost, updateContentPost,
-  deleteContentPost, generateContentPost, uploadContentMedia,
+  deleteContentPost, generateContentPost, generateContentCampaign, uploadContentMedia,
   generateContentImage, getContentImageHistory, getContentImageUsage,
   getAiPrompts, getSettings,
   API_URL,
@@ -1104,6 +1104,118 @@ function CalendarView({ posts, onSelect }: { posts: ContentPost[]; onSelect: (p:
   );
 }
 
+// ── Campaign generator (agent) ──────────────────────────────────────────────────
+
+function CampaignModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const { lang } = useLangCtx();
+  const en = lang === 'en';
+  const [theme, setTheme]       = useState('');
+  const [count, setCount]       = useState(5);
+  const [channel, setChannel]   = useState('instagram');
+  const [cross, setCross]       = useState<string[]>([]);
+  const [tone, setTone]         = useState('profesional');
+  const [startDate, setStartDate] = useState('');
+  const [spacing, setSpacing]   = useState(2);
+  const [withImages, setWithImages] = useState(false);
+  const [busy, setBusy]         = useState(false);
+  const [error, setError]       = useState('');
+
+  async function run() {
+    if (!theme.trim()) { setError(en ? 'Enter a theme' : 'Escribe el tema'); return; }
+    setBusy(true); setError('');
+    try {
+      await generateContentCampaign({
+        theme: theme.trim(), count, channel, tone,
+        crosspostChannels: cross.filter((c) => c !== channel).join(','),
+        startDate: startDate || undefined,
+        spacingDays: spacing,
+        withImages,
+      });
+      onDone();
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Error'); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">✨ {en ? 'Generate campaign' : 'Generar campaña'}</h2>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+            {en ? 'The assistant creates several draft posts from a theme. You review and approve each one to publish.'
+                : 'El asistente crea varios borradores a partir de un tema. Tú los revisas y apruebas para publicar.'}
+          </p>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">{en ? 'Theme / objective' : 'Tema / objetivo'}</label>
+            <input className="form-input" value={theme} onChange={(e) => setTheme(e.target.value)} placeholder={en ? 'e.g. December shipping promo to DR' : 'ej. promoción de envíos a RD en diciembre'} autoFocus />
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div className="form-group" style={{ margin: 0, flex: '1 1 90px' }}>
+              <label className="form-label">{en ? 'Posts' : 'Nº de posts'}</label>
+              <input className="form-input" type="number" min={1} max={12} value={count} onChange={(e) => setCount(Math.min(12, Math.max(1, +e.target.value || 1)))} />
+            </div>
+            <div className="form-group" style={{ margin: 0, flex: '1 1 130px' }}>
+              <label className="form-label">{en ? 'Channel' : 'Canal'}</label>
+              <select className="form-input" value={channel} onChange={(e) => setChannel(e.target.value)}>
+                <option value="instagram">📸 Instagram</option>
+                <option value="facebook">👥 Facebook</option>
+                <option value="linkedin">💼 LinkedIn</option>
+                <option value="twitter">𝕏 Twitter/X</option>
+                <option value="blog">✍️ Blog</option>
+              </select>
+            </div>
+            <div className="form-group" style={{ margin: 0, flex: '1 1 120px' }}>
+              <label className="form-label">{en ? 'Tone' : 'Tono'}</label>
+              <select className="form-input" value={tone} onChange={(e) => setTone(e.target.value)}>
+                <option value="profesional">{en ? 'Professional' : 'Profesional'}</option>
+                <option value="cercano">{en ? 'Friendly' : 'Cercano'}</option>
+                <option value="informativo">{en ? 'Informative' : 'Informativo'}</option>
+                <option value="divertido">{en ? 'Fun' : 'Divertido'}</option>
+                <option value="inspirador">{en ? 'Inspiring' : 'Inspirador'}</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="form-label">{en ? 'Also publish to' : 'Publicar también en'}</label>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {['instagram', 'facebook', 'twitter', 'linkedin'].filter((c) => c !== channel).map((c) => (
+                <label key={c} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={cross.includes(c)} onChange={(e) => setCross((p) => e.target.checked ? [...new Set([...p, c])] : p.filter((x) => x !== c))} />
+                  {c}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div className="form-group" style={{ margin: 0, flex: '1 1 150px' }}>
+              <label className="form-label">{en ? 'Start date' : 'Fecha de inicio'}</label>
+              <input className="form-input" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </div>
+            <div className="form-group" style={{ margin: 0, flex: '1 1 120px' }}>
+              <label className="form-label">{en ? 'Days apart' : 'Días entre posts'}</label>
+              <input className="form-input" type="number" min={0} max={30} value={spacing} onChange={(e) => setSpacing(Math.max(0, +e.target.value || 0))} />
+            </div>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+            <input type="checkbox" checked={withImages} onChange={(e) => setWithImages(e.target.checked)} />
+            {en ? 'Also generate an AI image per post (has a cost)' : 'Generar también una imagen con IA por post (tiene costo)'}
+          </label>
+          {error && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
+        </div>
+        <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '12px 20px' }}>
+          <button className="btn btn-secondary" onClick={onClose} disabled={busy}>{en ? 'Cancel' : 'Cancelar'}</button>
+          <button className="btn btn-primary" onClick={run} disabled={busy}>
+            {busy ? (en ? 'Generating…' : 'Generando…') : (en ? 'Generate drafts' : 'Generar borradores')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ContentPage() {
@@ -1140,6 +1252,7 @@ export default function ContentPage() {
 
   const [editing,   setEditing]   = useState<Partial<ContentPost> | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [campaignOpen, setCampaignOpen] = useState(false);
   const [deleting,  setDeleting]  = useState<string | null>(null);
   const [duping,    setDuping]    = useState<string | null>(null);
   const [actioning, setActioning] = useState<string | null>(null);
@@ -1214,8 +1327,13 @@ export default function ContentPage() {
           <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{i.contentTitle}</h1>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>{i.contentSubtitle}</p>
         </div>
-        <button className="btn btn-primary" onClick={openNew}>{i.contentNewPost}</button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-secondary" onClick={() => setCampaignOpen(true)}>✨ {lang === 'en' ? 'Generate campaign' : 'Generar campaña'}</button>
+          <button className="btn btn-primary" onClick={openNew}>{i.contentNewPost}</button>
+        </div>
       </div>
+
+      {campaignOpen && <CampaignModal onClose={() => setCampaignOpen(false)} onDone={() => { setCampaignOpen(false); load(); }} />}
 
       {/* Stats row */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
