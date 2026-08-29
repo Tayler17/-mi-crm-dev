@@ -6,7 +6,7 @@ import {
   getContentPosts, createContentPost, updateContentPost,
   deleteContentPost, generateContentPost, uploadContentMedia,
   generateContentImage, getContentImageHistory, getContentImageUsage,
-  getAiPrompts,
+  getAiPrompts, getSettings,
   API_URL,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
@@ -38,10 +38,12 @@ function fmtDate(dt: string | undefined, locale: string) {
 // ── Live Preview Card ─────────────────────────────────────────────────────────
 
 function PreviewCard({
-  channel, title, body, tagInput, mediaUrl, altText, mediaType,
-}: { channel: string; title: string; body: string; tagInput: string; mediaUrl?: string; altText?: string; mediaType?: string }) {
+  channel, title, body, tagInput, mediaUrl, altText, mediaType, brandName,
+}: { channel: string; title: string; body: string; tagInput: string; mediaUrl?: string; altText?: string; mediaType?: string; brandName?: string }) {
   const { lang } = useLangCtx();
   const i = APP[lang];
+  const brand = (brandName || '').trim();
+  const brandHandle = brand ? brand.toLowerCase().replace(/[^a-z0-9]+/g, '') : 'tu_empresa';
 
   const CHANNELS = [
     { key: 'blog',      label: 'Blog',      icon: '✍️' },
@@ -76,8 +78,8 @@ function PreviewCard({
               : 'linear-gradient(135deg, #1877F2 0%, #3b5998 100%)',
           }} />
           <div>
-            <div style={{ fontWeight: 700, fontSize: 13, color: '#262626' }}>tu_empresa</div>
-            <div style={{ fontSize: 11, color: '#8e8e8e' }}>Marketing Content</div>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#262626' }}>{brandHandle}</div>
+            <div style={{ fontSize: 11, color: '#8e8e8e' }}>{brand || 'Tu empresa'}</div>
           </div>
           <div style={{ marginLeft: 'auto', fontSize: 18, color: '#262626' }}>•••</div>
         </div>
@@ -282,6 +284,8 @@ function PostModal({
   const [crosspost,    setCrosspost]   = useState<string[]>(
     (post?.crosspostChannels ?? '').split(',').map((c) => c.trim()).filter(Boolean),
   );
+  const [brandName,    setBrandName]   = useState('');
+  useEffect(() => { getSettings().then((s) => setBrandName(s?.name ?? '')).catch(() => {}); }, []);
   const [tagInput,     setTagInput]    = useState((post?.tags ?? []).join(', '));
   const [assignedTo,   setAssignedTo]  = useState(post?.assignedTo   ?? '');
   const [assignedTeam, setAssignedTeam]= useState(post?.assignedTeam ?? '');
@@ -951,7 +955,7 @@ function PostModal({
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 {i.contentPreviewLabel} — {CHANNEL_MAP[channel]?.icon} {CHANNEL_MAP[channel]?.label ?? channel}
               </div>
-              <PreviewCard channel={channel} title={title} body={body} tagInput={tagInput} mediaUrl={mediaUrl || undefined} altText={altText || undefined} mediaType={mediaType} />
+              <PreviewCard channel={channel} title={title} body={body} tagInput={tagInput} mediaUrl={mediaUrl || undefined} altText={altText || undefined} mediaType={mediaType} brandName={brandName} />
               {/* Status preview */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{i.status}:</span>
