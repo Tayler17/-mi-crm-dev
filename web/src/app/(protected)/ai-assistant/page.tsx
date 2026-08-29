@@ -30,6 +30,7 @@ export default function AiAssistantPage() {
   const voiceModeRef = useRef(false);
   const autoReadRef = useRef(false);
   const recognitionRef = useRef<any>(null);
+  const silenceTimerRef = useRef<any>(null);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
@@ -120,10 +121,12 @@ export default function AiAssistantPage() {
     }
     const rec = new SR();
     rec.lang = voiceLangRef.current;
-    rec.continuous = false;
+    rec.continuous = true;      // keep the session; a silence timer decides when to stop
     rec.interimResults = true;
     let finalText = '';
     let liveText = '';
+    const clearSilence = () => { if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; } };
+    const armSilence = () => { clearSilence(); silenceTimerRef.current = setTimeout(() => { try { rec.stop(); } catch {} }, 1600); };
     rec.onresult = (e: any) => {
       finalText = ''; liveText = '';
       for (let i = 0; i < e.results.length; i++) {
@@ -131,8 +134,10 @@ export default function AiAssistantPage() {
         if (e.results[i].isFinal) finalText += t; else liveText += t;
       }
       setInterim((finalText + ' ' + liveText).trim());
+      if ((finalText + liveText).trim()) armSilence(); // reset the silence countdown while talking
     };
     rec.onend = () => {
+      clearSilence();
       setListening(false);
       // Send whatever we captured — final if present, otherwise the interim text.
       const t = (finalText || liveText).trim();
@@ -140,6 +145,7 @@ export default function AiAssistantPage() {
       else resumeListening();
     };
     rec.onerror = (ev: any) => {
+      clearSilence();
       setListening(false);
       // 'no-speech'/'aborted' are normal — keep listening; other errors stop.
       if (ev?.error === 'no-speech' || ev?.error === 'aborted') resumeListening();
@@ -157,6 +163,7 @@ export default function AiAssistantPage() {
   function stopVoice() {
     setVoiceMode(false); voiceModeRef.current = false;
     setListening(false); setSpeaking(false); setInterim('');
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
     try { recognitionRef.current?.abort(); } catch {}
     try { window.speechSynthesis?.cancel(); } catch {}
   }

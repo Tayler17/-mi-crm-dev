@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { createHmac } from 'crypto';
@@ -18,6 +18,8 @@ export class VoiceService {
     @InjectDataSource() private readonly db: DataSource,
     private readonly platformSettings: PlatformSettingsService,
   ) {}
+
+  private readonly logger = new Logger(VoiceService.name);
 
   // Active warm-transfer sessions, keyed by conference room name.
   private warmSessions = new Map<string, { tenantId: string; agentUserId: string; customerLeg: string; targetId: string; bCallSid?: string; confSid?: string }>();
@@ -113,7 +115,8 @@ export class VoiceService {
     return row?.id ?? null;
   }
 
-  /** Finalize a call log with the dialed-leg duration + status. */
+  /** Finalize a call log with the dialed-leg duration + status, and register the call
+   *  as a conversation in the inbox (channel 'phone') so agent calls show up there too. */
   async finishCallLog(logId: string, durationSeconds: number, dialStatus: string): Promise<void> {
     // Map Twilio DialCallStatus → our status. answered→completed, else keep the raw reason.
     const status = dialStatus === 'answered' || dialStatus === 'completed' ? 'completed' : (dialStatus || 'completed');
@@ -121,6 +124,57 @@ export class VoiceService {
       `UPDATE call_logs SET duration=$2, status=$3, ended_at=NOW() WHERE id=$1`,
       [logId, Math.max(0, Math.floor(Number(durationSeconds) || 0)), status],
     ).catch(() => {});
+    await this.recordCallConversation(logId).catch((e) => this.logger.warn(`[voice] recordCallConversation: ${e?.message}`));
+  }
+
+  /** Find or create the tenant's "Llamadas" inbox (channel 'phone'). */
+  private async ensureCallInbox(tenantId: string): Promise<string | null> {
+    const [ex] = await this.db.query(
+      `SELECT id FROM inboxes WHERE tenant_id=$1 AND channel_type='phone' ORDER BY created_at ASC LIMIT 1`,
+      [tenantId],
+    ).catch(() => []);
+    if (ex?.id) return ex.id;
+    const [created] = await this.db.query(
+      `INSERT INTO inboxes (tenant_id, name, channel_type, created_at, updated_at)
+       VALUES ($1, 'Llamadas', 'phone', NOW(), NOW()) RETURNING id`,
+      [tenantId],
+    ).catch(() => []);
+    return created?.id ?? null;
+  }
+
+  /** Create an inbox conversation (channel 'phone') summarizing an agent softphone call. */
+  private async recordCallConversation(logId: string): Promise<void> {
+    const [log] = await this.db.query(
+      `SELECT tenant_id, user_id, direction, from_number, to_number, duration, contact_id, conversation_id
+         FROM call_logs WHERE id=$1`,
+      [logId],
+    ).catch(() => []);
+    if (!log || log.conversation_id) return; // no log, or already linked (e.g., bot calls)
+    const inboxId = await this.ensureCallInbox(log.tenant_id);
+    if (!inboxId) return;
+    const num = (log.direction === 'outbound' ? log.to_number : log.from_number) || '';
+    const dur = Number(log.duration) || 0;
+    const [u] = await this.db.query(`SELECT full_name FROM users WHERE id=$1`, [log.user_id]).catch(() => []);
+    const dirEs = log.direction === 'outbound' ? 'saliente' : 'entrante';
+    const subject = `Llamada ${dirEs} — ${num}`;
+    const note = [
+      `📞 Llamada ${dirEs} (agente)`,
+      num ? `Número: ${num}` : '',
+      `Duración: ${Math.floor(dur / 60)}m ${dur % 60}s`,
+      u?.full_name ? `Agente: ${u.full_name}` : '',
+    ].filter(Boolean).join('\n');
+    const [conv] = await this.db.query(
+      `INSERT INTO conversations (tenant_id, inbox_id, contact_id, channel_type, status, subject, created_at, updated_at)
+       VALUES ($1, $2, $3, 'phone', 'resolved', $4, NOW(), NOW()) RETURNING id`,
+      [log.tenant_id, inboxId, log.contact_id, subject],
+    ).catch(() => []);
+    if (!conv?.id) return;
+    await this.db.query(
+      `INSERT INTO messages (tenant_id, conversation_id, body, sender_type, direction, content_type, is_private, created_at)
+       VALUES ($1, $2, $3, 'agent', $4, 'text', false, NOW())`,
+      [log.tenant_id, conv.id, note, log.direction],
+    ).catch(() => {});
+    await this.db.query(`UPDATE call_logs SET conversation_id=$2 WHERE id=$1`, [logId, conv.id]).catch(() => {});
   }
 
   /** Escape a string for XML attribute/text. */
