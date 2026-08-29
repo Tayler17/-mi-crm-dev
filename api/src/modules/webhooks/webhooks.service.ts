@@ -190,7 +190,14 @@ export class WebhooksService {
       // with no readable body. Store a clear placeholder instead of the literal
       // "unsupported" (which the bot would otherwise try to answer with a confusing reply).
       if (msg.type === 'unsupported') {
-        return { body: '⚠️ Mensaje no compatible: WhatsApp no permite recibir este tipo de mensaje. Pídele al cliente que lo reenvíe como texto.', contentType: 'text' };
+        // Log the raw payload so we can see WHY Meta flagged it (coexistence, edited msg,
+        // reaction, newer type, etc.) — helps diagnose false "unsupported" on normal text.
+        this.logger.warn(`[wa] unsupported message: ${JSON.stringify({ keys: Object.keys(msg), errors: msg.errors, context: msg.context }).slice(0, 500)}`);
+        // Defensive: some 'unsupported' payloads still carry readable text — keep it.
+        const salvaged = msg.text?.body ?? msg.button?.text ?? msg.caption;
+        if (salvaged && String(salvaged).trim()) return { body: String(salvaged).trim(), contentType: 'text' };
+        const reason = msg.errors?.[0]?.title ?? msg.errors?.[0]?.error_data?.details;
+        return { body: `⚠️ Mensaje no compatible con WhatsApp API${reason ? ` (${reason})` : ''}. Pídele al cliente que lo reenvíe como texto.`, contentType: 'text' };
       }
       const text = msg.text?.body
         ?? msg.button?.text
