@@ -208,7 +208,7 @@ export class ContentService implements OnModuleInit {
   async generateCampaign(
     tenantId: string,
     user: { id: string; fullName: string },
-    dto: { theme: string; count?: number; channel?: string; crosspostChannels?: string; tone?: string; startDate?: string; spacingDays?: number; withImages?: boolean },
+    dto: { theme: string; count?: number; channel?: string; crosspostChannels?: string; tone?: string; startDate?: string; spacingDays?: number; withImages?: boolean; imageLook?: string },
   ): Promise<{ created: number; posts: ContentPost[] }> {
     const theme = String(dto.theme ?? '').trim();
     if (!theme) throw new Error('Falta el tema de la campaña');
@@ -228,7 +228,7 @@ export class ContentService implements OnModuleInit {
       let mediaType: string | undefined;
       if (dto.withImages) {
         try {
-          const img = await this.generateImage(tenantId, user.id, { prompt: theme } as GenerateImageDto);
+          const img = await this.generateImage(tenantId, user.id, { prompt: theme, style: dto.imageLook === 'illustration' ? 'vivid' : 'natural' } as GenerateImageDto);
           if (img?.url) { mediaUrl = img.url; mediaType = 'image'; }
         } catch (e: any) { this.logger.warn(`[campaign] image gen failed: ${e.message}`); }
       }
@@ -445,12 +445,19 @@ REGLAS GENERALES:
     let localUrl: string;
     let model: string;
 
+    // The model (gpt-image-1) ignores the vivid/natural param, so we steer the look via
+    // the PROMPT based on the chosen style (works across all providers too).
+    const styleHint = style === 'natural'
+      ? 'Fotografía profesional realista, alta resolución, iluminación natural, aspecto de foto real (no ilustración). '
+      : 'Estilo vívido y llamativo. ';
+    const finalPrompt = styleHint + dto.prompt;
+
     if (provider === 'openai') {
-      ({ localUrl, model } = await this.callDallE(dto.prompt, size, apiKey));
+      ({ localUrl, model } = await this.callDallE(finalPrompt, size, apiKey));
     } else if (provider === 'stability') {
-      ({ localUrl, model } = await this.callStability(dto.prompt, size, apiKey));
+      ({ localUrl, model } = await this.callStability(finalPrompt, size, apiKey));
     } else {
-      const r = await this.callFal(dto.prompt, size, apiKey);
+      const r = await this.callFal(finalPrompt, size, apiKey);
       model    = r.model;
       localUrl = await this.downloadAndSave(r.tempUrl);
     }
