@@ -124,16 +124,10 @@ export function BusinessAssistantFab({ lang }: { lang: string }) {
     }
     const rec = new SR();
     rec.lang = voiceLangRef.current;
-    rec.continuous = true;      // keep the session; we decide when to stop via a silence timer
+    rec.continuous = false;     // iOS/Safari only support single-shot; it auto-ends on silence
     rec.interimResults = true;
     let finalText = '';
     let liveText = '';
-    const clearSilence = () => { if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; } };
-    const armSilence = () => {
-      clearSilence();
-      // After ~1.6s without new speech, stop → onend submits what was heard.
-      silenceTimerRef.current = setTimeout(() => { try { rec.stop(); } catch {} }, 1600);
-    };
     rec.onresult = (e: any) => {
       finalText = ''; liveText = '';
       for (let i = 0; i < e.results.length; i++) {
@@ -141,10 +135,8 @@ export function BusinessAssistantFab({ lang }: { lang: string }) {
         if (e.results[i].isFinal) finalText += t; else liveText += t;
       }
       setInterim((finalText + ' ' + liveText).trim());
-      if ((finalText + liveText).trim()) armSilence(); // reset the silence countdown while talking
     };
     rec.onend = () => {
-      clearSilence();
       setListening(false);
       const t = (finalText || liveText).trim();
       if (t) send(t);
@@ -154,7 +146,6 @@ export function BusinessAssistantFab({ lang }: { lang: string }) {
     rec.onspeechstart = () => console.log('[voice] speech detected');
     rec.onnomatch = () => console.log('[voice] no match');
     rec.onerror = (ev: any) => {
-      clearSilence();
       setListening(false);
       console.warn('[voice] error:', ev?.error);
       if (ev?.error === 'no-speech' || ev?.error === 'aborted') { resumeListening(); return; }

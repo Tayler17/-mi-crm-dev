@@ -121,12 +121,10 @@ export default function AiAssistantPage() {
     }
     const rec = new SR();
     rec.lang = voiceLangRef.current;
-    rec.continuous = true;      // keep the session; a silence timer decides when to stop
+    rec.continuous = false;     // iOS/Safari only support single-shot; it auto-ends on silence
     rec.interimResults = true;
     let finalText = '';
     let liveText = '';
-    const clearSilence = () => { if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; } };
-    const armSilence = () => { clearSilence(); silenceTimerRef.current = setTimeout(() => { try { rec.stop(); } catch {} }, 1600); };
     rec.onresult = (e: any) => {
       finalText = ''; liveText = '';
       for (let i = 0; i < e.results.length; i++) {
@@ -134,10 +132,8 @@ export default function AiAssistantPage() {
         if (e.results[i].isFinal) finalText += t; else liveText += t;
       }
       setInterim((finalText + ' ' + liveText).trim());
-      if ((finalText + liveText).trim()) armSilence(); // reset the silence countdown while talking
     };
     rec.onend = () => {
-      clearSilence();
       setListening(false);
       // Send whatever we captured — final if present, otherwise the interim text.
       const t = (finalText || liveText).trim();
@@ -148,7 +144,6 @@ export default function AiAssistantPage() {
     rec.onspeechstart = () => console.log('[voice] speech detected');
     rec.onnomatch = () => console.log('[voice] no match');
     rec.onerror = (ev: any) => {
-      clearSilence();
       setListening(false);
       console.warn('[voice] error:', ev?.error);
       // 'no-speech'/'aborted' are normal — keep listening; other errors stop and are shown.
