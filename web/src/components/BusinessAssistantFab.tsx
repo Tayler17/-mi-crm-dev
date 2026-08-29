@@ -150,14 +150,25 @@ export function BusinessAssistantFab({ lang }: { lang: string }) {
       if (t) send(t);
       else resumeListening();
     };
+    rec.onaudiostart = () => console.log('[voice] audio start (mic OK)');
+    rec.onspeechstart = () => console.log('[voice] speech detected');
+    rec.onnomatch = () => console.log('[voice] no match');
     rec.onerror = (ev: any) => {
       clearSilence();
       setListening(false);
-      if (ev?.error === 'no-speech' || ev?.error === 'aborted') resumeListening();
+      console.warn('[voice] error:', ev?.error);
+      if (ev?.error === 'no-speech' || ev?.error === 'aborted') { resumeListening(); return; }
+      // Surface real problems so the user knows why nothing happens.
+      const msg = ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed'
+        ? 'Micrófono bloqueado para el reconocimiento de voz. Permite el micrófono en el navegador.'
+        : ev?.error === 'network'
+        ? 'Sin conexión para el reconocimiento de voz (requiere internet).'
+        : `Reconocimiento de voz: ${ev?.error || 'error'}.`;
+      setError(msg);
     };
     recognitionRef.current = rec;
     setListening(true);
-    try { rec.start(); } catch {}
+    try { rec.start(); } catch (e: any) { console.warn('[voice] start failed', e?.message); setError('No se pudo iniciar el reconocimiento de voz.'); }
   }
 
   function startVoice() {
