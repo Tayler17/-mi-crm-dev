@@ -525,6 +525,16 @@ export class MessagesController {
           const toPhone = conv.external_id;
           if (!phoneId || !token || !toPhone) return;
 
+          // If replying to a specific message, quote it so WhatsApp shows it attached.
+          let ctx: any = {};
+          if (replyToMessageId) {
+            const [orig] = await this.db.query(
+              `SELECT external_id FROM messages WHERE id=$1 AND tenant_id=$2 LIMIT 1`,
+              [replyToMessageId, tenantId],
+            );
+            if (orig?.external_id) ctx = { context: { message_id: orig.external_id } };
+          }
+
           // Media messages: upload the file to Meta first, then send a media message.
           // Anything else falls back to plain text.
           let payload: any;
@@ -547,7 +557,7 @@ export class MessagesController {
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ messaging_product: 'whatsapp', to: toPhone, ...payload }),
+                body: JSON.stringify({ messaging_product: 'whatsapp', to: toPhone, ...ctx, ...payload }),
                 signal: AbortSignal.timeout(15000),
               },
             );
