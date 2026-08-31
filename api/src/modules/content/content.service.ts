@@ -481,32 +481,43 @@ REGLAS GENERALES:
   private async callDallE(
     prompt: string, size: string, apiKey: string,
   ): Promise<{ localUrl: string; model: string }> {
-    // gpt-image-1 is the current model for service-account keys (sk-svcacct-*).
-    // It uses slightly different size strings and always returns b64_json.
-    const gptSize = GPT_IMAGE_SIZES[size] ?? '1024x1024';
+    // gpt-image-1 is best but requires a VERIFIED OpenAI org. If that fails (very common),
+    // fall back to dall-e-3 (no verification needed). Surface the real error if both fail.
+    try {
+      return await this.openaiImage('gpt-image-1', prompt, GPT_IMAGE_SIZES[size] ?? '1024x1024', apiKey);
+    } catch (e: any) {
+      const reason = e?.response?.data?.error?.message ?? e?.message ?? 'error';
+      this.logger.warn(`[image] gpt-image-1 failed (${reason}); falling back to dall-e-3`);
+      try {
+        const d3Size = ['1024x1024', '1792x1024', '1024x1792'].includes(size) ? size : '1024x1024';
+        return await this.openaiImage('dall-e-3', prompt, d3Size, apiKey);
+      } catch (e2: any) {
+        const msg = e2?.response?.data?.error?.message ?? e2?.message ?? 'OpenAI rechazó la generación de imagen';
+        throw new Error(`OpenAI: ${msg}`);
+      }
+    }
+  }
+
+  private async openaiImage(
+    model: string, prompt: string, size: string, apiKey: string,
+  ): Promise<{ localUrl: string; model: string }> {
+    const body: any = { model, prompt, n: 1, size };
+    if (model === 'dall-e-3') body.response_format = 'b64_json'; // avoid expiring temp URLs
     const res = await axios.post(
       'https://api.openai.com/v1/images/generations',
-      { model: 'gpt-image-1', prompt, n: 1, size: gptSize },
+      body,
       { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 90000 },
     );
     const item = res.data?.data?.[0];
-    if (!item) throw new Error('OpenAI image API no devolvió imagen');
-
-    // gpt-image-1 always returns base64
+    if (!item) throw new Error('OpenAI no devolvió imagen');
     if (item.b64_json) {
       if (!existsSync(IMAGE_UPLOAD_DIR)) mkdirSync(IMAGE_UPLOAD_DIR, { recursive: true });
       const filename = `ai-${Date.now()}-${randomBytes(6).toString('hex')}.png`;
       writeFileSync(join(IMAGE_UPLOAD_DIR, filename), Buffer.from(item.b64_json, 'base64'));
-      return { localUrl: `/uploads/content/${filename}`, model: 'gpt-image-1' };
+      return { localUrl: `/uploads/content/${filename}`, model };
     }
-
-    // Fallback: older dall-e-3 keys return a temporary URL
-    if (item.url) {
-      const localUrl = await this.downloadAndSave(item.url);
-      return { localUrl, model: 'gpt-image-1' };
-    }
-
-    throw new Error('OpenAI image API no devolvió URL ni base64');
+    if (item.url) return { localUrl: await this.downloadAndSave(item.url), model };
+    throw new Error('OpenAI no devolvió URL ni base64');
   }
 
   private async callStability(
