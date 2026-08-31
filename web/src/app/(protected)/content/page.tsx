@@ -295,6 +295,7 @@ function PostModal({
   );
   const [mediaUrl,    setMediaUrl]    = useState(post?.mediaUrl    ?? '');
   const [mediaType,   setMediaType]   = useState(post?.mediaType   ?? 'image');
+  const [videoMode,   setVideoMode]   = useState(post?.videoMode   ?? 'reel');
   const [altText,     setAltText]     = useState(post?.altText     ?? '');
   const [mediaTab,    setMediaTab]    = useState<'upload' | 'url' | 'ai'>('upload');
   const [uploading,    setUploading]    = useState(false);
@@ -402,6 +403,7 @@ function PostModal({
         assignedTeam: assignedTeam.trim() || undefined,
         mediaUrl:     mediaUrl.trim()     || undefined,
         mediaType:    mediaUrl.trim() ? mediaType : undefined,
+        videoMode:    mediaUrl.trim() && mediaType === 'video' ? videoMode : undefined,
         altText:      altText.trim()      || undefined,
         crosspostChannels: crosspost.filter((c) => c !== channel).join(','),
       });
@@ -938,6 +940,38 @@ function PostModal({
                           }}
                         >{i.contentRemoveMedia}</button>
                       </div>
+                    </div>
+                  )}
+
+                  {/* Video publish mode (Instagram / Facebook) */}
+                  {mediaUrl && mediaType === 'video' && (
+                    <div style={{ marginTop: 4 }}>
+                      <label className="form-label">{lang === 'en' ? 'Publish video as' : 'Publicar video como'}</label>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {[
+                          { key: 'post', label: lang === 'en' ? 'Post' : 'Post' },
+                          { key: 'reel', label: 'Reel' },
+                          { key: 'both', label: lang === 'en' ? 'Both' : 'Ambos' },
+                        ].map((m) => (
+                          <button
+                            key={m.key}
+                            type="button"
+                            onClick={() => setVideoMode(m.key)}
+                            style={{
+                              flex: 1, padding: '7px 8px', borderRadius: 6, cursor: 'pointer',
+                              fontSize: 12, fontWeight: 600,
+                              border: `1px solid ${videoMode === m.key ? 'var(--primary)' : 'var(--border)'}`,
+                              background: videoMode === m.key ? 'var(--primary)' : 'transparent',
+                              color: videoMode === m.key ? '#fff' : 'var(--text-muted)',
+                            }}
+                          >{m.label}</button>
+                        ))}
+                      </div>
+                      <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '6px 0 0' }}>
+                        {lang === 'en'
+                          ? 'On Facebook this controls post vs Reel. Instagram always publishes video as a Reel.'
+                          : 'En Facebook controla post vs Reel. En Instagram el video siempre se publica como Reel.'}
+                      </p>
                     </div>
                   )}
                 </div>

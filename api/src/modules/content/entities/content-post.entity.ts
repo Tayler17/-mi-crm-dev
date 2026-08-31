@@ -53,6 +53,9 @@ export class ContentPost {
   @Column({ name: 'media_type', nullable: true })
   mediaType?: string; // image | gif | video
 
+  @Column({ name: 'video_mode', type: 'text', nullable: true })
+  videoMode?: string; // for video: 'post' | 'reel' | 'both'
+
   @Column({ name: 'alt_text', nullable: true })
   altText?: string;
 

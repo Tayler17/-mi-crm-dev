@@ -2087,6 +2087,7 @@ export interface ContentPost {
   assignedTeam?: string;
   mediaUrl?: string;
   mediaType?: string;
+  videoMode?: string; // for video: 'post' | 'reel' | 'both'
   altText?: string;
   crosspostChannels?: string; // comma-separated extra channels to publish to at once
   errorMessage?: string;

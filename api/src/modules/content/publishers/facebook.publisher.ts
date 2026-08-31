@@ -20,13 +20,20 @@ export async function publishToFacebook(
 
   const message = buildMessage(post);
 
-  // Video → publish as a Facebook Reel.
+  // Video → publish as a normal video post, a Reel, or both (per post.videoMode).
   if (post.mediaUrl && post.mediaType === 'video') {
     const base = process.env.API_PUBLIC_URL || 'https://api.automarkiq.com';
     const videoUrl = /^https?:\/\//.test(post.mediaUrl) ? post.mediaUrl : `${base}${post.mediaUrl}`;
-    const platformPostId = await publishFacebookReel(pageId, accessToken, videoUrl, message);
-    log.log(`Post ${post.id} publicado como Reel en Facebook: video_id=${platformPostId}`);
-    return { platformPostId };
+    const mode = post.videoMode || 'reel';
+    const ids: string[] = [];
+    if (mode === 'post' || mode === 'both') {
+      ids.push(await publishFacebookVideo(pageId, accessToken, videoUrl, message));
+    }
+    if (mode === 'reel' || mode === 'both') {
+      ids.push(await publishFacebookReel(pageId, accessToken, videoUrl, message));
+    }
+    log.log(`Post ${post.id} publicado en Facebook (${mode}): ${ids.join(', ')}`);
+    return { platformPostId: ids[0] };
   }
 
   let res: Response;
@@ -100,6 +107,23 @@ async function publishFacebookReel(
   // Give Meta a moment to move the reel out of processing (best-effort; not fatal).
   await sleep(3000);
   return videoId;
+}
+
+/**
+ * Publishes a normal video post to the Page feed via /videos (hosted-file method).
+ */
+async function publishFacebookVideo(
+  pageId: string,
+  accessToken: string,
+  videoUrl: string,
+  description: string,
+): Promise<string> {
+  const body = new URLSearchParams({ file_url: videoUrl, description, access_token: accessToken });
+  const res = await fetch(`${GQL}/${pageId}/videos`, { method: 'POST', body });
+  const data = await res.json();
+  const id: string | undefined = data?.id;
+  if (!id) throw new Error(`Facebook: error al publicar el video — ${JSON.stringify(data)}`);
+  return id;
 }
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }

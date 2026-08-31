@@ -42,6 +42,9 @@ export class CreateContentPostDto {
 
   @IsOptional() @IsString()
   crosspostChannels?: string;
+
+  @IsOptional() @IsIn(['post', 'reel', 'both'])
+  videoMode?: string;
 }
 
 export class UpdateContentPostDto {
@@ -86,6 +89,9 @@ export class UpdateContentPostDto {
 
   @IsOptional() @IsString()
   crosspostChannels?: string;
+
+  @IsOptional() @IsIn(['post', 'reel', 'both'])
+  videoMode?: string;
 }
 
 export class GenerateContentDto {

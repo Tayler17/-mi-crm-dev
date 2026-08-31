@@ -59,6 +59,8 @@ export class ContentService implements OnModuleInit {
   async onModuleInit() {
     // Extra channels to publish the same post to at once (no migrations in this project).
     await this.db.query(`ALTER TABLE content_posts ADD COLUMN IF NOT EXISTS crosspost_channels text`).catch(() => {});
+    // How to publish a video: 'post' (normal video), 'reel', or 'both' (video default).
+    await this.db.query(`ALTER TABLE content_posts ADD COLUMN IF NOT EXISTS video_mode text`).catch(() => {});
     // Recurring content agent (Fase 2): one config row per tenant.
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS content_agent (
@@ -164,6 +166,7 @@ export class ContentService implements OnModuleInit {
       mediaType:    dto.mediaType,
       altText:      dto.altText,
       crosspostChannels: dto.crosspostChannels,
+      videoMode:    dto.videoMode,
     });
     const saved = await this.repo.save(post);
     if (saved.status === 'approved') await this.scheduleJob(saved);
@@ -187,6 +190,7 @@ export class ContentService implements OnModuleInit {
       ...(dto.mediaType    !== undefined && { mediaType:    dto.mediaType }),
       ...(dto.altText      !== undefined && { altText:      dto.altText }),
       ...(dto.crosspostChannels !== undefined && { crosspostChannels: dto.crosspostChannels }),
+      ...(dto.videoMode    !== undefined && { videoMode:    dto.videoMode }),
     });
     if (dto.status === 'published' && !post.publishedAt) {
       post.publishedAt = new Date();
