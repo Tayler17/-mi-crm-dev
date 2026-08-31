@@ -15,16 +15,21 @@ export async function publishToInstagram(
   post: ContentPost,
   credentials: Record<string, any>,
 ): Promise<{ platformPostId: string }> {
-  const { accessToken, pageId } = credentials;
-  if (!accessToken || !pageId) throw new Error('Instagram: faltan accessToken o pageId en la conexión');
+  const { accessToken, pageId, igAccountId } = credentials;
+  if (!accessToken) throw new Error('Instagram: falta accessToken en la conexión');
 
-  // Step 1 — resolve the Instagram Business Account ID from the Facebook Page
-  const igRes = await fetch(`${GQL}/${pageId}?fields=instagram_business_account&access_token=${accessToken}`);
-  const igData = await igRes.json();
-  if (!igData?.instagram_business_account?.id) {
-    throw new Error(`Instagram: la página ${pageId} no tiene un Business Account vinculado`);
+  // Resolve the Instagram Business Account id:
+  //  1) use igAccountId if stored;
+  //  2) if the stored id is already an IG account id (17841…), use it directly;
+  //  3) else resolve it from a Facebook Page id.
+  let igUserId: string | undefined = igAccountId;
+  if (!igUserId && pageId && String(pageId).startsWith('17841')) igUserId = String(pageId);
+  if (!igUserId && pageId) {
+    const igRes = await fetch(`${GQL}/${pageId}?fields=instagram_business_account&access_token=${accessToken}`);
+    const igData = await igRes.json();
+    igUserId = igData?.instagram_business_account?.id;
   }
-  const igUserId: string = igData.instagram_business_account.id;
+  if (!igUserId) throw new Error('Instagram: no se encontró la cuenta de Instagram Business (revisa la conexión).');
 
   // Step 2 — build caption (title + body + hashtags)
   const caption = buildCaption(post);
@@ -32,7 +37,10 @@ export async function publishToInstagram(
   // Step 3 — create media container
   const containerParams = new URLSearchParams({ caption, access_token: accessToken });
   if (post.mediaUrl) {
-    containerParams.set('image_url', post.mediaUrl);
+    // Instagram must FETCH the image → it needs a public https URL, not a local path.
+    const base = process.env.API_PUBLIC_URL || 'https://api.automarkiq.com';
+    const imageUrl = /^https?:\/\//.test(post.mediaUrl) ? post.mediaUrl : `${base}${post.mediaUrl}`;
+    containerParams.set('image_url', imageUrl);
   } else {
     // Instagram requires media; fall back to text-as-caption with a 1×1 placeholder
     throw new Error('Instagram: se requiere una imagen para publicar (añade media al post)');
