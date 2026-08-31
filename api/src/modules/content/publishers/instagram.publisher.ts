@@ -34,16 +34,21 @@ export async function publishToInstagram(
   // Step 2 — build caption (title + body + hashtags)
   const caption = buildCaption(post);
 
-  // Step 3 — create media container
+  // Instagram must FETCH the media → it needs a public https URL, not a local path.
+  if (!post.mediaUrl) {
+    throw new Error('Instagram: se requiere una imagen o video para publicar (añade media al post)');
+  }
+  const base = process.env.API_PUBLIC_URL || 'https://api.automarkiq.com';
+  const mediaUrl = /^https?:\/\//.test(post.mediaUrl) ? post.mediaUrl : `${base}${post.mediaUrl}`;
+  const isVideo = post.mediaType === 'video';
+
+  // Step 3 — create media container (REELS for video, IMAGE otherwise)
   const containerParams = new URLSearchParams({ caption, access_token: accessToken });
-  if (post.mediaUrl) {
-    // Instagram must FETCH the image → it needs a public https URL, not a local path.
-    const base = process.env.API_PUBLIC_URL || 'https://api.automarkiq.com';
-    const imageUrl = /^https?:\/\//.test(post.mediaUrl) ? post.mediaUrl : `${base}${post.mediaUrl}`;
-    containerParams.set('image_url', imageUrl);
+  if (isVideo) {
+    containerParams.set('media_type', 'REELS');
+    containerParams.set('video_url', mediaUrl);
   } else {
-    // Instagram requires media; fall back to text-as-caption with a 1×1 placeholder
-    throw new Error('Instagram: se requiere una imagen para publicar (añade media al post)');
+    containerParams.set('image_url', mediaUrl);
   }
 
   const containerRes = await fetch(`${GQL}/${igUserId}/media`, {
@@ -55,8 +60,13 @@ export async function publishToInstagram(
     throw new Error(`Instagram: error al crear el container — ${JSON.stringify(container)}`);
   }
 
-  // Brief wait for the container to be ready (Meta recommends polling, but 1 s is usually enough)
-  await sleep(1000);
+  if (isVideo) {
+    // Reels must finish transcoding before publishing — poll status (up to ~2.5 min).
+    await waitForContainerReady(container.id, accessToken);
+  } else {
+    // Brief wait for the image container to be ready.
+    await sleep(1000);
+  }
 
   // Step 4 — publish the container
   const publishParams = new URLSearchParams({ creation_id: container.id, access_token: accessToken });
@@ -79,6 +89,26 @@ function buildCaption(post: ContentPost): string {
   if (post.body)  parts.push(post.body);
   if (post.tags?.length) parts.push(post.tags.map((t) => `#${t.replace(/\s+/g, '')}`).join(' '));
   return parts.join('\n\n');
+}
+
+/**
+ * Polls a media container until Meta finishes processing it (mainly for Reels/video,
+ * which transcode asynchronously). Throws if it errors or times out.
+ */
+async function waitForContainerReady(containerId: string, accessToken: string): Promise<void> {
+  const maxAttempts = 30;          // 30 × 5 s ≈ 2.5 min
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await sleep(5000);
+    const res = await fetch(`${GQL}/${containerId}?fields=status_code,status&access_token=${accessToken}`);
+    const data = await res.json();
+    const code = data?.status_code;
+    if (code === 'FINISHED') return;
+    if (code === 'ERROR' || code === 'EXPIRED') {
+      throw new Error(`Instagram: el video no se pudo procesar (${code}) — ${data?.status ?? ''}`);
+    }
+    // IN_PROGRESS / PUBLISHED → keep waiting
+  }
+  throw new Error('Instagram: el video tardó demasiado en procesarse. Inténtalo de nuevo.');
 }
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
