@@ -50,7 +50,9 @@ export class MetaOAuthController {
       'pages_manage_posts',        // publish posts to a Facebook Page
       'instagram_basic',
       'instagram_manage_messages',
-      'instagram_content_publish', // publish posts to an Instagram Business account
+      // NOTE: instagram_content_publish must be ADDED to the Meta app first (Instagram
+      // product / use case); requesting it before that returns "Invalid Scopes" and
+      // blocks the whole dialog. Re-add it here once it's enabled in the app.
     ].join(',');
 
     const url =
