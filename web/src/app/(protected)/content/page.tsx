@@ -7,6 +7,7 @@ import {
   deleteContentPost, generateContentPost, generateContentCampaign, uploadContentMedia,
   generateContentImage, getContentImageHistory, getContentImageUsage,
   getAiPrompts, getSettings,
+  getContentAgent, saveContentAgent, ContentAgentConfig,
   API_URL,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
@@ -1216,6 +1217,157 @@ function CampaignModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
   );
 }
 
+function AgentModal({ onClose }: { onClose: () => void }) {
+  const { lang } = useLangCtx();
+  const en = lang === 'en';
+  const [cfg, setCfg] = useState<ContentAgentConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const [enabled, setEnabled] = useState(false);
+  const [topics, setTopics] = useState('');
+  const [cadenceDays, setCadenceDays] = useState(7);
+  const [postsPerRun, setPostsPerRun] = useState(3);
+  const [channel, setChannel] = useState('instagram');
+  const [cross, setCross] = useState<string[]>([]);
+  const [tone, setTone] = useState('profesional');
+  const [withImages, setWithImages] = useState(false);
+
+  useEffect(() => {
+    getContentAgent().then((c) => {
+      setCfg(c);
+      setEnabled(!!c.enabled);
+      setTopics(c.topics ?? '');
+      setCadenceDays(c.cadence_days ?? 7);
+      setPostsPerRun(c.posts_per_run ?? 3);
+      setChannel(c.channel ?? 'instagram');
+      setCross(String(c.crosspost_channels ?? '').split(',').map((s) => s.trim()).filter(Boolean));
+      setTone(c.tone ?? 'profesional');
+      setWithImages(!!c.with_images);
+    }).catch((e) => setError(e instanceof Error ? e.message : 'Error'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function save() {
+    setBusy(true); setError(''); setSaved(false);
+    try {
+      const c = await saveContentAgent({
+        enabled, topics: topics.trim(), cadenceDays, postsPerRun, channel,
+        crosspostChannels: cross.filter((x) => x !== channel).join(','), tone, withImages,
+      });
+      setCfg(c);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Error'); }
+    finally { setBusy(false); }
+  }
+
+  const nextRun = cfg?.next_run_at ? new Date(cfg.next_run_at) : null;
+  const lastRun = cfg?.last_run_at ? new Date(cfg.last_run_at) : null;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">🤖 {en ? 'Auto content agent' : 'Agente automático de contenido'}</h2>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        {loading ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>{en ? 'Loading…' : 'Cargando…'}</div>
+        ) : (
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+            {en ? 'The agent automatically creates draft posts on a schedule, rotating through your topics. Drafts wait for your approval before publishing — nothing goes out without review.'
+                : 'El agente crea borradores automáticamente según una frecuencia, rotando entre tus temas. Los borradores esperan tu aprobación antes de publicarse — nada sale sin revisión.'}
+          </p>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, background: enabled ? 'var(--success-bg, #f0fdf4)' : 'transparent' }}>
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} style={{ width: 18, height: 18 }} />
+            <span style={{ fontWeight: 600, fontSize: 14 }}>{enabled ? (en ? 'Agent active' : 'Agente activo') : (en ? 'Agent paused' : 'Agente en pausa')}</span>
+          </label>
+
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">{en ? 'Topics (one per line, or comma-separated)' : 'Temas (uno por línea, o separados por coma)'}</label>
+            <textarea className="form-input" rows={4} value={topics} onChange={(e) => setTopics(e.target.value)}
+              placeholder={en ? 'Shipping promos to DR\nCustomer testimonials\nHoliday schedule' : 'Promos de envíos a RD\nTestimonios de clientes\nHorario de fiestas'} />
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              {en ? 'The agent rotates through these, one theme per run.' : 'El agente los rota, un tema por ejecución.'}
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div className="form-group" style={{ margin: 0, flex: '1 1 130px' }}>
+              <label className="form-label">{en ? 'Every (days)' : 'Cada (días)'}</label>
+              <input className="form-input" type="number" min={1} max={30} value={cadenceDays} onChange={(e) => setCadenceDays(Math.min(30, Math.max(1, +e.target.value || 1)))} />
+            </div>
+            <div className="form-group" style={{ margin: 0, flex: '1 1 130px' }}>
+              <label className="form-label">{en ? 'Posts per run' : 'Posts por ejecución'}</label>
+              <input className="form-input" type="number" min={1} max={10} value={postsPerRun} onChange={(e) => setPostsPerRun(Math.min(10, Math.max(1, +e.target.value || 1)))} />
+            </div>
+            <div className="form-group" style={{ margin: 0, flex: '1 1 130px' }}>
+              <label className="form-label">{en ? 'Tone' : 'Tono'}</label>
+              <select className="form-input" value={tone} onChange={(e) => setTone(e.target.value)}>
+                <option value="profesional">{en ? 'Professional' : 'Profesional'}</option>
+                <option value="cercano">{en ? 'Friendly' : 'Cercano'}</option>
+                <option value="informativo">{en ? 'Informative' : 'Informativo'}</option>
+                <option value="divertido">{en ? 'Fun' : 'Divertido'}</option>
+                <option value="inspirador">{en ? 'Inspiring' : 'Inspirador'}</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">{en ? 'Main channel' : 'Canal principal'}</label>
+            <select className="form-input" value={channel} onChange={(e) => setChannel(e.target.value)}>
+              <option value="instagram">📸 Instagram</option>
+              <option value="facebook">👥 Facebook</option>
+              <option value="linkedin">💼 LinkedIn</option>
+              <option value="twitter">𝕏 Twitter/X</option>
+              <option value="blog">✍️ Blog</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="form-label">{en ? 'Also create for' : 'Crear también para'}</label>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {['instagram', 'facebook', 'twitter', 'linkedin'].filter((c) => c !== channel).map((c) => (
+                <label key={c} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={cross.includes(c)} onChange={(e) => setCross((p) => e.target.checked ? [...new Set([...p, c])] : p.filter((x) => x !== c))} />
+                  {c}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+            <input type="checkbox" checked={withImages} onChange={(e) => setWithImages(e.target.checked)} />
+            {en ? 'Also generate an AI image per post (has a cost)' : 'Generar también una imagen con IA por post (tiene costo)'}
+          </label>
+
+          {(nextRun || lastRun) && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+              {lastRun && <div>{en ? 'Last run: ' : 'Última ejecución: '}{lastRun.toLocaleString()}</div>}
+              {enabled && nextRun && <div>{en ? 'Next run: ' : 'Próxima ejecución: '}{nextRun.toLocaleString()}</div>}
+            </div>
+          )}
+
+          {error && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
+          {saved && <div style={{ color: 'var(--success, #16a34a)', fontSize: 13 }}>✓ {en ? 'Saved' : 'Guardado'}</div>}
+        </div>
+        )}
+        <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '12px 20px' }}>
+          <button className="btn btn-secondary" onClick={onClose} disabled={busy}>{en ? 'Close' : 'Cerrar'}</button>
+          <button className="btn btn-primary" onClick={save} disabled={busy || loading}>
+            {busy ? (en ? 'Saving…' : 'Guardando…') : (en ? 'Save' : 'Guardar')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ContentPage() {
@@ -1253,6 +1405,7 @@ export default function ContentPage() {
   const [editing,   setEditing]   = useState<Partial<ContentPost> | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [campaignOpen, setCampaignOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
   const [deleting,  setDeleting]  = useState<string | null>(null);
   const [duping,    setDuping]    = useState<string | null>(null);
   const [actioning, setActioning] = useState<string | null>(null);
@@ -1328,12 +1481,14 @@ export default function ContentPage() {
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>{i.contentSubtitle}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-secondary" onClick={() => setAgentOpen(true)}>🤖 {lang === 'en' ? 'Auto agent' : 'Agente automático'}</button>
           <button className="btn btn-secondary" onClick={() => setCampaignOpen(true)}>✨ {lang === 'en' ? 'Generate campaign' : 'Generar campaña'}</button>
           <button className="btn btn-primary" onClick={openNew}>{i.contentNewPost}</button>
         </div>
       </div>
 
       {campaignOpen && <CampaignModal onClose={() => setCampaignOpen(false)} onDone={() => { setCampaignOpen(false); load(); }} />}
+      {agentOpen && <AgentModal onClose={() => setAgentOpen(false)} />}
 
       {/* Stats row */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>

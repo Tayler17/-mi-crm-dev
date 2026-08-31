@@ -6,6 +6,7 @@ import { Connection } from '../connections/connection.entity';
 import { ContentService } from './content.service';
 import { ContentController } from './content.controller';
 import { ContentPublishProcessor } from './content-publish.processor';
+import { ContentAgentWorker } from './content-agent-worker.service';
 import { CONTENT_PUBLISH_QUEUE } from './content-publish.constants';
 import { SettingsModule } from '../settings/settings.module';
 
@@ -16,6 +17,6 @@ import { SettingsModule } from '../settings/settings.module';
     SettingsModule,
   ],
   controllers: [ContentController],
-  providers: [ContentService, ContentPublishProcessor],
+  providers: [ContentService, ContentPublishProcessor, ContentAgentWorker],
 })
 export class ContentModule {}

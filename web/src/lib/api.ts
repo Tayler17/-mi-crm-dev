@@ -2119,6 +2119,27 @@ export const generateContentCampaign = (data: {
   tone?: string; startDate?: string; spacingDays?: number; withImages?: boolean;
 }) => apiPost<{ created: number; posts: ContentPost[] }>('/content/generate-campaign', data);
 
+export interface ContentAgentConfig {
+  tenant_id?: string;
+  enabled: boolean;
+  topics: string;
+  cadence_days: number;
+  posts_per_run: number;
+  channel: string;
+  crosspost_channels: string;
+  tone: string;
+  with_images: boolean;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+}
+
+export const getContentAgent = () => apiGet<ContentAgentConfig>('/content/agent');
+
+export const saveContentAgent = (data: {
+  enabled: boolean; topics: string; cadenceDays: number; postsPerRun: number;
+  channel: string; crosspostChannels?: string; tone: string; withImages: boolean;
+}) => apiPost<ContentAgentConfig>('/content/agent', data);
+
 export const getContentPostSchedule = (id: string) =>
   apiGet<{ scheduled: boolean; state?: string; runAt?: string | null }>(`/content/${id}/schedule`);
 

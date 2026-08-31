@@ -59,6 +59,74 @@ export class ContentService implements OnModuleInit {
   async onModuleInit() {
     // Extra channels to publish the same post to at once (no migrations in this project).
     await this.db.query(`ALTER TABLE content_posts ADD COLUMN IF NOT EXISTS crosspost_channels text`).catch(() => {});
+    // Recurring content agent (Fase 2): one config row per tenant.
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS content_agent (
+        tenant_id uuid PRIMARY KEY,
+        enabled boolean NOT NULL DEFAULT false,
+        topics text NOT NULL DEFAULT '',
+        cadence_days int NOT NULL DEFAULT 7,
+        posts_per_run int NOT NULL DEFAULT 3,
+        channel text NOT NULL DEFAULT 'instagram',
+        crosspost_channels text NOT NULL DEFAULT '',
+        tone text NOT NULL DEFAULT 'profesional',
+        with_images boolean NOT NULL DEFAULT false,
+        topic_index int NOT NULL DEFAULT 0,
+        last_run_at timestamptz,
+        next_run_at timestamptz,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `).catch(() => {});
+  }
+
+  async getAgentConfig(tenantId: string) {
+    const [row] = await this.db.query(`SELECT * FROM content_agent WHERE tenant_id=$1`, [tenantId]).catch(() => []);
+    return row ?? { tenant_id: tenantId, enabled: false, topics: '', cadence_days: 7, posts_per_run: 3, channel: 'instagram', crosspost_channels: '', tone: 'profesional', with_images: false };
+  }
+
+  async saveAgentConfig(tenantId: string, dto: any) {
+    const enabled = !!dto.enabled;
+    const cadence = Math.min(Math.max(Number(dto.cadenceDays) || 7, 1), 30);
+    const perRun = Math.min(Math.max(Number(dto.postsPerRun) || 3, 1), 10);
+    const nextRun = enabled ? new Date(Date.now() + cadence * 86_400_000) : null;
+    await this.db.query(
+      `INSERT INTO content_agent (tenant_id, enabled, topics, cadence_days, posts_per_run, channel, crosspost_channels, tone, with_images, next_run_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())
+       ON CONFLICT (tenant_id) DO UPDATE SET
+         enabled=$2, topics=$3, cadence_days=$4, posts_per_run=$5, channel=$6,
+         crosspost_channels=$7, tone=$8, with_images=$9,
+         next_run_at=CASE WHEN $2 THEN COALESCE(content_agent.next_run_at, $10) ELSE NULL END,
+         updated_at=now()`,
+      [tenantId, enabled, String(dto.topics ?? ''), cadence, perRun, dto.channel || 'instagram',
+       String(dto.crosspostChannels ?? ''), dto.tone || 'profesional', !!dto.withImages, nextRun],
+    );
+    return this.getAgentConfig(tenantId);
+  }
+
+  /** Run one due content-agent config: generate a batch of drafts for its next topic. */
+  async runAgentForTenant(cfg: any): Promise<void> {
+    const topics = String(cfg.topics ?? '').split(/[\n,]+/).map((t: string) => t.trim()).filter(Boolean);
+    if (!topics.length) return;
+    const idx = Number(cfg.topic_index ?? 0) % topics.length;
+    const theme = topics[idx];
+    const [owner] = await this.db.query(
+      `SELECT id, full_name FROM users WHERE tenant_id=$1 AND is_active=true AND role IN ('owner','admin') ORDER BY created_at ASC LIMIT 1`,
+      [cfg.tenant_id],
+    ).catch(() => []);
+    if (!owner) return; // no author available
+    await this.generateCampaign(cfg.tenant_id, { id: owner.id, fullName: owner.full_name ?? '' }, {
+      theme,
+      count: cfg.posts_per_run,
+      channel: cfg.channel,
+      crosspostChannels: cfg.crosspost_channels,
+      tone: cfg.tone,
+      spacingDays: Math.max(1, Math.floor(cfg.cadence_days / cfg.posts_per_run) || 1),
+      withImages: cfg.with_images,
+    }).catch((e) => this.logger.warn(`[content-agent] generate failed for ${cfg.tenant_id}: ${e.message}`));
+    await this.db.query(
+      `UPDATE content_agent SET last_run_at=now(), next_run_at=now() + ($2 || ' days')::interval, topic_index=$3, updated_at=now() WHERE tenant_id=$1`,
+      [cfg.tenant_id, String(cfg.cadence_days), (idx + 1) % topics.length],
+    ).catch(() => {});
   }
 
   findAll(tenantId: string, status?: string, channel?: string) {
