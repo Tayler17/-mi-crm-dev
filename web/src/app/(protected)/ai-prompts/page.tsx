@@ -131,6 +131,9 @@ type PromptForm = {
   prompt_text: string; variables: AiPromptVariable[];
   queue_ids: string[];
   provider: string; model: string; temperature: number; max_tokens: number;
+  schedule_enabled: boolean; schedule_channel: string; schedule_crosspost: string;
+  schedule_cadence_days: number; schedule_posts_per_run: number;
+  schedule_with_images: boolean; schedule_tone: string;
 };
 
 function PromptModal({ prompt, queues, onSave, onClose }: {
@@ -139,7 +142,7 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
   const { lang } = useLangCtx();
   const i = APP[lang];
 
-  const [tab, setTab] = useState<'edit' | 'variables' | 'settings'>('edit');
+  const [tab, setTab] = useState<'edit' | 'variables' | 'settings' | 'automation'>('edit');
   const [form, setForm] = useState<PromptForm>({
     name: prompt?.name ?? '',
     description: prompt?.description ?? '',
@@ -151,6 +154,13 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
     model: prompt?.model ?? 'gpt-4o-mini',
     temperature: prompt?.temperature ?? 0.7,
     max_tokens: prompt?.max_tokens ?? 300,
+    schedule_enabled: prompt?.schedule_enabled ?? false,
+    schedule_channel: prompt?.schedule_channel ?? 'instagram',
+    schedule_crosspost: prompt?.schedule_crosspost ?? '',
+    schedule_cadence_days: prompt?.schedule_cadence_days ?? 7,
+    schedule_posts_per_run: prompt?.schedule_posts_per_run ?? 1,
+    schedule_with_images: prompt?.schedule_with_images ?? false,
+    schedule_tone: prompt?.schedule_tone ?? 'profesional',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -197,6 +207,12 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
             {'{ }'} Variables {form.variables.length > 0 && <span style={{ marginLeft: 4, background: 'var(--primary)', color: '#fff', borderRadius: 8, padding: '0 5px', fontSize: 10 }}>{form.variables.length}</span>}
           </button>
           <button style={tabStyle('settings')} onClick={() => setTab('settings')}>⚙ {i.modelLabel}</button>
+          {form.category === 'marketing' && (
+            <button style={tabStyle('automation')} onClick={() => setTab('automation')}>
+              🤖 {lang === 'en' ? 'Automation' : 'Automatización'}
+              {form.schedule_enabled && <span style={{ marginLeft: 5, width: 7, height: 7, borderRadius: '50%', background: '#16a34a', display: 'inline-block' }} />}
+            </button>
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
@@ -338,6 +354,86 @@ function PromptModal({ prompt, queues, onSave, onClose }: {
                       );
                     })}
                   </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'automation' && form.category === 'marketing' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+                {lang === 'en'
+                  ? 'When enabled, this prompt automatically generates draft posts on a schedule. Drafts wait for your approval before publishing — nothing goes out without review.'
+                  : 'Al activarse, este prompt genera borradores automáticamente según la frecuencia. Los borradores esperan tu aprobación antes de publicarse — nada sale sin revisión.'}
+              </p>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, background: form.schedule_enabled ? '#f0fdf4' : 'transparent' }}>
+                <input type="checkbox" checked={form.schedule_enabled} onChange={(e) => setForm((p) => ({ ...p, schedule_enabled: e.target.checked }))} style={{ width: 18, height: 18 }} />
+                <span style={{ fontWeight: 600, fontSize: 14 }}>{form.schedule_enabled ? (lang === 'en' ? 'Automation active' : 'Automatización activa') : (lang === 'en' ? 'Automation off' : 'Automatización apagada')}</span>
+              </label>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">{lang === 'en' ? 'Every (days)' : 'Cada (días)'}</label>
+                  <input className="form-input" type="number" min={1} max={30} value={form.schedule_cadence_days}
+                    onChange={(e) => setForm((p) => ({ ...p, schedule_cadence_days: Math.min(30, Math.max(1, +e.target.value || 1)) }))} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">{lang === 'en' ? 'Posts per run' : 'Posts por vez'}</label>
+                  <input className="form-input" type="number" min={1} max={10} value={form.schedule_posts_per_run}
+                    onChange={(e) => setForm((p) => ({ ...p, schedule_posts_per_run: Math.min(10, Math.max(1, +e.target.value || 1)) }))} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">{lang === 'en' ? 'Tone' : 'Tono'}</label>
+                  <select className="form-input" value={form.schedule_tone} onChange={(e) => setForm((p) => ({ ...p, schedule_tone: e.target.value }))}>
+                    <option value="profesional">{lang === 'en' ? 'Professional' : 'Profesional'}</option>
+                    <option value="cercano">{lang === 'en' ? 'Friendly' : 'Cercano'}</option>
+                    <option value="informativo">{lang === 'en' ? 'Informative' : 'Informativo'}</option>
+                    <option value="divertido">{lang === 'en' ? 'Fun' : 'Divertido'}</option>
+                    <option value="inspirador">{lang === 'en' ? 'Inspiring' : 'Inspirador'}</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">{lang === 'en' ? 'Main channel' : 'Canal principal'}</label>
+                <select className="form-input" value={form.schedule_channel} onChange={(e) => setForm((p) => ({ ...p, schedule_channel: e.target.value }))}>
+                  <option value="instagram">📸 Instagram</option>
+                  <option value="facebook">👥 Facebook</option>
+                  <option value="linkedin">💼 LinkedIn</option>
+                  <option value="twitter">𝕏 Twitter/X</option>
+                  <option value="blog">✍️ Blog</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="form-label">{lang === 'en' ? 'Also create for' : 'Crear también para'}</label>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  {['instagram', 'facebook', 'twitter', 'linkedin'].filter((c) => c !== form.schedule_channel).map((c) => {
+                    const list = form.schedule_crosspost.split(',').map((s) => s.trim()).filter(Boolean);
+                    const on = list.includes(c);
+                    return (
+                      <label key={c} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={on} onChange={(e) => {
+                          const next = e.target.checked ? [...new Set([...list, c])] : list.filter((x) => x !== c);
+                          setForm((p) => ({ ...p, schedule_crosspost: next.join(',') }));
+                        }} />
+                        {c}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={form.schedule_with_images} onChange={(e) => setForm((p) => ({ ...p, schedule_with_images: e.target.checked }))} />
+                {lang === 'en' ? 'Also generate an AI image per post (has a cost)' : 'Generar también una imagen con IA por post (tiene costo)'}
+              </label>
+
+              {(prompt?.next_run_at || prompt?.last_run_at) && (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                  {prompt?.last_run_at && <div>{lang === 'en' ? 'Last run: ' : 'Última ejecución: '}{new Date(prompt.last_run_at).toLocaleString()}</div>}
+                  {form.schedule_enabled && prompt?.next_run_at && <div>{lang === 'en' ? 'Next run: ' : 'Próxima ejecución: '}{new Date(prompt.next_run_at).toLocaleString()}</div>}
                 </div>
               )}
             </div>

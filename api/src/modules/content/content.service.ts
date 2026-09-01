@@ -61,73 +61,32 @@ export class ContentService implements OnModuleInit {
     await this.db.query(`ALTER TABLE content_posts ADD COLUMN IF NOT EXISTS crosspost_channels text`).catch(() => {});
     // How to publish a video: 'post' (normal video), 'reel', or 'both' (video default).
     await this.db.query(`ALTER TABLE content_posts ADD COLUMN IF NOT EXISTS video_mode text`).catch(() => {});
-    // Recurring content agent (Fase 2): one config row per tenant.
-    await this.db.query(`
-      CREATE TABLE IF NOT EXISTS content_agent (
-        tenant_id uuid PRIMARY KEY,
-        enabled boolean NOT NULL DEFAULT false,
-        topics text NOT NULL DEFAULT '',
-        cadence_days int NOT NULL DEFAULT 7,
-        posts_per_run int NOT NULL DEFAULT 3,
-        channel text NOT NULL DEFAULT 'instagram',
-        crosspost_channels text NOT NULL DEFAULT '',
-        tone text NOT NULL DEFAULT 'profesional',
-        with_images boolean NOT NULL DEFAULT false,
-        topic_index int NOT NULL DEFAULT 0,
-        last_run_at timestamptz,
-        next_run_at timestamptz,
-        updated_at timestamptz NOT NULL DEFAULT now()
-      )
-    `).catch(() => {});
+    // Recurring content agent (Fase 2) now lives on Marketing AI prompts (ai_prompts.schedule_*).
   }
 
-  async getAgentConfig(tenantId: string) {
-    const [row] = await this.db.query(`SELECT * FROM content_agent WHERE tenant_id=$1`, [tenantId]).catch(() => []);
-    return row ?? { tenant_id: tenantId, enabled: false, topics: '', cadence_days: 7, posts_per_run: 3, channel: 'instagram', crosspost_channels: '', tone: 'profesional', with_images: false };
-  }
-
-  async saveAgentConfig(tenantId: string, dto: any) {
-    const enabled = !!dto.enabled;
-    const cadence = Math.min(Math.max(Number(dto.cadenceDays) || 7, 1), 30);
-    const perRun = Math.min(Math.max(Number(dto.postsPerRun) || 3, 1), 10);
-    const nextRun = enabled ? new Date(Date.now() + cadence * 86_400_000) : null;
-    await this.db.query(
-      `INSERT INTO content_agent (tenant_id, enabled, topics, cadence_days, posts_per_run, channel, crosspost_channels, tone, with_images, next_run_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())
-       ON CONFLICT (tenant_id) DO UPDATE SET
-         enabled=$2, topics=$3, cadence_days=$4, posts_per_run=$5, channel=$6,
-         crosspost_channels=$7, tone=$8, with_images=$9,
-         next_run_at=CASE WHEN $2 THEN COALESCE(content_agent.next_run_at, $10) ELSE NULL END,
-         updated_at=now()`,
-      [tenantId, enabled, String(dto.topics ?? ''), cadence, perRun, dto.channel || 'instagram',
-       String(dto.crosspostChannels ?? ''), dto.tone || 'profesional', !!dto.withImages, nextRun],
-    );
-    return this.getAgentConfig(tenantId);
-  }
-
-  /** Run one due content-agent config: generate a batch of drafts for its next topic. */
-  async runAgentForTenant(cfg: any): Promise<void> {
-    const topics = String(cfg.topics ?? '').split(/[\n,]+/).map((t: string) => t.trim()).filter(Boolean);
-    if (!topics.length) return;
-    const idx = Number(cfg.topic_index ?? 0) % topics.length;
-    const theme = topics[idx];
+  /** Run one due Marketing AI-prompt: generate a batch of DRAFT posts from its prompt_text.
+   *  Humans review/approve (which publishes). Reschedules next_run_at from the cadence. */
+  async runScheduledPrompt(prompt: any): Promise<void> {
     const [owner] = await this.db.query(
       `SELECT id, full_name FROM users WHERE tenant_id=$1 AND is_active=true AND role IN ('owner','admin') ORDER BY created_at ASC LIMIT 1`,
-      [cfg.tenant_id],
+      [prompt.tenant_id],
     ).catch(() => []);
     if (!owner) return; // no author available
-    await this.generateCampaign(cfg.tenant_id, { id: owner.id, fullName: owner.full_name ?? '' }, {
-      theme,
-      count: cfg.posts_per_run,
-      channel: cfg.channel,
-      crosspostChannels: cfg.crosspost_channels,
-      tone: cfg.tone,
-      spacingDays: Math.max(1, Math.floor(cfg.cadence_days / cfg.posts_per_run) || 1),
-      withImages: cfg.with_images,
-    }).catch((e) => this.logger.warn(`[content-agent] generate failed for ${cfg.tenant_id}: ${e.message}`));
+    const perRun = Math.min(Math.max(Number(prompt.schedule_posts_per_run) || 1, 1), 10);
+    const cadence = Math.min(Math.max(Number(prompt.schedule_cadence_days) || 7, 1), 30);
+    await this.generateCampaign(prompt.tenant_id, { id: owner.id, fullName: owner.full_name ?? '' }, {
+      theme: prompt.name || 'Contenido',
+      count: perRun,
+      channel: prompt.schedule_channel || 'instagram',
+      crosspostChannels: prompt.schedule_crosspost || '',
+      tone: prompt.schedule_tone || 'profesional',
+      spacingDays: Math.max(1, Math.floor(cadence / perRun) || 1),
+      withImages: !!prompt.schedule_with_images,
+      promptId: prompt.id,
+    }).catch((e) => this.logger.warn(`[content-agent] prompt ${prompt.id} generate failed: ${e.message}`));
     await this.db.query(
-      `UPDATE content_agent SET last_run_at=now(), next_run_at=now() + ($2 || ' days')::interval, topic_index=$3, updated_at=now() WHERE tenant_id=$1`,
-      [cfg.tenant_id, String(cfg.cadence_days), (idx + 1) % topics.length],
+      `UPDATE ai_prompts SET last_run_at=now(), next_run_at=now() + ($2 || ' days')::interval, updated_at=now() WHERE id=$1`,
+      [prompt.id, String(cadence)],
     ).catch(() => {});
   }
 
@@ -280,7 +239,7 @@ export class ContentService implements OnModuleInit {
   async generateCampaign(
     tenantId: string,
     user: { id: string; fullName: string },
-    dto: { theme: string; count?: number; channel?: string; crosspostChannels?: string; tone?: string; startDate?: string; spacingDays?: number; withImages?: boolean; imageLook?: string },
+    dto: { theme: string; count?: number; channel?: string; crosspostChannels?: string; tone?: string; startDate?: string; spacingDays?: number; withImages?: boolean; imageLook?: string; promptId?: string },
   ): Promise<{ created: number; posts: ContentPost[] }> {
     const theme = String(dto.theme ?? '').trim();
     if (!theme) throw new Error('Falta el tema de la campaña');
@@ -292,7 +251,7 @@ export class ContentService implements OnModuleInit {
     const posts: ContentPost[] = [];
     for (let i = 0; i < count; i++) {
       const gen = await this.generate(
-        { title: theme, channel, keywords: `Publicación ${i + 1} de ${count} de una campaña sobre: ${theme}. Usa un ángulo/gancho DISTINTO a las demás.`, tone: dto.tone } as GenerateContentDto,
+        { title: theme, channel, keywords: `Publicación ${i + 1} de ${count} de una campaña sobre: ${theme}. Usa un ángulo/gancho DISTINTO a las demás.`, tone: dto.tone, promptId: dto.promptId } as GenerateContentDto,
         tenantId,
       ).catch(() => ({ body: '', aiGenerated: false }));
 

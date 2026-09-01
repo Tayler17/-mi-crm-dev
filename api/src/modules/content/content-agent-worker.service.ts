@@ -4,9 +4,10 @@ import { DataSource } from 'typeorm';
 import { ContentService } from './content.service';
 
 /**
- * Content agent (Fase 2): periodically generates a batch of DRAFT posts for each tenant
- * whose recurring config is due, rotating through their topics. Humans review/approve
- * (which publishes). Ticks every ~15 min; each config runs at most once per cadence.
+ * Content agent (Fase 2): periodically generates a batch of DRAFT posts for each
+ * Marketing AI prompt whose automation is enabled and due. The prompt's own text
+ * drives the generation. Humans review/approve (which publishes). Ticks every ~15 min;
+ * each prompt runs at most once per its cadence.
  */
 @Injectable()
 export class ContentAgentWorker implements OnModuleInit, OnModuleDestroy {
@@ -30,14 +31,15 @@ export class ContentAgentWorker implements OnModuleInit, OnModuleDestroy {
 
   private async tick(): Promise<void> {
     const due = await this.db.query(
-      `SELECT * FROM content_agent
-         WHERE enabled = true AND topics <> '' AND (next_run_at IS NULL OR next_run_at <= now())`,
+      `SELECT * FROM ai_prompts
+         WHERE category = 'marketing' AND is_active = true AND schedule_enabled = true
+           AND (next_run_at IS NULL OR next_run_at <= now())`,
     ).catch(() => []);
     if (!due.length) return;
-    this.logger.log(`[content-agent] ${due.length} tenant(s) due`);
-    for (const cfg of due) {
-      await this.content.runAgentForTenant(cfg).catch((e) =>
-        this.logger.warn(`[content-agent] run failed for ${cfg.tenant_id}: ${e.message}`));
+    this.logger.log(`[content-agent] ${due.length} prompt(s) due`);
+    for (const prompt of due) {
+      await this.content.runScheduledPrompt(prompt).catch((e) =>
+        this.logger.warn(`[content-agent] run failed for prompt ${prompt.id}: ${e.message}`));
     }
   }
 }

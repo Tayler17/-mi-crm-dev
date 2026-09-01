@@ -17,6 +17,17 @@ export class AiPrompt {
   @Column({ default: true }) is_active: boolean;
   @Column({ default: 0 }) usage_count: number;
   @Column({ nullable: true }) created_by: string;
+
+  // ── Automation (Marketing prompts can auto-generate content on a schedule) ──
+  @Column({ default: false }) schedule_enabled: boolean;
+  @Column({ default: 'instagram' }) schedule_channel: string;
+  @Column({ type: 'text', nullable: true }) schedule_crosspost: string;
+  @Column({ default: 7 }) schedule_cadence_days: number;
+  @Column({ default: 1 }) schedule_posts_per_run: number;
+  @Column({ default: false }) schedule_with_images: boolean;
+  @Column({ default: 'profesional' }) schedule_tone: string;
+  @Column({ type: 'timestamptz', nullable: true }) next_run_at: Date;
+  @Column({ type: 'timestamptz', nullable: true }) last_run_at: Date;
   @CreateDateColumn() created_at: Date;
   @UpdateDateColumn() updated_at: Date;
 }

@@ -110,6 +110,16 @@ tr:hover td { background: var(--bg); }
 .modal-body { padding: 18px 20px; }
 .modal-footer { display: flex; gap: 10px; justify-content: flex-end; padding: 14px 20px; border-top: 1px solid var(--border); }
 
+/* Content editor: two-column (form + live preview) collapses to a single column on phones. */
+@media (max-width: 768px) {
+  .content-editor-body { flex-direction: column !important; overflow-y: auto !important; }
+  .content-editor-form { overflow: visible !important; padding: 16px !important; }
+  .content-editor-preview {
+    width: 100% !important; border-left: none !important;
+    border-top: 1px solid var(--border) !important; overflow: visible !important;
+  }
+}
+
 /* ── States ──────────────────────────────────────────────────────── */
 .loading { text-align: center; color: var(--text-muted); padding: 40px; }
 .empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }

@@ -42,16 +42,7 @@ export class ContentController {
     return this.svc.generateCampaign(req.user.tenantId, { id: req.user.userId, fullName: req.user.fullName ?? '' }, dto);
   }
 
-  // Agent (Fase 2): recurring auto-generation config.
-  @Get('agent')
-  getAgent(@Request() req: any) {
-    return this.svc.getAgentConfig(req.user.tenantId);
-  }
-
-  @Post('agent')
-  saveAgent(@Request() req: any, @Body() dto: any) {
-    return this.svc.saveAgentConfig(req.user.tenantId, dto);
-  }
+  // Agent (Fase 2) config now lives on Marketing AI prompts (PUT /ai-prompts/:id schedule_*).
 
   @Get('image-gen/history')
   getImageHistory(@Request() req: any) {

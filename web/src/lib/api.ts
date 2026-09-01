@@ -1672,6 +1672,16 @@ export interface AiPrompt {
   usage_count: number;
   created_at: string;
   updated_at: string;
+  // Automation (Marketing prompts): auto-generate draft content on a schedule.
+  schedule_enabled?: boolean;
+  schedule_channel?: string;
+  schedule_crosspost?: string;
+  schedule_cadence_days?: number;
+  schedule_posts_per_run?: number;
+  schedule_with_images?: boolean;
+  schedule_tone?: string;
+  next_run_at?: string | null;
+  last_run_at?: string | null;
 }
 
 export const getAiPrompts = (category?: string) =>

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { AiPrompt } from './ai-prompt.entity';
@@ -6,12 +6,46 @@ import { PlatformSettingsService } from '../settings/platform-settings.service';
 import axios from 'axios';
 
 @Injectable()
-export class AiPromptsService {
+export class AiPromptsService implements OnModuleInit {
   constructor(
     @InjectRepository(AiPrompt) private readonly repo: Repository<AiPrompt>,
     @InjectDataSource() private readonly db: DataSource,
     private readonly platformSettings: PlatformSettingsService,
   ) {}
+
+  async onModuleInit() {
+    // Automation columns (no migrations in this project → ALTER IF NOT EXISTS).
+    const cols = [
+      `schedule_enabled boolean NOT NULL DEFAULT false`,
+      `schedule_channel text NOT NULL DEFAULT 'instagram'`,
+      `schedule_crosspost text`,
+      `schedule_cadence_days integer NOT NULL DEFAULT 7`,
+      `schedule_posts_per_run integer NOT NULL DEFAULT 1`,
+      `schedule_with_images boolean NOT NULL DEFAULT false`,
+      `schedule_tone text NOT NULL DEFAULT 'profesional'`,
+      `next_run_at timestamptz`,
+      `last_run_at timestamptz`,
+    ];
+    for (const c of cols) {
+      await this.db.query(`ALTER TABLE ai_prompts ADD COLUMN IF NOT EXISTS ${c}`).catch(() => {});
+    }
+  }
+
+  /** When automation is (re)enabled, compute the next run time from the cadence. */
+  private applySchedule(dto: any, existing?: AiPrompt) {
+    if (dto.schedule_enabled === undefined) return;
+    if (dto.schedule_enabled) {
+      const cadence = Math.min(Math.max(Number(dto.schedule_cadence_days ?? existing?.schedule_cadence_days ?? 7), 1), 30);
+      dto.schedule_cadence_days = cadence;
+      // Keep a future next_run if one is already set; otherwise schedule from now.
+      const current = existing?.next_run_at ? new Date(existing.next_run_at).getTime() : 0;
+      if (!current || current <= Date.now()) {
+        dto.next_run_at = new Date(Date.now() + cadence * 86_400_000);
+      }
+    } else {
+      dto.next_run_at = null;
+    }
+  }
 
   findAll(tenantId: string, category?: string) {
     const qb = this.repo.createQueryBuilder('p')
@@ -29,12 +63,14 @@ export class AiPromptsService {
   }
 
   async create(dto: any, tenantId: string, userId: string) {
+    this.applySchedule(dto);
     const p = this.repo.create({ ...dto, tenant_id: tenantId, created_by: userId });
     return this.repo.save(p);
   }
 
   async update(id: string, dto: any, tenantId: string) {
     const p = await this.findOne(id, tenantId);
+    this.applySchedule(dto, p);
     Object.assign(p, dto);
     return this.repo.save(p);
   }
