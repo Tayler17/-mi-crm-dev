@@ -1362,6 +1362,7 @@ export default function ContentPage() {
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>{i.contentSubtitle}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <a className="btn btn-secondary" href="/ai-prompts?category=marketing" style={{ textDecoration: 'none' }}>🤖 {lang === 'en' ? 'Auto agents' : 'Agentes automáticos'}</a>
           <button className="btn btn-secondary" onClick={() => setCampaignOpen(true)}>✨ {lang === 'en' ? 'Generate campaign' : 'Generar campaña'}</button>
           <button className="btn btn-primary" onClick={openNew}>{i.contentNewPost}</button>
         </div>

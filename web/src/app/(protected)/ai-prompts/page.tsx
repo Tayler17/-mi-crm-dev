@@ -621,7 +621,9 @@ export default function AiPromptsPage() {
   const [categories, setCategories] = useState<{ category: string; count: number }[]>([]);
   const [queues, setQueues] = useState<Queue[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filterCategory, setFilterCategory] = useState('');
+  const [filterCategory, setFilterCategory] = useState(
+    () => (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('category') ?? '' : ''),
+  );
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<AiPrompt | null>(null);
