@@ -205,6 +205,28 @@ export class AiChatbotEngineService {
     // 4. Skip if handed off to a human (ended = queue-transfer, handled above by new session)
     if (session.status === 'handed_off') return;
 
+    // 4b. HUMAN TAKEOVER — if a human agent has replied in this conversation since the
+    // bot's current session started, the human owns the chat. The bot goes silent (no
+    // reply, no auto-resolve) so it never talks over or contradicts an agent handling
+    // a live case. It resumes only after the conversation is resolved and later reopened
+    // (which ends this session and starts a fresh one — see webhooks reopen).
+    const [humanReply] = await this.db.query(
+      `SELECT 1 FROM messages
+         WHERE conversation_id=$1 AND is_private=false AND sender_type='agent'
+           AND created_at >= $2 LIMIT 1`,
+      [conversationId, session.created_at],
+    ).catch(() => []);
+    if (humanReply) {
+      if (session.status !== 'handed_off') {
+        await this.db.query(
+          `UPDATE ai_chatbot_sessions SET status='handed_off', handed_off_at=NOW() WHERE id=$1`,
+          [session.id],
+        ).catch(() => {});
+      }
+      this.logger.debug(`[engine] Human agent active in conv ${conversationId} — bot staying silent`);
+      return;
+    }
+
     // 5. Handoff keyword
     const userText: string = (inboundMsg.body ?? '').toLowerCase().trim();
     const keyword: string  = (bot.handoff_keyword ?? 'agente').toLowerCase();
@@ -607,10 +629,18 @@ export class AiChatbotEngineService {
     // 10e-bis. Handle contact update (standard fields + custom fields) for THIS contact
     if (updateContact && conv.contact_id) {
       const { fullName, phone, email, jobTitle, notes, customFields } = updateContact;
+      // SAFETY: the bot must NEVER change the contact's phone. It is the WhatsApp identity
+      // and the key used to match incoming messages to a contact. Customers frequently
+      // share a beneficiary's / recipient's / third party's number (or a shared contact
+      // card), and letting the bot overwrite the phone corrupts the contact's identity
+      // and splits the whole chat history into a new conversation. Phone changes are
+      // left to human agents.
+      if (String(phone ?? '').trim()) {
+        this.logger.warn(`[engine] Bot attempted to change phone for contact ${conv.contact_id} — ignored (identity key).`);
+      }
       const sets: string[] = [];
       const params: any[] = [];
       if (String(fullName ?? '').trim()) { params.push(fullName!.trim()); sets.push(`full_name=$${params.length}`); }
-      if (String(phone ?? '').trim())    { params.push(phone!.trim());    sets.push(`phone=$${params.length}`); }
       if (String(email ?? '').trim())    { params.push(email!.trim());    sets.push(`email=$${params.length}`); }
       if (String(jobTitle ?? '').trim()) { params.push(jobTitle!.trim()); sets.push(`job_title=$${params.length}`); }
       if (notes !== undefined && notes !== null) { params.push(String(notes)); sets.push(`notes=$${params.length}`); }
@@ -622,7 +652,6 @@ export class AiChatbotEngineService {
           params,
         ).catch((e: any) => this.logger.warn(`[engine] update_contact failed: ${e.message}`));
         if (String(fullName ?? '').trim()) changed.push('nombre');
-        if (String(phone ?? '').trim())    changed.push('teléfono');
         if (String(email ?? '').trim())    changed.push('email');
         if (String(jobTitle ?? '').trim()) changed.push('puesto');
         if (notes !== undefined && notes !== null) changed.push('notas');
@@ -899,7 +928,7 @@ export class AiChatbotEngineService {
       }
       if (tagNames.length > 0)   crmLines.push(`- add_tag: OBLIGATORIO — en cuanto identifiques la intención principal del usuario, aplica la etiqueta más apropiada de esta lista: ${tagNames.join(', ')}. Úsala en la misma respuesta en que queda clara la intención, no esperes al final de la conversación. Si el tema cambia, usa remove_tag para la anterior y add_tag para la nueva.`);
       crmLines.push('- create_task: cuando el usuario pida callback, cotización, recordatorio o cualquier acción de seguimiento.');
-      crmLines.push(`- update_contact: cuando el cliente te dé o corrija SUS propios datos (nombre, teléfono, email, puesto, notas${contactFields.length ? `, o los campos: ${contactFields.map((f: any) => f.label || f.name).join(', ')}` : ''}). Envía solo los campos que el cliente realmente te dio; no inventes ni sobrescribas datos que no mencionó.`);
+      crmLines.push(`- update_contact: ÚSALO SOLO cuando el cliente te dé o corrija datos SOBRE SÍ MISMO (su propio nombre, email, puesto, notas${contactFields.length ? `, o los campos: ${contactFields.map((f: any) => f.label || f.name).join(', ')}` : ''}). NUNCA lo uses para datos de OTRA persona: si el cliente te da el nombre, teléfono, dirección o cédula del DESTINATARIO/beneficiario en destino, de un tercero, o comparte una tarjeta de contacto, esos datos NO son del cliente — no los guardes en su ficha (anótalos para el envío o pásalos a un agente). No cambies el teléfono del cliente. Envía solo los campos que el cliente realmente dio sobre él mismo; no inventes ni sobrescribas nada.`);
       if (whatsappInteractive) crmLines.push('- send_interactive: cuando ofrezcas al cliente un conjunto claro de opciones para elegir (confirmar/cancelar, elegir servicio, elegir horario, menú). Úsala en vez de escribir las opciones como lista numerada de texto. kind="button" para hasta 3 opciones, kind="list" para 4–10. La pregunta va en body_text; esta herramienta REEMPLAZA tu respuesta de texto en ese turno. No la uses para respuestas abiertas ni cuando el cliente debe escribir texto libre.');
       if (stripeConnectEnabled) crmLines.push('- create_payment_link: SOLO cuando el cliente confirme EXPLÍCITAMENTE que quiere pagar y hayas acordado el monto exacto. Siempre pregunta primero "¿Confirmas el pago de $X [moneda]?" antes de llamar esta herramienta. Monto mínimo $1, máximo $10,000.');
       if (transferTargets.length > 0) crmLines.push(`- transfer_conversation: solo cuando el usuario pida explícitamente hablar con otro departamento o cuando claramente necesitas un servicio que no puedes ofrecer. Destinos: ${transferTargets.join(', ')}.`);
@@ -934,12 +963,21 @@ export class AiChatbotEngineService {
 
       const styleRule = 'ESTILO: Escribe en texto natural y conversacional para chat. NO uses markdown (nada de ** o ##) ni listas numeradas largas. Pide solo 1 o 2 datos a la vez, no vuelques listas grandes de campos. Presta MUCHA atención a todo lo que el cliente ya dijo antes en la conversación: reconoce lo que ya te dio y pide ÚNICAMENTE lo que falta. NUNCA vuelvas a preguntar un dato que el cliente ya te proporcionó.';
 
+      const limitsRule = [
+        'LÍMITES Y HONESTIDAD (críticas):',
+        '- NUNCA afirmes que hiciste una acción que en realidad no puedes hacer. No tienes forma de editar facturas, cambiar precios de una factura, registrar pagos ni asignar/enviar un conductor. Por eso NO digas "he actualizado tu factura", "agregué las cajas a tu factura", "ajusté el total", "registré tu pago" ni nada parecido.',
+        '- Para facturas, montos finales, descuentos y cobros: NO los confirmes ni los inventes tú. Dile al cliente que un agente le confirmará el precio/factura y crea una tarea de seguimiento. El dinero lo maneja un humano.',
+        '- Sobre recogidas y entregas: NO te hagas pasar por el conductor ni prometas horas de llegada ("estoy en camino", "llego antes de las 10", "el driver llega a tal hora"). Solo puedes dar la información general de horarios/zonas que esté en tu conocimiento. Para confirmar una hora concreta o el estado de una ruta, crea una tarea o deja que un agente responda.',
+        '- No inventes motivos, retrasos, incidencias ni estados operativos. Si no sabes algo con certeza a partir del historial, tu conocimiento o una herramienta, dilo con honestidad y ofrece que un agente lo confirme. No repitas como un hecho algo que tú mismo supusiste antes.',
+      ].join('\n');
+
       const systemPrompt = [
         `IDENTIDAD: Tu nombre es "${bot.name}". Cuando alguien pregunte de qué equipo eres o quién eres, responde siempre que eres "${bot.name}".`,
         languageRule,
         currentDate,
         noGreet,
         styleRule,
+        limitsRule,
         bot.system_prompt ?? '',
         crmInstructions,
         ragContext,

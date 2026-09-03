@@ -418,6 +418,14 @@ export class WebhooksService {
           `UPDATE conversations SET status='open', session_count=session_count+1, updated_at=NOW() WHERE id=$1`,
           [conversationId],
         );
+        // Fresh chapter: end any lingering bot sessions (active or handed-off) so the
+        // bot starts a NEW session and picks up again. A human takeover from the previous
+        // (now-resolved) chapter must not keep the bot silent forever.
+        await this.db.query(
+          `UPDATE ai_chatbot_sessions SET status='ended', ended_at=NOW()
+             WHERE conversation_id=$1 AND status IN ('active','handed_off')`,
+          [conversationId],
+        ).catch(() => {});
       }
     } else {
       const [newConv] = await this.db.query(
