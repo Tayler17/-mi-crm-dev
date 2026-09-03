@@ -14,6 +14,37 @@ export class AiChatbotsService implements OnModuleInit {
   async onModuleInit() {
     // Optional signature appended to the bot's messages (no migrations in this project).
     await this.db.query(`ALTER TABLE ai_chatbots ADD COLUMN IF NOT EXISTS signature text`).catch(() => {});
+    // Temporary operational status note (one per tenant) — for same-day incidents
+    // ("no route today", "van broke down") that must NOT live in permanent knowledge.
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS chatbot_status_note (
+        tenant_id uuid PRIMARY KEY,
+        note text NOT NULL DEFAULT '',
+        expires_at timestamptz,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `).catch(() => {});
+  }
+
+  /** Temporary operational status note for this tenant (used by the chatbot engine). */
+  async getStatusNote(tenantId: string) {
+    const [row] = await this.db.query(
+      `SELECT note, expires_at, updated_at FROM chatbot_status_note WHERE tenant_id=$1`,
+      [tenantId],
+    ).catch(() => []);
+    return row ?? { note: '', expires_at: null, updated_at: null };
+  }
+
+  async saveStatusNote(tenantId: string, dto: { note?: string; expiresAt?: string | null }) {
+    const note = String(dto.note ?? '').trim();
+    const expiresAt = dto.expiresAt ? new Date(dto.expiresAt) : null;
+    await this.db.query(
+      `INSERT INTO chatbot_status_note (tenant_id, note, expires_at, updated_at)
+       VALUES ($1,$2,$3,now())
+       ON CONFLICT (tenant_id) DO UPDATE SET note=$2, expires_at=$3, updated_at=now()`,
+      [tenantId, note, expiresAt],
+    );
+    return this.getStatusNote(tenantId);
   }
 
   async findAll(tenantId: string) {

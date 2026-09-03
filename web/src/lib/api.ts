@@ -1764,6 +1764,11 @@ export const testAiChatbotMessage = (id: string, message: string, history: { rol
 export const improveAiChatbotPrompt = (system_prompt: string) =>
   apiPost<{ improved: string }>('/ai-chatbots/improve-prompt', { system_prompt });
 
+export interface BotStatusNote { note: string; expires_at?: string | null; updated_at?: string | null; }
+export const getBotStatusNote = () => apiGet<BotStatusNote>('/ai-chatbots/status-note');
+export const saveBotStatusNote = (data: { note: string; expiresAt?: string | null }) =>
+  apiPost<BotStatusNote>('/ai-chatbots/status-note', data);
+
 // ── Knowledge Base ────────────────────────────────────────────────────────────
 
 export interface KnowledgeSource {

@@ -22,6 +22,15 @@ export class AiChatbotsController {
   @Get('stats')
   getStats(@TenantId() tenantId: string) { return this.svc.getStats(tenantId); }
 
+  // Temporary operational status note (declared before ':id' so it isn't captured by it).
+  @Get('status-note')
+  getStatusNote(@TenantId() tenantId: string) { return this.svc.getStatusNote(tenantId); }
+
+  @Post('status-note')
+  saveStatusNote(@TenantId() tenantId: string, @Body() dto: { note?: string; expiresAt?: string | null }) {
+    return this.svc.saveStatusNote(tenantId, dto);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @TenantId() tenantId: string) { return this.svc.findOne(id, tenantId); }
 

@@ -8,6 +8,7 @@ import {
   getInboxes, getQueues, getTeams,
   getKnowledgeSources, addKnowledgeUrl, reindexKnowledgeSource, deleteKnowledgeSource, addKnowledgePdf,
   getSettings,
+  getBotStatusNote, saveBotStatusNote,
   type AiChatbot, type AiChatbotStats, type Inbox, type Queue, type Team, type KnowledgeSource,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
@@ -1432,6 +1433,97 @@ function TestChatModal({ bot, onClose }: { bot: AiChatbot; onClose: () => void }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
+function StatusNoteCard() {
+  const { lang } = useLangCtx();
+  const t = (en: string, es: string) => (lang === 'en' ? en : es);
+  const [note, setNote] = useState('');
+  const [expiry, setExpiry] = useState<'today' | '24h' | '48h' | 'none'>('today');
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    getBotStatusNote().then((r) => {
+      setNote(r.note ?? '');
+      setExpiresAt(r.expires_at ?? null);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  function computeExpiry(): string | null {
+    const now = new Date();
+    if (expiry === 'none') return null;
+    if (expiry === '24h') return new Date(now.getTime() + 24 * 3600_000).toISOString();
+    if (expiry === '48h') return new Date(now.getTime() + 48 * 3600_000).toISOString();
+    // today → end of local day
+    const end = new Date(now); end.setHours(23, 59, 59, 0);
+    return end.toISOString();
+  }
+
+  async function save(clear = false) {
+    setBusy(true); setSaved(false);
+    try {
+      const body = clear ? { note: '', expiresAt: null } : { note: note.trim(), expiresAt: computeExpiry() };
+      const r = await saveBotStatusNote(body);
+      setNote(r.note ?? '');
+      setExpiresAt(r.expires_at ?? null);
+      if (clear) setNote('');
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch { /* ignore */ }
+    finally { setBusy(false); }
+  }
+
+  const active = !!note.trim() && (!expiresAt || new Date(expiresAt) > new Date());
+
+  if (loading) return null;
+
+  return (
+    <div className="card" style={{ padding: '14px 16px', marginBottom: 20, border: active ? '1px solid #f59e0b' : '1px solid var(--border)', background: active ? '#fffbeb' : 'var(--surface)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 18 }}>📣</span>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>{t('Temporary status for the bots', 'Estado temporal para los bots')}</div>
+        {active && <span style={{ fontSize: 11, fontWeight: 700, color: '#92400e', background: '#fde68a', padding: '2px 8px', borderRadius: 10 }}>{t('ACTIVE', 'ACTIVO')}</span>}
+      </div>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+        {t('A same-day notice the bots will tell customers (e.g. "no route today"). It has priority over permanent knowledge and expires on its own — no need to remember to delete it.',
+           'Un aviso del día que los bots le dirán a los clientes (ej. "hoy no hay ruta"). Tiene prioridad sobre el conocimiento permanente y caduca solo — no hay que acordarse de borrarlo.')}
+      </p>
+      <textarea
+        className="form-input"
+        rows={2}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder={t('e.g. Today the van is in the shop; pickups move to Tuesday.', 'ej. Hoy la van está en el taller; las recogidas pasan al martes.')}
+        style={{ resize: 'vertical' }}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+        <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('Expires:', 'Caduca:')}</label>
+        <select className="form-input" style={{ width: 'auto', fontSize: 13, padding: '4px 8px' }} value={expiry} onChange={(e) => setExpiry(e.target.value as any)}>
+          <option value="today">{t('End of today', 'Al final de hoy')}</option>
+          <option value="24h">{t('In 24 hours', 'En 24 horas')}</option>
+          <option value="48h">{t('In 48 hours', 'En 48 horas')}</option>
+          <option value="none">{t('No expiry (until I clear it)', 'Sin caducidad (hasta que lo borre)')}</option>
+        </select>
+        <button className="btn btn-primary" style={{ padding: '6px 14px' }} disabled={busy || !note.trim()} onClick={() => save(false)}>
+          {busy ? t('Saving…', 'Guardando…') : t('Save', 'Guardar')}
+        </button>
+        {active && (
+          <button className="btn btn-secondary" style={{ padding: '6px 14px' }} disabled={busy} onClick={() => save(true)}>
+            {t('Clear', 'Quitar')}
+          </button>
+        )}
+        {saved && <span style={{ color: '#16a34a', fontSize: 13 }}>✓ {t('Saved', 'Guardado')}</span>}
+        {active && expiresAt && (
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+            {t('Until', 'Hasta')} {new Date(expiresAt).toLocaleString()}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AiChatbotsPage() {
   const { lang } = useLangCtx();
   const i = APP[lang];
@@ -1562,6 +1654,9 @@ export default function AiChatbotsPage() {
           ))}
         </div>
       )}
+
+      {/* Temporary operational status note */}
+      <StatusNoteCard />
 
       {/* Search */}
       <div style={{ marginBottom: 16 }}>

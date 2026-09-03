@@ -437,7 +437,13 @@ export class AiChatbotEngineService {
     // re-ask known info (name, address) and doesn't guess (e.g. the pickup zone from
     // their postcode). Durable facts live here regardless of the message window.
     const contactSummary = await this.buildContactSummary(tenantId, conv.contact_id, existingDeals);
-    const fullContext = [contactSummary, ragContext].filter(Boolean).join('\n\n');
+
+    // 9b-3. Temporary operational status note — same-day incidents that must override
+    // the permanent knowledge base (e.g. "no route today", "van broke down"). Only
+    // applied while it exists and hasn't expired; it disappears on its own afterwards.
+    const statusNote = await this.buildStatusNote(tenantId);
+
+    const fullContext = [statusNote, contactSummary, ragContext].filter(Boolean).join('\n\n');
 
     // 9c. Call AI — pass queueMap + stages + deals + tags + stripeConnect so each provider can use function/tool calling
     const dentallyConnected = await this.integrations.isConnected(tenantId, 'dentally').catch(() => false);
@@ -906,6 +912,19 @@ export class AiChatbotEngineService {
       },
     );
     return res.data.text?.trim() ?? '';
+  }
+
+  /** Returns the tenant's active temporary operational status note (empty if none or
+   *  expired). This overrides the permanent knowledge base for same-day incidents. */
+  private async buildStatusNote(tenantId: string): Promise<string> {
+    const [row] = await this.db.query(
+      `SELECT note FROM chatbot_status_note
+        WHERE tenant_id=$1 AND COALESCE(note,'') <> ''
+          AND (expires_at IS NULL OR expires_at > now())`,
+      [tenantId],
+    ).catch(() => []);
+    if (!row?.note) return '';
+    return `ESTADO OPERATIVO ACTUAL (aviso TEMPORAL de hoy — tiene PRIORIDAD sobre el conocimiento general; aplícalo cuando el cliente pregunte por recogidas, entregas, rutas o tiempos):\n${row.note}`;
   }
 
   /** Builds a compact summary of the customer's saved CRM data (name, phone, address,
