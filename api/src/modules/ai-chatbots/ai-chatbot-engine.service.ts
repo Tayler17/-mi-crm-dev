@@ -363,15 +363,24 @@ export class AiChatbotEngineService {
       ).catch(() => []);
     } catch {}
 
-    // 7. Build message history — only include messages from AFTER this bot's session
-    // started so that messages from a previous bot don't bleed into this bot's context.
+    // 7. Build message history. Anchor at the FIRST time THIS bot engaged this
+    // conversation (not the last session) so a resolve/reopen no longer wipes the
+    // context: the whole relationship with this customer in this chat stays visible
+    // (capped to the most recent msgPerConv). Filtering by this bot's first session
+    // still keeps a *different* bot's earlier messages out. Durable facts (name,
+    // address, open shipments) are additionally injected via the contact profile.
     const memoryConvs = Math.min(parseInt(bot.memory_conversations ?? '5', 10) || 0, 50);
     const msgPerConv  = 40;
 
-    // When a session was recreated (e.g. after a reconnect or queue-return), use the
-    // previous session's start time so the bot retains context from before the break.
-    // For truly first-contact sessions there is no prior session, so session.created_at is correct.
-    const historyStart = (!sessionIsNew && prevSessionCreatedAt) ? prevSessionCreatedAt : session.created_at;
+    let historyStart = session.created_at;
+    if (!sessionIsNew) {
+      const [firstSession] = await this.db.query(
+        `SELECT MIN(created_at) AS first FROM ai_chatbot_sessions WHERE chatbot_id=$1 AND conversation_id=$2`,
+        [bot.id, conversationId],
+      ).catch(() => []);
+      if (firstSession?.first) historyStart = firstSession.first;
+      else if (prevSessionCreatedAt) historyStart = prevSessionCreatedAt;
+    }
     const currentHistory = await this.db.query(
       `SELECT body, direction, sender_type, content_type
        FROM messages
@@ -424,10 +433,16 @@ export class AiChatbotEngineService {
     // 9b. RAG: search knowledge base for relevant context
     const ragContext = await this.kbSvc.searchRelevantContext(bot.id, tenantId, userText).catch(() => '');
 
+    // 9b-2. Contact profile — inject the customer's saved CRM data so the bot doesn't
+    // re-ask known info (name, address) and doesn't guess (e.g. the pickup zone from
+    // their postcode). Durable facts live here regardless of the message window.
+    const contactSummary = await this.buildContactSummary(tenantId, conv.contact_id, existingDeals);
+    const fullContext = [contactSummary, ragContext].filter(Boolean).join('\n\n');
+
     // 9c. Call AI — pass queueMap + stages + deals + tags + stripeConnect so each provider can use function/tool calling
     const dentallyConnected = await this.integrations.isConnected(tenantId, 'dentally').catch(() => false);
     const whatsappInteractive = conv.channel_type === 'whatsapp'; // interactive msgs = Cloud API only
-    const result = await this.callAi(bot, apiKey, history, media, queueMap, stageNames, stageMap, existingDeals, tagNames, tagMap, ragContext, stripeConnectEnabled, dentallyConnected, contactFields, whatsappInteractive);
+    const result = await this.callAi(bot, apiKey, history, media, queueMap, stageNames, stageMap, existingDeals, tagNames, tagMap, fullContext, stripeConnectEnabled, dentallyConnected, contactFields, whatsappInteractive);
     if (!result) {
       this.logger.warn(`[engine] AI returned null for conv ${conversationId} (bot "${bot.name}", provider "${bot.provider}") — sending fallback`);
       await this.saveBotMessage(tenantId, conversationId,
@@ -891,6 +906,40 @@ export class AiChatbotEngineService {
       },
     );
     return res.data.text?.trim() ?? '';
+  }
+
+  /** Builds a compact summary of the customer's saved CRM data (name, phone, address,
+   *  custom fields, open shipments) so the bot uses known info instead of re-asking or
+   *  guessing. Returns '' when there is nothing useful. */
+  private async buildContactSummary(tenantId: string, contactId: string | null | undefined, existingDeals: any[] = []): Promise<string> {
+    if (!contactId) return '';
+    const [c] = await this.db.query(
+      `SELECT full_name, phone, email, location, notes FROM contacts WHERE id=$1 AND tenant_id=$2`,
+      [contactId, tenantId],
+    ).catch(() => []);
+    if (!c) return '';
+    const cfVals = await this.db.query(
+      `SELECT d.label, d.name, v.value
+         FROM custom_field_values v
+         JOIN custom_field_definitions d ON d.id = v.definition_id
+        WHERE v.entity_id=$1 AND v.entity_type='contact' AND d.tenant_id=$2
+          AND COALESCE(v.value, '') <> ''
+        ORDER BY d.position, d.created_at`,
+      [contactId, tenantId],
+    ).catch(() => []);
+
+    const lines: string[] = [];
+    if (c.full_name) lines.push(`Nombre: ${c.full_name}`);
+    if (c.phone)     lines.push(`Teléfono: ${c.phone}`);
+    if (c.email)     lines.push(`Email: ${c.email}`);
+    if (c.location)  lines.push(`Dirección/ubicación: ${c.location}`);
+    for (const f of cfVals) lines.push(`${f.label || f.name}: ${f.value}`);
+    if (c.notes)     lines.push(`Notas: ${c.notes}`);
+    if (existingDeals.length) {
+      lines.push(`Envíos/tratos abiertos: ${existingDeals.map((d: any) => `${d.title}${d.stage_name ? ` (${d.stage_name})` : ''}`).join('; ')}`);
+    }
+    if (!lines.length) return '';
+    return `FICHA DEL CONTACTO (datos ya guardados en el CRM sobre ESTE cliente — úsalos y NO se los vuelvas a preguntar; si un dato no está aquí y lo necesitas, pídelo solo entonces):\n${lines.join('\n')}`;
   }
 
   // ── AI provider calls ─────────────────────────────────────────────────────────
