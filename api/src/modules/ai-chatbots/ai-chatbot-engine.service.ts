@@ -13,6 +13,9 @@ import { KnowledgeBaseService } from '../knowledge-base/knowledge-base.service';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
 import { BillingService } from '../billing/billing.service';
 import { IntegrationsService } from '../integrations/integrations.service';
+import { AuditService } from '../audit/audit.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { agentAddressableName } from '../contacts/contact-identity';
 import { buildChatbotTools, toOpenAiChatbotTools, toAnthropicChatbotTools, toGeminiChatbotTools, mapChatbotToolCall } from './chatbot-tools';
 
 interface MediaResult {
@@ -36,7 +39,8 @@ interface AiResult {
   addTag?: { tagName: string };
   removeTag?: { tagName: string };
   createTask?: { title: string; description?: string; dueDate?: string; priority?: string };
-  updateContact?: { fullName?: string; phone?: string; email?: string; jobTitle?: string; notes?: string; customFields?: Record<string, any> };
+  updateContact?: { phone?: string; email?: string; jobTitle?: string; notes?: string; customFields?: Record<string, any> };
+  confirmContactName?: { name: string; isCorrection?: boolean };
   sendInteractive?: { kind: 'button' | 'list'; bodyText: string; buttons?: string[]; rows?: { title?: string; description?: string }[]; listButton?: string };
   createPaymentLink?: { amount: number; currency: string; description: string };
   dentallyListPractitioners?: boolean;
@@ -63,6 +67,8 @@ export class AiChatbotEngineService {
     private readonly platformSettings: PlatformSettingsService,
     private readonly billing: BillingService,
     private readonly integrations: IntegrationsService,
+    private readonly audit: AuditService,
+    private readonly events: EventEmitter2,
   ) {}
 
   // ── Core processing (called by BotQueueProcessor) ────────────────────────────
@@ -456,7 +462,7 @@ export class AiChatbotEngineService {
       return;
     }
 
-    let { reply, transferTo, resolveConversation, setWaiting, createDeal, updateDeal, addTag, removeTag, createTask, updateContact, createPaymentLink } = result;
+    let { reply, transferTo, resolveConversation, setWaiting, createDeal, updateDeal, addTag, removeTag, createTask, updateContact, confirmContactName, createPaymentLink } = result;
     this.logger.log(`[engine] AI reply (first 120): "${reply?.slice(0, 120)}" transferTo="${transferTo ?? 'none'}" resolve=${!!resolveConversation} wait=${!!setWaiting} createDeal=${!!createDeal} updateDeal=${!!updateDeal} addTag=${addTag?.tagName ?? 'none'} removeTag=${removeTag?.tagName ?? 'none'} createTask=${createTask?.title ?? 'none'}`);
 
     // Dentally actions: execute and send the authoritative reply our code composes
@@ -521,7 +527,7 @@ export class AiChatbotEngineService {
 
     // If a CRM action was requested but the AI returned no message, use a generic confirmation
     // so the bot doesn't go silent after silently running a tool.
-    const hasCrmAction = !!(createDeal || updateDeal || addTag || removeTag || createTask || updateContact || resolveConversation || setWaiting);
+    const hasCrmAction = !!(createDeal || updateDeal || addTag || removeTag || createTask || updateContact || confirmContactName || resolveConversation || setWaiting);
     if (!reply && hasCrmAction && !transferTo) {
       reply = bot.language?.startsWith('es') !== false
         ? '¡Listo, lo he registrado!'
@@ -647,21 +653,23 @@ export class AiChatbotEngineService {
       await this.saveActivityMessage(tenantId, conversationId, `🤖 Bot creó tarea: ${taskLabel}`);
     }
 
-    // 10e-bis. Handle contact update (standard fields + custom fields) for THIS contact
+    // 10e-0. Confirm the customer's OWN name (dedicated, verified path). The name can
+    // ONLY be set through here — update_contact no longer touches it — so the model
+    // can't quietly overwrite the contact's name with a recipient/third-party name.
+    if (confirmContactName && conv.contact_id && String(confirmContactName.name ?? '').trim()) {
+      await this.applyConfirmContactName(tenantId, conv.contact_id, conversationId, confirmContactName.name.trim());
+    }
+
+    // 10e-bis. Handle contact update (standard fields + custom fields) for THIS contact.
+    // NOTE: name and phone are intentionally NOT settable here (name → confirm_contact_name;
+    // phone is the WhatsApp identity/matching key and is human-only).
     if (updateContact && conv.contact_id) {
-      const { fullName, phone, email, jobTitle, notes, customFields } = updateContact;
-      // SAFETY: the bot must NEVER change the contact's phone. It is the WhatsApp identity
-      // and the key used to match incoming messages to a contact. Customers frequently
-      // share a beneficiary's / recipient's / third party's number (or a shared contact
-      // card), and letting the bot overwrite the phone corrupts the contact's identity
-      // and splits the whole chat history into a new conversation. Phone changes are
-      // left to human agents.
+      const { phone, email, jobTitle, notes, customFields } = updateContact;
       if (String(phone ?? '').trim()) {
         this.logger.warn(`[engine] Bot attempted to change phone for contact ${conv.contact_id} — ignored (identity key).`);
       }
       const sets: string[] = [];
       const params: any[] = [];
-      if (String(fullName ?? '').trim()) { params.push(fullName!.trim()); sets.push(`full_name=$${params.length}`); }
       if (String(email ?? '').trim())    { params.push(email!.trim());    sets.push(`email=$${params.length}`); }
       if (String(jobTitle ?? '').trim()) { params.push(jobTitle!.trim()); sets.push(`job_title=$${params.length}`); }
       if (notes !== undefined && notes !== null) { params.push(String(notes)); sets.push(`notes=$${params.length}`); }
@@ -672,7 +680,6 @@ export class AiChatbotEngineService {
           `UPDATE contacts SET ${sets.join(',')}, updated_at=NOW() WHERE id=$${params.length - 1} AND tenant_id=$${params.length}`,
           params,
         ).catch((e: any) => this.logger.warn(`[engine] update_contact failed: ${e.message}`));
-        if (String(fullName ?? '').trim()) changed.push('nombre');
         if (String(email ?? '').trim())    changed.push('email');
         if (String(jobTitle ?? '').trim()) changed.push('puesto');
         if (notes !== undefined && notes !== null) changed.push('notas');
@@ -914,6 +921,34 @@ export class AiChatbotEngineService {
     return res.data.text?.trim() ?? '';
   }
 
+  /** Confirms and VERIFIES the customer's OWN name (called only via the confirm_contact_name
+   *  tool). Sets full_name + name_verified=true + source='customer', audits the change and
+   *  emits contact.name_confirmed so other agents/automations see the verified identity. */
+  private async applyConfirmContactName(tenantId: string, contactId: string, conversationId: string, name: string): Promise<void> {
+    const [prev] = await this.db.query(
+      `SELECT full_name, name_verified FROM contacts WHERE id=$1 AND tenant_id=$2`,
+      [contactId, tenantId],
+    ).catch(() => []);
+    await this.db.query(
+      `UPDATE contacts
+          SET full_name=$1, name_verified=true, name_source='customer', name_verified_at=NOW(), updated_at=NOW()
+        WHERE id=$2 AND tenant_id=$3`,
+      [name, contactId, tenantId],
+    ).catch((e: any) => this.logger.warn(`[engine] confirm_contact_name failed: ${e.message}`));
+
+    await this.saveActivityMessage(tenantId, conversationId, `🤖 Bot confirmó el nombre del cliente: ${name}`);
+    await this.audit.log({
+      tenantId,
+      entityType: 'contact',
+      entityId: contactId,
+      action: 'contact.name_confirmed',
+      oldValues: prev ? { full_name: prev.full_name, name_verified: prev.name_verified } : undefined,
+      newValues: { full_name: name, name_verified: true, name_source: 'customer' },
+    }).catch(() => {});
+    this.events.emit('contact.name_confirmed', { tenantId, contactId, name, source: 'customer' });
+    this.logger.log(`[engine] Contact ${contactId} name confirmed by customer: "${name}"`);
+  }
+
   /** Returns the tenant's active temporary operational status note (empty if none or
    *  expired). This overrides the permanent knowledge base for same-day incidents. */
   private async buildStatusNote(tenantId: string): Promise<string> {
@@ -933,7 +968,8 @@ export class AiChatbotEngineService {
   private async buildContactSummary(tenantId: string, contactId: string | null | undefined, existingDeals: any[] = []): Promise<string> {
     if (!contactId) return '';
     const [c] = await this.db.query(
-      `SELECT full_name, phone, email, location, notes FROM contacts WHERE id=$1 AND tenant_id=$2`,
+      `SELECT full_name, phone, email, location, notes, whatsapp_display_name, name_verified
+         FROM contacts WHERE id=$1 AND tenant_id=$2`,
       [contactId, tenantId],
     ).catch(() => []);
     if (!c) return '';
@@ -948,7 +984,15 @@ export class AiChatbotEngineService {
     ).catch(() => []);
 
     const lines: string[] = [];
-    if (c.full_name) lines.push(`Nombre: ${c.full_name}`);
+    // Name handling: only a VERIFIED name may be used to address the customer. An
+    // unverified name (usually the WhatsApp display name) must NOT be used as a real name.
+    const addressable = agentAddressableName(c);
+    if (addressable) {
+      lines.push(`Nombre confirmado: ${addressable} (puedes dirigirte al cliente por este nombre)`);
+    } else {
+      const wa = c.whatsapp_display_name || c.full_name;
+      lines.push(`Nombre del cliente: SIN CONFIRMAR. ${wa ? `Su nombre en WhatsApp es "${wa}", pero puede NO ser su nombre real` : 'No lo conocemos'} — NO te dirijas a él por ese nombre. Si necesitas su nombre, pregúntaselo con naturalidad (una sola vez) y guárdalo con confirm_contact_name.`);
+    }
     if (c.phone)     lines.push(`Teléfono: ${c.phone}`);
     if (c.email)     lines.push(`Email: ${c.email}`);
     if (c.location)  lines.push(`Dirección/ubicación: ${c.location}`);
@@ -996,7 +1040,8 @@ export class AiChatbotEngineService {
       }
       if (tagNames.length > 0)   crmLines.push(`- add_tag: OBLIGATORIO — en cuanto identifiques la intención principal del usuario, aplica la etiqueta más apropiada de esta lista: ${tagNames.join(', ')}. Úsala en la misma respuesta en que queda clara la intención, no esperes al final de la conversación. Si el tema cambia, usa remove_tag para la anterior y add_tag para la nueva.`);
       crmLines.push('- create_task: cuando el usuario pida callback, cotización, recordatorio o cualquier acción de seguimiento.');
-      crmLines.push(`- update_contact: ÚSALO SOLO cuando el cliente te dé o corrija datos SOBRE SÍ MISMO (su propio nombre, email, puesto, notas${contactFields.length ? `, o los campos: ${contactFields.map((f: any) => f.label || f.name).join(', ')}` : ''}). NUNCA lo uses para datos de OTRA persona: si el cliente te da el nombre, teléfono, dirección o cédula del DESTINATARIO/beneficiario en destino, de un tercero, o comparte una tarjeta de contacto, esos datos NO son del cliente — no los guardes en su ficha (anótalos para el envío o pásalos a un agente). No cambies el teléfono del cliente. Envía solo los campos que el cliente realmente dio sobre él mismo; no inventes ni sobrescribas nada.`);
+      crmLines.push(`- confirm_contact_name: úsalo SOLO cuando el cliente te dé o corrija SU PROPIO nombre (ej. "me llamo José Martínez" o "soy José, no Juan"). NUNCA lo uses con el nombre del DESTINATARIO/beneficiario en destino, de una empresa, de un conductor o de un tercero. Si no estás seguro de que el nombre es de la persona con la que chateas, no lo llames.`);
+      crmLines.push(`- update_contact: ÚSALO SOLO para datos del cliente SOBRE SÍ MISMO (email, puesto, notas${contactFields.length ? `, o los campos: ${contactFields.map((f: any) => f.label || f.name).join(', ')}` : ''}). NO incluye el nombre (eso va por confirm_contact_name) ni el teléfono (lo maneja un humano). NUNCA lo uses para datos de OTRA persona (destinatario/beneficiario, tercero, tarjeta de contacto): esos NO son del cliente — anótalos para el envío o pásalos a un agente. Envía solo lo que el cliente dio sobre él mismo.`);
       if (whatsappInteractive) crmLines.push('- send_interactive: cuando ofrezcas al cliente un conjunto claro de opciones para elegir (confirmar/cancelar, elegir servicio, elegir horario, menú). Úsala en vez de escribir las opciones como lista numerada de texto. kind="button" para hasta 3 opciones, kind="list" para 4–10. La pregunta va en body_text; esta herramienta REEMPLAZA tu respuesta de texto en ese turno. No la uses para respuestas abiertas ni cuando el cliente debe escribir texto libre.');
       if (stripeConnectEnabled) crmLines.push('- create_payment_link: SOLO cuando el cliente confirme EXPLÍCITAMENTE que quiere pagar y hayas acordado el monto exacto. Siempre pregunta primero "¿Confirmas el pago de $X [moneda]?" antes de llamar esta herramienta. Monto mínimo $1, máximo $10,000.');
       if (transferTargets.length > 0) crmLines.push(`- transfer_conversation: solo cuando el usuario pida explícitamente hablar con otro departamento o cuando claramente necesitas un servicio que no puedes ofrecer. Destinos: ${transferTargets.join(', ')}.`);
@@ -1031,6 +1076,14 @@ export class AiChatbotEngineService {
 
       const styleRule = 'ESTILO: Escribe en texto natural y conversacional para chat. NO uses markdown (nada de ** o ##) ni listas numeradas largas. Pide solo 1 o 2 datos a la vez, no vuelques listas grandes de campos. Presta MUCHA atención a todo lo que el cliente ya dijo antes en la conversación: reconoce lo que ya te dio y pide ÚNICAMENTE lo que falta. NUNCA vuelvas a preguntar un dato que el cliente ya te proporcionó.';
 
+      const identityRule = [
+        'IDENTIDAD DEL CLIENTE (regla global):',
+        '- NUNCA asumas que el nombre de perfil de WhatsApp es el nombre real del cliente (suele ser un apodo, un emoji, una empresa u otra persona).',
+        '- Dirígete al cliente por su nombre SOLO cuando su nombre esté CONFIRMADO (en la FICHA DEL CONTACTO verás "Nombre confirmado"). Si aparece "SIN CONFIRMAR", NO uses ese nombre para saludarlo.',
+        '- Si el nombre no está confirmado y viene bien al hilo, pregúntale su nombre con naturalidad UNA sola vez. No insistas ni bloquees la conversación si no lo da: sigue atendiéndolo igual.',
+        '- Cuando el cliente te diga o corrija SU PROPIO nombre, guárdalo con confirm_contact_name. NUNCA interpretes el nombre del remitente, destinatario, empresa, conductor o un tercero como el nombre del cliente, salvo que la conversación lo confirme explícitamente.',
+      ].join('\n');
+
       const limitsRule = [
         'LÍMITES Y HONESTIDAD (críticas):',
         '- NUNCA afirmes que hiciste una acción que en realidad no puedes hacer. No tienes forma de editar facturas, cambiar precios de una factura, registrar pagos ni asignar/enviar un conductor. Por eso NO digas "he actualizado tu factura", "agregué las cajas a tu factura", "ajusté el total", "registré tu pago" ni nada parecido.',
@@ -1045,6 +1098,7 @@ export class AiChatbotEngineService {
         currentDate,
         noGreet,
         styleRule,
+        identityRule,
         limitsRule,
         bot.system_prompt ?? '',
         crmInstructions,

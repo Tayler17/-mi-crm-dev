@@ -13,9 +13,10 @@ import { KnowledgeBaseModule } from '../knowledge-base/knowledge-base.module';
 import { SettingsModule } from '../settings/settings.module';
 import { BillingModule } from '../billing/billing.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([AiChatbot]), ConnectionsModule, NotificationsModule, BotQueueModule, KnowledgeBaseModule, SettingsModule, BillingModule, IntegrationsModule],
+  imports: [TypeOrmModule.forFeature([AiChatbot]), ConnectionsModule, NotificationsModule, BotQueueModule, KnowledgeBaseModule, SettingsModule, BillingModule, IntegrationsModule, AuditModule],
   controllers: [AiChatbotsController],
   providers: [AiChatbotsService, AiChatbotEngineService, BotQueueListener, BotQueueProcessor],
   exports: [AiChatbotsService, AiChatbotEngineService],

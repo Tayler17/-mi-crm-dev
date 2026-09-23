@@ -170,6 +170,13 @@ export interface Contact {
   website?: string;
   notes?: string;
   createdAt: string;
+  // Contact identity (name verification) — may arrive snake or camel from the API.
+  whatsappDisplayName?: string;
+  whatsapp_display_name?: string;
+  nameVerified?: boolean;
+  name_verified?: boolean;
+  nameSource?: string;
+  name_source?: string;
 }
 
 export interface ContactProfile {
@@ -196,6 +203,8 @@ export const exportAllContacts = (search = '') => {
 };
 export const getContact = (id: string) => apiGet<Contact>(`/contacts/${id}`);
 export const getContactProfile = (id: string) => apiGet<ContactProfile>(`/contacts/${id}/profile`);
+export const confirmContactName = (id: string, name?: string) =>
+  apiPost<Contact>(`/contacts/${id}/confirm-name`, { name });
 export const createContact = (data: Partial<Contact>) => apiPost<Contact>('/contacts', data);
 export const updateContact = (id: string, data: Partial<Contact>) => apiPatch<Contact>(`/contacts/${id}`, data);
 export const deleteContact = (id: string) => apiDelete(`/contacts/${id}`);

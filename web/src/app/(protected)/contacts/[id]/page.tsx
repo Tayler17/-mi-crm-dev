@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   getContactProfile, updateContact, deleteContact, getTags,
   addContactTag, removeContactTag, getCompanies, formatMessagePreview,
-  getContactCalls,
+  getContactCalls, confirmContactName,
   type ContactProfile, type Tag, type CallLog,
 } from '@/lib/api';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
@@ -204,6 +204,12 @@ export default function ContactProfilePage() {
     setProfile(p);
   }
 
+  async function handleConfirmName(nameArg?: string) {
+    await confirmContactName(id, nameArg);
+    const p = await getContactProfile(id);
+    setProfile(p);
+  }
+
   async function handleDelete() {
     if (!confirm(i.ctctDeleteConfirm)) return;
     await deleteContact(id);
@@ -233,6 +239,8 @@ export default function ContactProfilePage() {
 
   const c = profile.contact;
   const name = c.fullName || (c as any).full_name || i.ctctNoName;
+  const nameVerified = (c.nameVerified ?? (c as any).name_verified) === true;
+  const waDisplayName: string = c.whatsappDisplayName || (c as any).whatsapp_display_name || '';
   const createdAt = c.createdAt || (c as any).created_at;
   const assignedTags = profile.tags ?? [];
   const unassignedTags = allTags.filter((t) => !assignedTags.find((at) => at.id === t.id));
@@ -258,7 +266,35 @@ export default function ContactProfilePage() {
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
-                <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>{name}</h1>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>{nameVerified ? name : (name || i.ctctNoName)}</h1>
+                  {nameVerified ? (
+                    <span title={lang === 'en' ? 'Name confirmed' : 'Nombre confirmado'} style={{ fontSize: 11, fontWeight: 700, color: '#065f46', background: '#d1fae5', padding: '2px 8px', borderRadius: 10 }}>
+                      ✓ {lang === 'en' ? 'Verified' : 'Verificado'}
+                    </span>
+                  ) : (
+                    <span title={lang === 'en' ? 'Name not confirmed — it may be the WhatsApp display name' : 'Nombre sin confirmar — puede ser el nombre de WhatsApp'} style={{ fontSize: 11, fontWeight: 700, color: '#92400e', background: '#fef3c7', padding: '2px 8px', borderRadius: 10 }}>
+                      {lang === 'en' ? 'Unverified' : 'Sin verificar'}
+                    </span>
+                  )}
+                  {!nameVerified && (
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: 11, padding: '3px 10px' }}
+                      onClick={() => {
+                        const suggested = name && name !== i.ctctNoName ? name : '';
+                        const entered = window.prompt(lang === 'en' ? "Confirm the customer's real name:" : 'Confirma el nombre real del cliente:', suggested);
+                        if (entered === null) return;
+                        handleConfirmName(entered.trim() || undefined);
+                      }}
+                    >✓ {lang === 'en' ? 'Confirm name' : 'Confirmar nombre'}</button>
+                  )}
+                </div>
+                {waDisplayName && (!nameVerified || waDisplayName !== name) && (
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
+                    {lang === 'en' ? 'WhatsApp name' : 'Nombre en WhatsApp'}: <span style={{ fontWeight: 600 }}>{waDisplayName}</span>
+                  </div>
+                )}
                 <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
                   {c.jobTitle && `${c.jobTitle}`}
                   {c.jobTitle && c.company_name ? ' · ' : ''}

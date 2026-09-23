@@ -386,6 +386,12 @@ export class ContactsController {
     return this.service.update(id, dto as any, tenantId, req.user.id);
   }
 
+  // A human agent confirms/corrects the contact's real name → marks it verified.
+  @Post(':id/confirm-name')
+  confirmName(@Param('id') id: string, @Body() dto: { name?: string }, @TenantId() tenantId: string, @Request() req: any) {
+    return this.service.confirmName(id, tenantId, dto?.name, req.user.id);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string, @TenantId() tenantId: string, @Request() req: any) {
     return this.service.remove(id, tenantId, req.user.id);

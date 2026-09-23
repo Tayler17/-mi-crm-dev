@@ -59,7 +59,8 @@ export interface ChatbotToolIntent {
   addTag?: { tagName: string };
   removeTag?: { tagName: string };
   createTask?: { title: string; description?: string; dueDate?: string; priority?: string };
-  updateContact?: { fullName?: string; phone?: string; email?: string; jobTitle?: string; notes?: string; customFields?: Record<string, any> };
+  updateContact?: { phone?: string; email?: string; jobTitle?: string; notes?: string; customFields?: Record<string, any> };
+  confirmContactName?: { name: string; isCorrection?: boolean };
   sendInteractive?: { kind: 'button' | 'list'; bodyText: string; buttons?: string[]; rows?: { title?: string; description?: string }[]; listButton?: string };
   createPaymentLink?: { amount: number; currency: string; description: string };
   dentallyListPractitioners?: boolean;
@@ -113,11 +114,29 @@ export function buildChatbotTools(ctx: ChatbotToolContext): NeutralTool[] {
     parameters: { type: 'object', properties: { message: { type: 'string', description: 'Message explaining the wait' } }, required: ['message'] },
   });
 
+  // confirm_contact_name — the ONLY way to set/verify the customer's own name.
+  // The model must call this exclusively when the customer gives or corrects THEIR OWN
+  // name (never a recipient/beneficiary/third party). Setting a name here marks it
+  // verified so every agent can then address the customer by it.
+  tools.push({
+    name: 'confirm_contact_name',
+    description: "Save and VERIFY the customer's OWN name. Call this ONLY when the customer tells you their own name (e.g. answers \"my name is José Martínez\") or corrects it (\"it's José, not Juan\"). NEVER call it with the name of a recipient/beneficiary in the destination country, a company, a driver, or any third party the customer mentions. If you're not certain the name belongs to the person you're chatting with, do not call it.",
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: "The customer's own full name, exactly as they gave it" },
+        is_correction: { type: 'boolean', description: 'true if the customer is correcting a previously wrong name' },
+        message: { type: 'string', description: 'Short friendly confirmation to the customer' },
+      },
+      required: ['name'],
+    },
+  });
+
   // update_contact — always available. Updates THIS customer's own contact record.
   // The contact is resolved from the conversation, so no id is passed by the model.
+  // NOTE: the NAME is intentionally NOT here — use confirm_contact_name for that.
   {
     const properties: Record<string, any> = {
-      full_name: { type: 'string', description: "The customer's full name" },
       phone: { type: 'string', description: "The customer's phone number, with country code" },
       email: { type: 'string', description: "The customer's email address" },
       job_title: { type: 'string', description: 'Job title / role, if the customer mentions it' },
@@ -138,7 +157,7 @@ export function buildChatbotTools(ctx: ChatbotToolContext): NeutralTool[] {
     properties.message = { type: 'string', description: 'Short friendly confirmation to the customer' };
     tools.push({
       name: 'update_contact',
-      description: `Save or correct THIS customer's own contact details in the CRM (name, phone, email, job title, notes${ctx.contactFields && ctx.contactFields.length ? ', custom fields' : ''}). Use when the customer provides or corrects their own information. Only include the fields the customer actually gave you — leave the rest out.${customFieldsHint}`,
+      description: `Save or correct THIS customer's own contact details in the CRM (phone, email, job title, notes${ctx.contactFields && ctx.contactFields.length ? ', custom fields' : ''}). Use when the customer provides or corrects their own information. Do NOT set the name here — use confirm_contact_name for the name. Only include the fields the customer actually gave you — leave the rest out.${customFieldsHint}`,
       parameters: { type: 'object', properties, required: ['message'] },
     });
   }
@@ -364,7 +383,8 @@ export function mapChatbotToolCall(name: string, rawArgs: any): ChatbotToolInten
     case 'add_tag':               return { reply: a.message ?? '', addTag: { tagName: a.tag_name } };
     case 'remove_tag':            return { reply: a.message ?? '', removeTag: { tagName: a.tag_name } };
     case 'create_task':           return { reply: a.message ?? '', createTask: { title: a.title, description: a.description, dueDate: a.due_date, priority: a.priority } };
-    case 'update_contact':        return { reply: a.message ?? '', updateContact: { fullName: a.full_name, phone: a.phone, email: a.email, jobTitle: a.job_title, notes: a.notes, customFields: a.custom_fields } };
+    case 'update_contact':        return { reply: a.message ?? '', updateContact: { phone: a.phone, email: a.email, jobTitle: a.job_title, notes: a.notes, customFields: a.custom_fields } };
+    case 'confirm_contact_name':  return { reply: a.message ?? '', confirmContactName: { name: a.name, isCorrection: !!a.is_correction } };
     case 'send_interactive':      return { reply: '', sendInteractive: { kind: a.kind === 'list' ? 'list' : 'button', bodyText: a.body_text ?? '', buttons: Array.isArray(a.buttons) ? a.buttons : undefined, rows: Array.isArray(a.rows) ? a.rows : undefined, listButton: a.list_button } };
     case 'create_payment_link':   return { reply: a.message ?? '', createPaymentLink: { amount: a.amount, currency: a.currency ?? 'USD', description: a.description } };
     case 'dentally_list_practitioners': return { reply: a.message ?? '', dentallyListPractitioners: true };

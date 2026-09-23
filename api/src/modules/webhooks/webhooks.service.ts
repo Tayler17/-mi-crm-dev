@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationsService } from '../notifications/notifications.service';
+import { resolveInboundWhatsAppName } from '../contacts/contact-identity';
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { spawn } from 'child_process';
@@ -375,26 +376,43 @@ export class WebhooksService {
   }) {
     const { tenantId, connectionId, inboxId, channel, externalId, contactName, contactPhone, messageExtId, body, contentType = 'text', skipAutomation = false } = opts;
 
-    // 1. Find or create contact
+    // 1. Find or create contact.
+    // The name coming from WhatsApp is a DISPLAY name (may be a nickname, emoji, a
+    // company, or someone else). We store it separately in whatsapp_display_name and
+    // never mark it as a verified real name — agents must not address the customer by
+    // it. full_name may hold it only for CRM display while name_verified is false.
+    const { displayName: waDisplayName, nameSource: newNameSource } = resolveInboundWhatsAppName(contactName, contactPhone);
+    const hasWaDisplay = !!waDisplayName;
     const [existing] = await this.db.query(
-      `SELECT id, full_name FROM contacts WHERE tenant_id=$1 AND phone=$2 LIMIT 1`,
+      `SELECT id, full_name, whatsapp_display_name, name_verified FROM contacts WHERE tenant_id=$1 AND phone=$2 LIMIT 1`,
       [tenantId, contactPhone],
     );
     let contactId: string;
     if (existing) {
       contactId = existing.id;
-      // If the contact was saved with just the numeric ID as name, update to real name now
-      if (contactName !== contactPhone && existing.full_name === contactPhone) {
+      const sets: string[] = [];
+      const params: any[] = [];
+      // Keep the WhatsApp display name in sync (CASE 9: WA name changes later).
+      if (hasWaDisplay && existing.whatsapp_display_name !== waDisplayName) {
+        params.push(waDisplayName); sets.push(`whatsapp_display_name=$${params.length}`);
+      }
+      // Backfill full_name for display ONLY when it's still the raw number placeholder
+      // and the name has NOT been verified — never overwrite a confirmed name.
+      if (hasWaDisplay && !existing.name_verified && existing.full_name === contactPhone) {
+        params.push(waDisplayName); sets.push(`full_name=$${params.length}`);
+      }
+      if (sets.length) {
+        params.push(contactId);
         await this.db.query(
-          `UPDATE contacts SET full_name=$1, updated_at=NOW() WHERE id=$2`,
-          [contactName, contactId],
+          `UPDATE contacts SET ${sets.join(',')}, updated_at=NOW() WHERE id=$${params.length}`,
+          params,
         ).catch(() => {});
       }
     } else {
       const [newContact] = await this.db.query(
-        `INSERT INTO contacts (tenant_id, full_name, phone, created_at, updated_at)
-         VALUES ($1,$2,$3,NOW(),NOW()) RETURNING id`,
-        [tenantId, contactName, contactPhone],
+        `INSERT INTO contacts (tenant_id, full_name, phone, whatsapp_display_name, name_verified, name_source, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,false,$5,NOW(),NOW()) RETURNING id`,
+        [tenantId, contactName, contactPhone, waDisplayName, newNameSource],
       );
       contactId = newContact.id;
     }
