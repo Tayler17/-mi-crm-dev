@@ -31,6 +31,10 @@ interface MediaResult {
 /** Return value from every callAi* method */
 interface AiResult {
   reply: string;
+  /** The AI provider call failed (quota/credits exhausted, auth, network, 5xx). When set,
+   *  the bot must NOT send the customer a fallback — it notifies an agent instead. */
+  aiUnavailable?: boolean;
+  errorDetail?: string;
   transferTo?: string;
   resolveConversation?: boolean;
   setWaiting?: boolean;
@@ -455,6 +459,12 @@ export class AiChatbotEngineService {
     const dentallyConnected = await this.integrations.isConnected(tenantId, 'dentally').catch(() => false);
     const whatsappInteractive = conv.channel_type === 'whatsapp'; // interactive msgs = Cloud API only
     const result = await this.callAi(bot, apiKey, history, media, queueMap, stageNames, stageMap, existingDeals, tagNames, tagMap, fullContext, stripeConnectEnabled, dentallyConnected, contactFields, whatsappInteractive);
+    // AI provider outage (e.g. out of credits): stay SILENT to the customer and notify an
+    // agent in the CRM — never spam the "no entendí" fallback on every incoming message.
+    if (result?.aiUnavailable) {
+      await this.notifyAiUnavailable(tenantId, conversationId, result.errorDetail);
+      return;
+    }
     if (!result) {
       this.logger.warn(`[engine] AI returned null for conv ${conversationId} (bot "${bot.name}", provider "${bot.provider}") — sending fallback`);
       await this.saveBotMessage(tenantId, conversationId,
@@ -1117,7 +1127,9 @@ export class AiChatbotEngineService {
       const status = err?.response?.status;
       const detail = err?.response?.data?.error?.message ?? err?.message ?? String(err);
       this.logger.error(`AI call failed (${bot.provider} ${status ?? ''}): ${detail}`);
-      return bot.fallback_message ? { reply: bot.fallback_message } : null;
+      // Provider outage (quota/credits, auth, 429/5xx, network). Do NOT reply the generic
+      // fallback to the customer on every message — signal it so an agent is notified.
+      return { reply: '', aiUnavailable: true, errorDetail: `${bot.provider} ${status ?? ''}: ${detail}`.trim() };
     }
   }
 
@@ -1340,6 +1352,26 @@ export class AiChatbotEngineService {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
+
+  /** AI provider is down (usually out of credits). Post ONE internal notice per conversation
+   *  every 2h so agents are alerted, and never send the customer a fallback. The notice is a
+   *  system/activity message (shown in the CRM, NOT sent to the customer's WhatsApp). */
+  private async notifyAiUnavailable(tenantId: string, conversationId: string, detail?: string): Promise<void> {
+    this.logger.error(`[engine] AI unavailable for conv ${conversationId}: ${detail ?? 'unknown'}`);
+    const [recent] = await this.db.query(
+      `SELECT 1 FROM messages
+         WHERE conversation_id=$1 AND content_type='activity'
+           AND body LIKE '⚠️ Asistente de IA no disponible%'
+           AND created_at > now() - interval '2 hours' LIMIT 1`,
+      [conversationId],
+    ).catch(() => []);
+    if (recent) return; // already flagged recently — stay silent, don't duplicate the notice
+    await this.saveActivityMessage(
+      tenantId,
+      conversationId,
+      '⚠️ Asistente de IA no disponible (posible falta de créditos o error del proveedor). El bot no respondió a este cliente — necesita atención de un agente.',
+    ).catch(() => {});
+  }
 
   private async saveActivityMessage(tenantId: string, conversationId: string, body: string) {
     const [msg] = await this.db.query(
