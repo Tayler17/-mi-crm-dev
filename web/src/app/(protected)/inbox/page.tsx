@@ -1990,14 +1990,31 @@ export default function InboxPage() {
                           {m.createdAt ? new Date(m.createdAt).toLocaleString(i.locale, { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : ''}
                           {m.editedAt && !m.deletedAt ? ' · editado' : ''}
                         </span>
-                        {m.direction === 'outbound' && conv?.channelType?.startsWith('whatsapp') && (
-                          <span title={m.status} style={{ fontSize: 12, lineHeight: 1 }}>
-                            {m.status === 'read'      ? <span style={{ color: '#3b82f6' }}>✓✓</span>
-                           : m.status === 'delivered' ? <span style={{ color: 'var(--text-muted)' }}>✓✓</span>
-                           : m.status === 'failed'    ? <span style={{ color: '#ef4444' }}>⚠</span>
-                           :                            <span style={{ color: 'var(--text-muted)', opacity: 0.6 }}>✓</span>}
-                          </span>
-                        )}
+                        {m.direction === 'outbound' && conv?.channelType?.startsWith('whatsapp') && (() => {
+                          const notEn = i.locale?.startsWith('en');
+                          // 'sent' that never reached 'delivered' after a grace period means WhatsApp
+                          // accepted it but did NOT deliver (typically free text sent outside the 24h
+                          // window). Surface it clearly instead of a silent single check.
+                          const ageMin = m.createdAt ? (Date.now() - new Date(m.createdAt).getTime()) / 60000 : 0;
+                          const undelivered = m.status === 'failed' || (m.status === 'sent' && ageMin > 10);
+                          if (undelivered) {
+                            return (
+                              <span
+                                title={notEn
+                                  ? 'WhatsApp did not deliver this message. Outside the 24h window only an approved template is delivered.'
+                                  : 'WhatsApp no entregó este mensaje. Fuera de la ventana de 24h solo se entrega una plantilla aprobada.'}
+                                style={{ fontSize: 10, fontWeight: 700, color: '#b91c1c', background: '#fee2e2', padding: '1px 6px', borderRadius: 8, lineHeight: 1.4 }}
+                              >⚠ {notEn ? 'Not delivered' : 'No entregado'}</span>
+                            );
+                          }
+                          return (
+                            <span title={m.status} style={{ fontSize: 12, lineHeight: 1 }}>
+                              {m.status === 'read'      ? <span style={{ color: '#3b82f6' }}>✓✓</span>
+                             : m.status === 'delivered' ? <span style={{ color: 'var(--text-muted)' }}>✓✓</span>
+                             :                            <span style={{ color: 'var(--text-muted)', opacity: 0.6 }}>✓</span>}
+                            </span>
+                          );
+                        })()}
                         {!m.isPrivate && !m.deletedAt && editingMsgId !== m.id && m.contentType !== 'activity' && (
                           <span className="msg-actions" style={{ display: 'inline-flex', gap: 6 }}>
                             {!isTranscript && (
