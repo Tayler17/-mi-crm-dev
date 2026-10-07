@@ -181,6 +181,9 @@ export default function ContactProfilePage() {
   const [showEdit, setShowEdit] = useState(false);
   const [showTagPicker, setShowTagPicker] = useState(false);
   const [calls, setCalls] = useState<CallLog[]>([]);
+  const [confirmingName, setConfirmingName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [confirmingSaving, setConfirmingSaving] = useState(false);
 
   const dealStatusLabels: Record<string, string> = {
     open: i.ctctDealActive, active: i.ctctDealActive,
@@ -205,9 +208,14 @@ export default function ContactProfilePage() {
   }
 
   async function handleConfirmName(nameArg?: string) {
-    await confirmContactName(id, nameArg);
-    const p = await getContactProfile(id);
-    setProfile(p);
+    try {
+      await confirmContactName(id, nameArg);
+      const p = await getContactProfile(id);
+      setProfile(p);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'No se pudo confirmar el nombre');
+      throw e;
+    }
   }
 
   async function handleDelete() {
@@ -277,17 +285,36 @@ export default function ContactProfilePage() {
                       {lang === 'en' ? 'Unverified' : 'Sin verificar'}
                     </span>
                   )}
-                  {!nameVerified && (
+                  {!nameVerified && !confirmingName && (
                     <button
                       className="btn btn-secondary"
                       style={{ fontSize: 11, padding: '3px 10px' }}
-                      onClick={() => {
-                        const suggested = name && name !== i.ctctNoName ? name : '';
-                        const entered = window.prompt(lang === 'en' ? "Confirm the customer's real name:" : 'Confirma el nombre real del cliente:', suggested);
-                        if (entered === null) return;
-                        handleConfirmName(entered.trim() || undefined);
-                      }}
+                      onClick={() => { setNameInput(name && name !== i.ctctNoName ? name : ''); setConfirmingName(true); }}
                     >✓ {lang === 'en' ? 'Confirm name' : 'Confirmar nombre'}</button>
+                  )}
+                  {!nameVerified && confirmingName && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        className="form-input"
+                        autoFocus
+                        value={nameInput}
+                        onChange={(e) => setNameInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && nameInput.trim()) { e.preventDefault(); (async () => { setConfirmingSaving(true); try { await handleConfirmName(nameInput.trim()); setConfirmingName(false); } finally { setConfirmingSaving(false); } })(); } if (e.key === 'Escape') setConfirmingName(false); }}
+                        placeholder={lang === 'en' ? "Customer's real name" : 'Nombre real del cliente'}
+                        style={{ fontSize: 13, padding: '4px 8px', width: 220 }}
+                      />
+                      <button
+                        className="btn btn-primary"
+                        style={{ fontSize: 11, padding: '4px 10px' }}
+                        disabled={confirmingSaving || !nameInput.trim()}
+                        onClick={async () => { setConfirmingSaving(true); try { await handleConfirmName(nameInput.trim()); setConfirmingName(false); } finally { setConfirmingSaving(false); } }}
+                      >{confirmingSaving ? '…' : (lang === 'en' ? 'Save' : 'Guardar')}</button>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: 11, padding: '4px 8px' }}
+                        onClick={() => setConfirmingName(false)}
+                      >{lang === 'en' ? 'Cancel' : 'Cancelar'}</button>
+                    </span>
                   )}
                 </div>
                 {waDisplayName && (!nameVerified || waDisplayName !== name) && (
