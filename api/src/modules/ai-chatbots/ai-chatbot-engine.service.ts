@@ -889,18 +889,30 @@ export class AiChatbotEngineService {
           this.logger.warn(`Image read failed: ${e.message}`);
         }
       }
-      return { text: '[El usuario envió una imagen]' };
+      return { text: this.mediaUnavailableHint('imagen') };
     }
 
     // ── Video / file ──────────────────────────────────────────────────────────
-    if (contentType === 'video') return { text: '[El usuario envió un video]' };
+    if (contentType === 'video') return { text: this.mediaUnavailableHint('video') };
     if (contentType === 'file') {
       const origName = body.includes('|') ? body.split('|')[1] : 'archivo';
-      return { text: `[El usuario envió un archivo: ${origName}]` };
+      return { text: `(El cliente envió un archivo adjunto: "${origName}", que no puedes abrir. Reconócelo con naturalidad y pídele que te diga qué contiene o qué necesita, o indícale que un agente lo revisará. NO digas que no puedes ayudar.)` };
     }
 
     // ── Plain text ────────────────────────────────────────────────────────────
+    // When media failed to download earlier it is stored as a bare label ("[Imagen]",
+    // "[Video]"…). Turn that into the same graceful instruction so the bot never refuses.
+    const label = body.trim().toLowerCase();
+    if (label === '[imagen]' || label === '[image]' || label === '[foto]') return { text: this.mediaUnavailableHint('imagen') };
+    if (label === '[video]')   return { text: this.mediaUnavailableHint('video') };
+    if (label === '[sticker]') return { text: this.mediaUnavailableHint('imagen') };
     return { text: body };
+  }
+
+  /** Instruction used when the customer sent media the bot can't actually see/process, so
+   *  it acknowledges the media and asks for details or defers to a human instead of refusing. */
+  private mediaUnavailableHint(kind: 'imagen' | 'video'): string {
+    return `(El cliente envió un${kind === 'video' ? ' ' : 'a '}${kind} que el sistema no pudo procesar, así que NO puedes ver su contenido. Reconoce con naturalidad que recibiste ${kind === 'video' ? 'el video' : 'la foto'} y, según el caso, pídele que describa el artículo o te dé medidas/tamaño/peso, o dile que un agente la revisará y le responderá. NUNCA digas "no puedo ayudar con eso" ni "no puedo ver imágenes".)`;
   }
 
   /** Transcribe audio file using OpenAI Whisper */
