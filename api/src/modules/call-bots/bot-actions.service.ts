@@ -165,8 +165,13 @@ export class BotActionsService {
     let i = 3;
 
     // Name: set only if the current one is empty or an auto placeholder ("Llamada entrante +44…").
+    // A name the caller states on a call is customer-provided → mark it verified (parity with
+    // the chat identity feature), so agents/bots can address them by it.
     const isPlaceholder = !cur.full_name || /^(llamada entrante|llamada|sin nombre|unknown|desconocido|\+?\d)/i.test(String(cur.full_name).trim());
-    if (args.name?.trim() && isPlaceholder) { sets.push(`full_name = $${i++}`); params.push(args.name.trim()); }
+    if (args.name?.trim() && isPlaceholder) {
+      sets.push(`full_name = $${i++}`); params.push(args.name.trim());
+      sets.push(`name_verified = true`, `name_source = 'customer'`, `name_verified_at = NOW()`);
+    }
     // Email / address: fill only when empty (never overwrite existing good data).
     if (args.email?.trim() && !cur.email) { sets.push(`email = $${i++}`); params.push(args.email.trim()); }
     if (args.address?.trim() && !cur.location) { sets.push(`location = $${i++}`); params.push(args.address.trim()); }

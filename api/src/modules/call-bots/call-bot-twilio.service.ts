@@ -110,11 +110,11 @@ function buildTools(stageNames: string[], tagNames: string[] = [], dentallyConne
     },
     {
       name: 'update_contact',
-      description: 'Save the caller\'s details onto their CRM contact record. Call this AS SOON AS you learn the caller\'s name (so the contact is not left as just a phone number), and again if they give an email or address. Silent — do not mention it to the caller.',
+      description: "Save the CALLER's own details onto their CRM contact record. Call this AS SOON AS you learn the caller's own name (so the contact is not left as just a phone number), and again if they give an email or address. NEVER use it with the name of the recipient/beneficiary in the destination or any third party. Silent — do not mention it to the caller.",
       parameters: {
         type: 'object',
         properties: {
-          name:    { type: 'string', description: 'Full name of the caller' },
+          name:    { type: 'string', description: "The CALLER's own full name (never a recipient/third party)" },
           email:   { type: 'string', description: 'Caller email (optional)' },
           address: { type: 'string', description: 'Caller address, e.g. the pickup address (optional)' },
           notes:   { type: 'string', description: 'Other useful info about the contact (optional)' },
@@ -956,6 +956,37 @@ ${addTagInstruction}
       this.getQueues(bot.id, tenantId).catch(() => []),
       this.platformSettings.getVoiceSdk().catch(() => ({ accountSid: '', apiKey: '', apiSecret: '', twimlAppSid: '' })),
     ]);
+    // Parity with the text chatbots: the temporary operational status note (same-day
+    // incidents) and the caller's saved CRM profile, so the voice bot uses what it knows
+    // and respects today's status instead of guessing.
+    const [statusRow] = await this.db.query(
+      `SELECT note FROM chatbot_status_note
+         WHERE tenant_id=$1 AND COALESCE(note,'') <> ''
+           AND (expires_at IS NULL OR expires_at > now())`,
+      [tenantId],
+    ).catch(() => []);
+    const statusNote: string = statusRow?.note ?? '';
+
+    let contactProfile = '';
+    if (meta?.contactId) {
+      const [c] = await this.db.query(
+        `SELECT full_name, phone, email, location, name_verified FROM contacts WHERE id=$1 AND tenant_id=$2`,
+        [meta.contactId, tenantId],
+      ).catch(() => []);
+      if (c) {
+        const lines: string[] = [];
+        if (c.name_verified && c.full_name) lines.push(`${isEs ? 'Nombre confirmado' : 'Confirmed name'}: ${c.full_name}`);
+        if (c.phone)    lines.push(`${isEs ? 'Teléfono' : 'Phone'}: ${c.phone}`);
+        if (c.email)    lines.push(`Email: ${c.email}`);
+        if (c.location) lines.push(`${isEs ? 'Dirección' : 'Address'}: ${c.location}`);
+        if (lines.length) {
+          contactProfile = isEs
+            ? `FICHA DEL CLIENTE (datos ya guardados — úsalos y no los vuelvas a pedir):\n${lines.join('\n')}`
+            : `CALLER PROFILE (data already saved — use it, don't ask again):\n${lines.join('\n')}`;
+        }
+      }
+    }
+
     // Human transfer is available if there's a configured external number OR the in-CRM
     // softphone is set up (agents can receive the call in the browser). Without either,
     // the bot has no way to reach a person, so we don't offer the tool.
@@ -1051,18 +1082,31 @@ ${addTagInstruction}
       : '';
     const crmRule = isEs
       ? `ACCIONES EN EL CRM (hazlas en silencio, sin mencionarlas al cliente, DURANTE la llamada y no al final):
-- update_contact: cuando el cliente comparta o corrija sus datos (nombre, teléfono, email, dirección), guárdalos.
-- create_deal: cuando el cliente muestre interés, haga una reserva/cita o se cierre una venta, crea un trato con la etapa adecuada.${stageList}
+- update_contact: guarda SOLO los datos del propio cliente que llama (su nombre, email, dirección). El "name" es ÚNICAMENTE el nombre de la persona que llama — NUNCA el del DESTINATARIO/beneficiario en destino ni el de un tercero.
+- create_deal: cuando el cliente muestre interés, haga una reserva/cita o se cierre una venta, crea un trato con la etapa adecuada. En las notas del trato incluye los datos del DESTINATARIO (nombre, teléfono, dirección, cédula) — van ahí, NO en la ficha del cliente.${stageList}
 - update_deal: cuando un trato avance (cita confirmada, venta cerrada), muévelo a la etapa correspondiente.
 - create_task: crea una tarea de seguimiento cuando el cliente pida que le llamen, deje una nota o necesite seguimiento.
 - add_tag: en cuanto identifiques la intención principal del cliente, etiqueta el contacto.${tagList}`
       : `CRM ACTIONS (do them silently, without mentioning them to the caller, DURING the call and not at the end):
-- update_contact: when the caller shares or corrects their details (name, phone, email, address), save them.
-- create_deal: when the caller shows interest, makes a booking/appointment or closes a sale, create a deal with the right stage.${stageList}
+- update_contact: save ONLY the calling customer's own details (their name, email, address). "name" is ONLY the caller's own name — NEVER the DESTINATION recipient/beneficiary or a third party.
+- create_deal: when the caller shows interest, makes a booking/appointment or closes a sale, create a deal with the right stage. Put the RECIPIENT's details (name, phone, address, ID) in the deal notes — they go there, NOT on the caller's contact.${stageList}
 - update_deal: when a deal progresses (appointment confirmed, sale closed), move it to the matching stage.
 - create_task: create a follow-up task when the caller asks to be called back, leaves a note, or needs follow-up.
 - add_tag: as soon as you identify the caller's main intent, tag the contact.${tagList}`;
-    const prompt = [bot.system_prompt ?? '', dateRule, langRule, voiceRule, apptRule, crmRule, deptRule, humanRule, hangupRule].filter(Boolean).join('\n\n');
+
+    // Honesty/limits — same guardrails as the text chatbots.
+    const limitsRule = isEs
+      ? `LÍMITES Y HONESTIDAD: No afirmes acciones que no puedes hacer (editar facturas, registrar pagos, enviar/asignar un conductor) ni digas "ya lo hice". Para facturas, montos finales y cobros, di que un agente los confirmará. No te hagas pasar por el conductor ni prometas horas de llegada. No inventes motivos, retrasos ni estados: si no lo sabes con certeza, dilo y ofrece que un agente lo confirme.`
+      : `LIMITS & HONESTY: Do not claim actions you can't perform (editing invoices, recording payments, sending/assigning a driver) or say "I already did it". For invoices, final amounts and charges, say an agent will confirm. Do not impersonate the driver or promise arrival times. Don't invent reasons, delays or statuses: if you're not sure, say so and offer to have an agent confirm.`;
+
+    // Current operational status note — overrides general info for same-day incidents.
+    const statusRule = statusNote
+      ? (isEs
+          ? `ESTADO OPERATIVO ACTUAL (aviso de hoy, PRIORITARIO sobre la info general; aplícalo si preguntan por recogidas, entregas, rutas o tiempos): ${statusNote}`
+          : `CURRENT OPERATIONAL STATUS (today's notice, takes PRIORITY over general info; apply it if asked about pickups, deliveries, routes or times): ${statusNote}`)
+      : '';
+
+    const prompt = [bot.system_prompt ?? '', dateRule, langRule, voiceRule, apptRule, contactProfile, statusRule, crmRule, limitsRule, deptRule, humanRule, hangupRule].filter(Boolean).join('\n\n');
 
     // Use the Aura voice the tenant picked in the Voice Catalog (getBot resolves
     // voice_catalog_id → tts_provider/tts_voice_id); else the catalog's default voice
