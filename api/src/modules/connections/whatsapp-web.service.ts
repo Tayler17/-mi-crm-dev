@@ -1111,6 +1111,97 @@ export class WhatsappWebService implements OnModuleInit {
     }
   }
 
+  /**
+   * Records a message the business sent from its OWN phone (fromMe) as an AGENT message,
+   * so the CRM inbox shows it and the chatbot's human-pause treats it as a human takeover.
+   * Resolves the conversation purely by the chat JID (remoteJid) — never by sender identity,
+   * which on fromMe is the business, not the customer. Does NOT create contacts/conversations
+   * and does NOT trigger the bot.
+   */
+  private async handleOutboundFromPhone(
+    connectionId: string,
+    tenantId: string,
+    remoteJid: string,
+    msg: any,
+    helpers: any,
+  ): Promise<void> {
+    const extId: string = msg.key?.id ?? '';
+    if (!extId) return;
+
+    // Find the EXISTING conversation for this chat. If none exists yet, ignore (the
+    // customer's own inbound message will create it) — avoids noise from outbound chats.
+    const normalized = helpers.jidNormalizedUser(remoteJid);
+    const phone = normalized.split('@')[0];
+    const [conv] = await this.db.query(
+      `SELECT c.id FROM conversations c
+         WHERE c.tenant_id=$1 AND c.connection_id=$2
+           AND (c.external_id=$3 OR c.external_id=$4
+                OR RIGHT(regexp_replace(c.external_id, '\\D', '', 'g'), 9) = RIGHT($5, 9))
+         ORDER BY c.created_at DESC LIMIT 1`,
+      [tenantId, connectionId, remoteJid, normalized, phone],
+    ).catch(() => []);
+    if (!conv) return;
+
+    // Extract a text body (media → a short label; we only need the agent's turn recorded).
+    const mc = msg.message ?? {};
+    const ct = helpers.getContentType(mc);
+    let body = '';
+    let dbContentType = 'text';
+    if (ct === 'conversation')            body = mc.conversation ?? '';
+    else if (ct === 'extendedTextMessage') body = mc.extendedTextMessage?.text ?? '';
+    else if (ct === 'imageMessage')       { body = mc.imageMessage?.caption || '[Imagen]'; dbContentType = 'text'; }
+    else if (ct === 'videoMessage')       { body = mc.videoMessage?.caption || '[Video]'; }
+    else if (ct === 'audioMessage')        body = '[Audio]';
+    else if (ct === 'documentMessage')     body = `[Documento: ${mc.documentMessage?.fileName ?? 'archivo'}]`;
+    else if (ct === 'stickerMessage')      body = '[Sticker]';
+    else return; // protocol/system/reaction → ignore
+    if (!body) return;
+
+    // Dedup: skip our OWN echoes. A CRM/bot send stores the message with external_id=extId;
+    // we also guard the brief race (echo arrives before our external_id UPDATE lands) by
+    // matching a recent identical outbound bot/agent message in this conversation.
+    const [dup] = await this.db.query(
+      `SELECT id FROM messages
+         WHERE conversation_id=$2
+           AND (external_id=$1
+             OR (direction='outbound' AND sender_type IN ('bot','agent') AND body=$3
+                 AND created_at > now() - interval '45 seconds'))
+         LIMIT 1`,
+      [extId, conv.id, body],
+    ).catch(() => []);
+    if (dup) return;
+
+    const msgTs = msg.messageTimestamp
+      ? new Date(Number(msg.messageTimestamp) * 1000).toISOString()
+      : new Date().toISOString();
+
+    await this.db.query(
+      `INSERT INTO messages
+         (tenant_id, conversation_id, body, content_type, direction, sender_type,
+          is_private, external_id, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,'outbound','agent',false,$5,$6,$6)`,
+      [tenantId, conv.id, body, dbContentType, extId, msgTs],
+    ).catch((e: any) => { throw e; });
+
+    await this.db.query(
+      `UPDATE conversations SET last_message_at=$1, updated_at=NOW() WHERE id=$2`,
+      [msgTs, conv.id],
+    ).catch(() => {});
+
+    // Show it in the inbox in real time. We deliberately do NOT emit
+    // conversation.message_received — this is the agent's own message and must not trigger
+    // the bot. The bot's human-pause will see this agent message on the next customer turn.
+    this.notifications.emit({
+      tenantId,
+      type: 'message_created',
+      payload: { conversationId: conv.id, message: {
+        id: extId, conversationId: conv.id, body, direction: 'outbound',
+        senderType: 'agent', contentType: dbContentType, isPrivate: false, createdAt: msgTs,
+      } },
+    });
+    this.logger.log(`[wa_web] agent phone reply recorded → conv ${conv.id}: "${body.slice(0, 60)}"`);
+  }
+
   // ── Incoming message handler ────────────────────────────────────────────────
 
   private async handleIncomingMessage(
@@ -1123,14 +1214,24 @@ export class WhatsappWebService implements OnModuleInit {
   ) {
     const { getContentType, jidNormalizedUser, isJidGroup, isJidBroadcast, isJidStatusBroadcast, downloadMediaMessage } = helpers;
 
-    if (msg.key?.fromMe) return;
-
     const remoteJid: string = msg.key?.remoteJid ?? '';
     if (isJidBroadcast(remoteJid))       return;
     if (isJidStatusBroadcast(remoteJid)) return;
     if (remoteJid.endsWith('@newsletter')) return;
 
     const isGroup = isJidGroup(remoteJid);
+
+    // Message sent from the business's OWN phone (an agent replying outside the CRM inbox).
+    // We used to ignore these, which meant the bot never knew a human had taken over and
+    // kept replying on top of the agent. Record it as an agent message (deduped against our
+    // own CRM/bot echoes) so it shows in the inbox AND the bot's human-pause detects it.
+    if (msg.key?.fromMe) {
+      if (!isGroup) {
+        await this.handleOutboundFromPhone(connectionId, tenantId, remoteJid, msg, helpers)
+          .catch((e: any) => this.logger.warn(`[wa_web] fromMe handling failed: ${e.message}`));
+      }
+      return;
+    }
 
     const msgContent = msg.message;
     if (!msgContent) return;
