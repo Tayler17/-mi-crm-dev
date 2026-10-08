@@ -45,6 +45,7 @@ interface AiResult {
   createTask?: { title: string; description?: string; dueDate?: string; priority?: string };
   updateContact?: { phone?: string; email?: string; jobTitle?: string; notes?: string; customFields?: Record<string, any> };
   confirmContactName?: { name: string; isCorrection?: boolean };
+  setRecipient?: { name?: string; phone?: string; address?: string; document?: string };
   sendInteractive?: { kind: 'button' | 'list'; bodyText: string; buttons?: string[]; rows?: { title?: string; description?: string }[]; listButton?: string };
   createPaymentLink?: { amount: number; currency: string; description: string };
   dentallyListPractitioners?: boolean;
@@ -472,7 +473,7 @@ export class AiChatbotEngineService {
       return;
     }
 
-    let { reply, transferTo, resolveConversation, setWaiting, createDeal, updateDeal, addTag, removeTag, createTask, updateContact, confirmContactName, createPaymentLink } = result;
+    let { reply, transferTo, resolveConversation, setWaiting, createDeal, updateDeal, addTag, removeTag, createTask, updateContact, confirmContactName, setRecipient, createPaymentLink } = result;
     this.logger.log(`[engine] AI reply (first 120): "${reply?.slice(0, 120)}" transferTo="${transferTo ?? 'none'}" resolve=${!!resolveConversation} wait=${!!setWaiting} createDeal=${!!createDeal} updateDeal=${!!updateDeal} addTag=${addTag?.tagName ?? 'none'} removeTag=${removeTag?.tagName ?? 'none'} createTask=${createTask?.title ?? 'none'}`);
 
     // Dentally actions: execute and send the authoritative reply our code composes
@@ -537,7 +538,7 @@ export class AiChatbotEngineService {
 
     // If a CRM action was requested but the AI returned no message, use a generic confirmation
     // so the bot doesn't go silent after silently running a tool.
-    const hasCrmAction = !!(createDeal || updateDeal || addTag || removeTag || createTask || updateContact || confirmContactName || resolveConversation || setWaiting);
+    const hasCrmAction = !!(createDeal || updateDeal || addTag || removeTag || createTask || updateContact || confirmContactName || setRecipient || resolveConversation || setWaiting);
     if (!reply && hasCrmAction && !transferTo) {
       reply = bot.language?.startsWith('es') !== false
         ? '¡Listo, lo he registrado!'
@@ -668,6 +669,49 @@ export class AiChatbotEngineService {
     // can't quietly overwrite the contact's name with a recipient/third-party name.
     if (confirmContactName && conv.contact_id && String(confirmContactName.name ?? '').trim()) {
       await this.applyConfirmContactName(tenantId, conv.contact_id, conversationId, confirmContactName.name.trim());
+    }
+
+    // 10e-0b. Save the shipment RECIPIENT (destinatario/beneficiary) in the contact's open
+    // deal NOTES — kept out of the sender's contact record, and tenant-neutral (no courier
+    // columns imposed on every tenant). Creates a deal if none. Updates the recipient line
+    // in place so it doesn't clobber other notes.
+    if (setRecipient && conv.contact_id) {
+      const { name, phone, address, document } = setRecipient;
+      const parts: string[] = [];
+      if (String(name ?? '').trim())     parts.push(`Nombre: ${name!.trim()}`);
+      if (String(phone ?? '').trim())    parts.push(`Tel: ${phone!.trim()}`);
+      if (String(address ?? '').trim())  parts.push(`Dir: ${address!.trim()}`);
+      if (String(document ?? '').trim()) parts.push(`Cédula: ${document!.trim()}`);
+      if (parts.length) {
+        const [openDeal] = await this.db.query(
+          `SELECT id, notes FROM deals WHERE tenant_id=$1 AND contact_id=$2 AND status='open' ORDER BY created_at DESC LIMIT 1`,
+          [tenantId, conv.contact_id],
+        ).catch(() => []);
+        let dealId = openDeal?.id;
+        let existingNotes: string = openDeal?.notes ?? '';
+        if (!dealId) {
+          const [created] = await this.db.query(
+            `INSERT INTO deals (tenant_id, contact_id, title, status, created_at, updated_at)
+             VALUES ($1,$2,$3,'open',NOW(),NOW()) RETURNING id`,
+            [tenantId, conv.contact_id, 'Envío'],
+          ).catch(() => [null]);
+          dealId = created?.id;
+          existingNotes = '';
+        }
+        if (dealId) {
+          const marker = '📦 Destinatario:';
+          // Drop any previous recipient line, keep the rest of the notes, append the new one.
+          const kept = String(existingNotes || '')
+            .split('\n').filter((l) => !l.trim().startsWith(marker)).join('\n').trim();
+          const recipientLine = `${marker} ${parts.join(' | ')}`;
+          const newNotes = kept ? `${kept}\n${recipientLine}` : recipientLine;
+          await this.db.query(
+            `UPDATE deals SET notes=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3`,
+            [newNotes, dealId, tenantId],
+          ).catch((e: any) => this.logger.warn(`[engine] set_recipient failed: ${e.message}`));
+          await this.saveActivityMessage(tenantId, conversationId, `🤖 Bot guardó el destinatario del envío${name ? `: ${name.trim()}` : ''}`).catch(() => {});
+        }
+      }
     }
 
     // 10e-bis. Handle contact update (standard fields + custom fields) for THIS contact.
@@ -1063,6 +1107,7 @@ export class AiChatbotEngineService {
       if (tagNames.length > 0)   crmLines.push(`- add_tag: OBLIGATORIO — en cuanto identifiques la intención principal del usuario, aplica la etiqueta más apropiada de esta lista: ${tagNames.join(', ')}. Úsala en la misma respuesta en que queda clara la intención, no esperes al final de la conversación. Si el tema cambia, usa remove_tag para la anterior y add_tag para la nueva.`);
       crmLines.push('- create_task: cuando el usuario pida callback, cotización, recordatorio o cualquier acción de seguimiento.');
       crmLines.push(`- confirm_contact_name: úsalo SOLO cuando el cliente te dé o corrija SU PROPIO nombre (ej. "me llamo José Martínez" o "soy José, no Juan"). NUNCA lo uses con el nombre del DESTINATARIO/beneficiario en destino, de una empresa, de un conductor o de un tercero. Si no estás seguro de que el nombre es de la persona con la que chateas, no lo llames.`);
+      crmLines.push(`- set_recipient: úsalo cuando el cliente te dé los datos del DESTINATARIO/beneficiario en destino (quien RECIBE el paquete): su nombre, teléfono, dirección y/o cédula. Esos datos son del destinatario, NO del cliente — van al envío, nunca a su ficha. Envía solo los campos que el cliente realmente dio.`);
       crmLines.push(`- update_contact: ÚSALO SOLO para datos del cliente SOBRE SÍ MISMO (email, puesto, notas${contactFields.length ? `, o los campos: ${contactFields.map((f: any) => f.label || f.name).join(', ')}` : ''}). NO incluye el nombre (eso va por confirm_contact_name) ni el teléfono (lo maneja un humano). NUNCA lo uses para datos de OTRA persona (destinatario/beneficiario, tercero, tarjeta de contacto): esos NO son del cliente — anótalos para el envío o pásalos a un agente. Envía solo lo que el cliente dio sobre él mismo.`);
       if (whatsappInteractive) crmLines.push('- send_interactive: cuando ofrezcas al cliente un conjunto claro de opciones para elegir (confirmar/cancelar, elegir servicio, elegir horario, menú). Úsala en vez de escribir las opciones como lista numerada de texto. kind="button" para hasta 3 opciones, kind="list" para 4–10. La pregunta va en body_text; esta herramienta REEMPLAZA tu respuesta de texto en ese turno. No la uses para respuestas abiertas ni cuando el cliente debe escribir texto libre.');
       if (stripeConnectEnabled) crmLines.push('- create_payment_link: SOLO cuando el cliente confirme EXPLÍCITAMENTE que quiere pagar y hayas acordado el monto exacto. Siempre pregunta primero "¿Confirmas el pago de $X [moneda]?" antes de llamar esta herramienta. Monto mínimo $1, máximo $10,000.');

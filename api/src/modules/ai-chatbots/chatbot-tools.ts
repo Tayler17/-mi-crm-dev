@@ -61,6 +61,7 @@ export interface ChatbotToolIntent {
   createTask?: { title: string; description?: string; dueDate?: string; priority?: string };
   updateContact?: { phone?: string; email?: string; jobTitle?: string; notes?: string; customFields?: Record<string, any> };
   confirmContactName?: { name: string; isCorrection?: boolean };
+  setRecipient?: { name?: string; phone?: string; address?: string; document?: string };
   sendInteractive?: { kind: 'button' | 'list'; bodyText: string; buttons?: string[]; rows?: { title?: string; description?: string }[]; listButton?: string };
   createPaymentLink?: { amount: number; currency: string; description: string };
   dentallyListPractitioners?: boolean;
@@ -129,6 +130,24 @@ export function buildChatbotTools(ctx: ChatbotToolContext): NeutralTool[] {
         message: { type: 'string', description: 'Short friendly confirmation to the customer' },
       },
       required: ['name'],
+    },
+  });
+
+  // set_recipient — saves the DESTINATION recipient/beneficiary of a shipment onto the
+  // customer's open deal, kept separate from the sender's contact record.
+  tools.push({
+    name: 'set_recipient',
+    description: "Save the DESTINATION recipient (beneficiary) of a shipment — the person who RECEIVES the package in the destination country, NOT the customer you're chatting with. Use this when the customer gives the recipient's name, address, phone, or ID/cédula. This is stored on the shipment/deal, never on the customer's own contact.",
+    parameters: {
+      type: 'object',
+      properties: {
+        name:     { type: 'string', description: "Recipient's full name in the destination" },
+        phone:    { type: 'string', description: "Recipient's phone number" },
+        address:  { type: 'string', description: "Recipient's delivery address" },
+        document: { type: 'string', description: "Recipient's ID / cédula / document number" },
+        message:  { type: 'string', description: 'Short friendly confirmation to the customer' },
+      },
+      required: [],
     },
   });
 
@@ -385,6 +404,7 @@ export function mapChatbotToolCall(name: string, rawArgs: any): ChatbotToolInten
     case 'create_task':           return { reply: a.message ?? '', createTask: { title: a.title, description: a.description, dueDate: a.due_date, priority: a.priority } };
     case 'update_contact':        return { reply: a.message ?? '', updateContact: { phone: a.phone, email: a.email, jobTitle: a.job_title, notes: a.notes, customFields: a.custom_fields } };
     case 'confirm_contact_name':  return { reply: a.message ?? '', confirmContactName: { name: a.name, isCorrection: !!a.is_correction } };
+    case 'set_recipient':         return { reply: a.message ?? '', setRecipient: { name: a.name, phone: a.phone, address: a.address, document: a.document } };
     case 'send_interactive':      return { reply: '', sendInteractive: { kind: a.kind === 'list' ? 'list' : 'button', bodyText: a.body_text ?? '', buttons: Array.isArray(a.buttons) ? a.buttons : undefined, rows: Array.isArray(a.rows) ? a.rows : undefined, listButton: a.list_button } };
     case 'create_payment_link':   return { reply: a.message ?? '', createPaymentLink: { amount: a.amount, currency: a.currency ?? 'USD', description: a.description } };
     case 'dentally_list_practitioners': return { reply: a.message ?? '', dentallyListPractitioners: true };

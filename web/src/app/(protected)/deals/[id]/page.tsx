@@ -503,7 +503,7 @@ export default function DealDetailPage() {
             </div>
             <StageSelector deal={d} onStageChange={handleStageChange} />
             {d.notes && (
-              <div style={{ marginTop: 12, padding: '8px 12px', background: '#fef9c3', borderRadius: 6, fontSize: 13, color: '#78350f', borderLeft: '3px solid #f59e0b' }}>
+              <div style={{ marginTop: 12, padding: '8px 12px', background: '#fef9c3', borderRadius: 6, fontSize: 13, color: '#78350f', borderLeft: '3px solid #f59e0b', whiteSpace: 'pre-wrap' }}>
                 📝 {d.notes}
               </div>
             )}
