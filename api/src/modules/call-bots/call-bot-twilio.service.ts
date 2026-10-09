@@ -1141,7 +1141,9 @@ ${addTagInstruction}
         // UNDERSTANDS any language the caller speaks (Nova-3 multi, code-switching);
         // it still REPLIES in its own language via the prompt + its Aura voice, and
         // routes/transfers as needed. Fixes "the bot only understands its own language".
-        listen: { provider: { type: 'deepgram', model: 'nova-3', language: 'multi' } },
+        // smart_format + numerals so spoken numbers/phones are transcribed as DIGITS
+        // ("01782 971403") instead of words ("o one seven eight two…") in the inbox transcript.
+        listen: { provider: { type: 'deepgram', model: 'nova-3', language: 'multi', smart_format: true, numerals: true } },
         think:  {
           provider: { type: 'open_ai', model: thinkModel, temperature: 0.7 },
           // Use OUR OpenAI key so the LLM does NATIVE tool-calling. With Deepgram's
