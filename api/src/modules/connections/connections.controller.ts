@@ -57,8 +57,13 @@ export class ConnectionsController {
   // WhatsApp Embedded Signup: the frontend SDK needs the app id + config id to launch.
   @Get('whatsapp/embedded-config')
   async embeddedConfig() {
-    const { appId, waConfigId } = await this.platformSettings.getMeta();
-    return { appId, configId: waConfigId, enabled: !!(appId && waConfigId) };
+    const { appId, waConfigId, waCoexistenceConfigId } = await this.platformSettings.getMeta();
+    return {
+      appId,
+      configId: waConfigId,
+      coexistenceConfigId: waCoexistenceConfigId || '',
+      enabled: !!(appId && waConfigId),
+    };
   }
 
   // WhatsApp Embedded Signup: finish onboarding (exchange code, subscribe, store).

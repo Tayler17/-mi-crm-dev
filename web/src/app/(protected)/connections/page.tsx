@@ -401,6 +401,11 @@ function ConnectionModal({ conn, defaultType, inboxes, onClose, onSaved }: Conne
                 Conecta tu WhatsApp con Meta en unos clics — inicias sesión, eliges o creas tu cuenta y número, y el resto (webhook, permisos) se configura solo. Debajo puedes hacerlo manual si prefieres.
               </p>
               <WhatsappEmbeddedSignup onDone={onSaved} />
+              <div style={{ borderTop: '1px dashed #86efac', margin: '12px 0 10px' }} />
+              <div style={{ fontSize: 12, color: '#166534', margin: '0 0 8px' }}>
+                ¿Tu número ya está en la <strong>app de WhatsApp Business</strong> (coexistencia)? Conéctalo escaneando un QR con la app, sin perder el uso del teléfono:
+              </div>
+              <WhatsappEmbeddedSignup onDone={onSaved} coexistence />
             </div>
           )}
 

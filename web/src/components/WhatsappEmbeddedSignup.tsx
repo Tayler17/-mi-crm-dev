@@ -9,8 +9,8 @@ import { getWaEmbeddedConfig, whatsappEmbeddedSignup } from '@/lib/api';
  * (exchange code → token, subscribe app to the WABA, register number, store connection).
  * Needs meta.app_id + meta.wa_config_id configured in Platform settings.
  */
-export function WhatsappEmbeddedSignup({ onDone }: { onDone?: () => void }) {
-  const [cfg, setCfg] = useState<{ appId: string; configId: string; enabled: boolean } | null>(null);
+export function WhatsappEmbeddedSignup({ onDone, coexistence }: { onDone?: () => void; coexistence?: boolean }) {
+  const [cfg, setCfg] = useState<{ appId: string; configId: string; coexistenceConfigId?: string; enabled: boolean } | null>(null);
   const [sdkReady, setSdkReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -76,10 +76,17 @@ export function WhatsappEmbeddedSignup({ onDone }: { onDone?: () => void }) {
         .catch((e) => setMsg(e?.message || 'Error'))
         .finally(() => setBusy(false));
     }, {
-      config_id: cfg.configId,
+      // Coexistence (import the existing WhatsApp Business App number via QR) uses its own
+      // config + featureType; the classic flow adds a hosted number. Falls back to the
+      // main config if no dedicated coexistence config is set.
+      config_id: coexistence ? (cfg.coexistenceConfigId || cfg.configId) : cfg.configId,
       response_type: 'code',
       override_default_response_type: true,
-      extras: { setup: {}, featureType: '', sessionInfoVersion: '3' },
+      extras: {
+        setup: {},
+        featureType: coexistence ? 'whatsapp_business_app_onboarding' : '',
+        sessionInfoVersion: '3',
+      },
     });
   }
 
@@ -99,7 +106,7 @@ export function WhatsappEmbeddedSignup({ onDone }: { onDone?: () => void }) {
         disabled={!sdkReady || busy}
         style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: 14, fontWeight: 700, cursor: sdkReady && !busy ? 'pointer' : 'default', display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'flex-start' }}
       >
-        <span style={{ fontSize: 16 }}>💬</span> {busy ? 'Conectando…' : 'Conectar WhatsApp'}
+        <span style={{ fontSize: 16 }}>💬</span> {busy ? 'Conectando…' : (coexistence ? 'Conectar por Coexistencia (QR)' : 'Conectar WhatsApp')}
       </button>
       {msg && <div style={{ fontSize: 12, color: msg.startsWith('✓') ? '#16a34a' : 'var(--text-muted)' }}>{msg}</div>}
     </div>
