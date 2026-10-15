@@ -1476,6 +1476,31 @@ ${addTagInstruction}
     }
   }
 
+  /** Resolve a VALID inbox id for a call bot's conversation. The bot's configured inbox
+   *  may have been deleted (→ conversations_inbox_id_fkey violation, so the call's
+   *  conversation/transcript is lost), so fall back to — or create — the tenant's
+   *  "Llamadas" (phone) inbox. */
+  private async resolveCallInbox(tenantId: string, configuredInboxId: string | null): Promise<string | null> {
+    if (configuredInboxId) {
+      const [ok] = await this.db.query(
+        `SELECT id FROM inboxes WHERE id=$1 AND tenant_id=$2 LIMIT 1`,
+        [configuredInboxId, tenantId],
+      ).catch(() => []);
+      if (ok?.id) return ok.id;
+    }
+    const [ex] = await this.db.query(
+      `SELECT id FROM inboxes WHERE tenant_id=$1 AND channel_type='phone' ORDER BY created_at ASC LIMIT 1`,
+      [tenantId],
+    ).catch(() => []);
+    if (ex?.id) return ex.id;
+    const [created] = await this.db.query(
+      `INSERT INTO inboxes (tenant_id, name, channel_type, created_at, updated_at)
+       VALUES ($1, 'Llamadas', 'phone', NOW(), NOW()) RETURNING id`,
+      [tenantId],
+    ).catch(() => []);
+    return created?.id ?? null;
+  }
+
   // ── Status callback (call ended) ──────────────────────────────────────────────
 
   /**
@@ -1511,7 +1536,13 @@ ${addTagInstruction}
         [botId],
       );
       const tenantId = meta?.tenantId ?? bot?.tenant_id ?? null;
-      const inboxId  = bot?.inbox_id ?? null;
+      // The bot's configured inbox may have been deleted → the conversation INSERT would
+      // violate conversations_inbox_id_fkey and the call (and its transcript) would be lost.
+      // Resolve to a valid inbox, and self-heal the bot config so it stops failing.
+      const inboxId = tenantId ? await this.resolveCallInbox(tenantId, bot?.inbox_id ?? null) : null;
+      if (inboxId && botId && inboxId !== (bot?.inbox_id ?? null)) {
+        await this.db.query(`UPDATE call_bots SET inbox_id=$2 WHERE id=$1`, [botId, inboxId]).catch(() => {});
+      }
 
       let conversationId: string | null = null;
       if (inboxId && tenantId && body.CallStatus === 'completed') {
