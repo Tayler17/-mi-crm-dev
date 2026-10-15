@@ -1141,9 +1141,12 @@ ${addTagInstruction}
         // UNDERSTANDS any language the caller speaks (Nova-3 multi, code-switching);
         // it still REPLIES in its own language via the prompt + its Aura voice, and
         // routes/transfers as needed. Fixes "the bot only understands its own language".
-        // smart_format + numerals so spoken numbers/phones are transcribed as DIGITS
-        // ("01782 971403") instead of words ("o one seven eight two…") in the inbox transcript.
-        listen: { provider: { type: 'deepgram', model: 'nova-3', language: 'multi', smart_format: true, numerals: true } },
+        // NOTE: `smart_format`/`numerals` are transcription (STT) query params, NOT valid
+        // fields of the Voice Agent listen.provider. Including them made Deepgram REJECT the
+        // whole Settings message → the agent never started (silent bot, no transcript) from
+        // ~Oct 9. Keep only the documented fields (type/model/language). Digit formatting of
+        // spoken numbers, if needed, is done by post-processing the transcript text, not here.
+        listen: { provider: { type: 'deepgram', model: 'nova-3', language: 'multi' } },
         think:  {
           provider: { type: 'open_ai', model: thinkModel, temperature: 0.7 },
           // Use OUR OpenAI key so the LLM does NATIVE tool-calling. With Deepgram's
