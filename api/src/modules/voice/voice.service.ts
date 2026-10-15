@@ -185,8 +185,9 @@ export class VoiceService implements OnModuleInit {
       [log.tenant_id, conv.id, note, log.direction],
     ).catch(() => {});
     await this.db.query(`UPDATE call_logs SET conversation_id=$2 WHERE id=$1`, [logId, conv.id]).catch(() => {});
-    // If the recording already arrived, attach it now (otherwise the recording callback will).
-    await this.attachRecording(logId).catch((e) => this.logger.warn(`[voice] attachRecording: ${e?.message}`));
+    // If the recording already arrived, attach it (in the background so we don't block the
+    // Twilio callback); otherwise the recording callback will.
+    void this.attachRecording(logId).catch((e) => this.logger.warn(`[voice] attachRecording: ${e?.message}`));
   }
 
   /** Twilio recording-status callback: store the recording URL, then try to attach it to
@@ -194,7 +195,7 @@ export class VoiceService implements OnModuleInit {
   async saveRecording(logId: string, recordingUrl: string): Promise<void> {
     if (!logId || !recordingUrl) return;
     await this.db.query(`UPDATE call_logs SET recording_url=$2 WHERE id=$1`, [logId, recordingUrl]).catch(() => {});
-    await this.attachRecording(logId).catch((e) => this.logger.warn(`[voice] attachRecording: ${e?.message}`));
+    void this.attachRecording(logId).catch((e) => this.logger.warn(`[voice] attachRecording: ${e?.message}`));
   }
 
   /** Download the call recording (audio) and post it as a playable message in the call
@@ -210,19 +211,35 @@ export class VoiceService implements OnModuleInit {
       [logId],
     ).catch(() => []);
     if (!log) return; // not ready yet (missing url or conversation), or already posted
-    const { accountSid, authToken } = await this.platformSettings.getVoice();
-    if (!accountSid || !authToken) return;
-    // Twilio recording resource → fetch the mp3 rendering with Basic auth.
+    // Download auth: the Twilio REST API (recordings included) accepts Basic auth with the
+    // API Key SID:Secret — which is ALWAYS configured for the softphone — as well as the
+    // Account SID:Auth Token. Prefer the API key (the Auth Token is often left unset, which
+    // made the download 401 → "download failed").
+    const [sdk, voice] = await Promise.all([
+      this.platformSettings.getVoiceSdk().catch(() => ({} as any)),
+      this.platformSettings.getVoice().catch(() => ({} as any)),
+    ]);
+    const pair = (sdk?.apiKey && sdk?.apiSecret) ? `${sdk.apiKey}:${sdk.apiSecret}`
+      : (voice?.accountSid && voice?.authToken) ? `${voice.accountSid}:${voice.authToken}` : '';
+    if (!pair) {
+      this.logger.warn(`[voice] recording: no Twilio credentials to download log ${logId}`);
+      await this.db.query(`UPDATE call_logs SET recording_posted=false WHERE id=$1`, [logId]).catch(() => {});
+      return;
+    }
+    const auth = 'Basic ' + Buffer.from(pair).toString('base64');
+    // Twilio recording resource → the .mp3 rendering. It can take a few seconds to be ready
+    // after the "completed" event, so retry a handful of times (this runs in the background).
     const mp3Url = /\.mp3$/i.test(log.recording_url) ? log.recording_url : `${log.recording_url}.mp3`;
-    const auth = 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64');
     let buffer: Buffer | null = null;
-    for (let i = 0; i < 3 && !buffer; i++) {               // the mp3 can take a moment to render
+    let lastStatus = 0;
+    for (let i = 0; i < 5 && !buffer; i++) {
       const res = await fetch(mp3Url, { headers: { Authorization: auth } }).catch(() => null);
-      if (res?.ok) buffer = Buffer.from(await res.arrayBuffer());
-      else await new Promise((r) => setTimeout(r, 1500));
+      if (res?.ok) { buffer = Buffer.from(await res.arrayBuffer()); break; }
+      lastStatus = res?.status ?? 0;
+      await new Promise((r) => setTimeout(r, 2500));
     }
     if (!buffer || buffer.length < 200) {
-      this.logger.warn(`[voice] recording download failed for log ${logId}`);
+      this.logger.warn(`[voice] recording download failed for log ${logId} (httpStatus=${lastStatus})`);
       await this.db.query(`UPDATE call_logs SET recording_posted=false WHERE id=$1`, [logId]).catch(() => {});
       return;
     }

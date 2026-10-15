@@ -155,6 +155,10 @@ export class VoiceController {
       const duration = Number(body?.DialCallDuration ?? body?.CallDuration ?? 0);
       const dialStatus = String(body?.DialCallStatus ?? body?.CallStatus ?? 'completed');
       await this.voice.finishCallLog(logId, duration, dialStatus);
+      // The Dial action callback carries RecordingUrl when recording is on — capture it as a
+      // backup in case the recordingStatusCallback doesn't arrive. (Attach runs in background.)
+      const recUrl = String(body?.RecordingUrl ?? '');
+      if (recUrl) await this.voice.saveRecording(logId, recUrl).catch(() => {});
     }
     // Empty response ends the call cleanly.
     res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
