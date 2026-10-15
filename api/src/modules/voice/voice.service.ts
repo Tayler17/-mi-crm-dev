@@ -1,7 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { createHmac } from 'crypto';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
 
 /**
@@ -13,13 +15,21 @@ import { PlatformSettingsService } from '../settings/platform-settings.service';
  * Twilio SDK. Needs an API Key SID + Secret from the Twilio console.
  */
 @Injectable()
-export class VoiceService {
+export class VoiceService implements OnModuleInit {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly platformSettings: PlatformSettingsService,
   ) {}
 
   private readonly logger = new Logger(VoiceService.name);
+
+  async onModuleInit() {
+    // Agent softphone calls can be recorded (audio only). We stash the recording URL on
+    // the call log and post it as a playable message once both the recording and the
+    // conversation exist (synchronize:false → add the columns if missing).
+    await this.db.query(`ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url text`).catch(() => {});
+    await this.db.query(`ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_posted boolean NOT NULL DEFAULT false`).catch(() => {});
+  }
 
   // Active warm-transfer sessions, keyed by conference room name.
   private warmSessions = new Map<string, { tenantId: string; agentUserId: string; customerLeg: string; targetId: string; bCallSid?: string; confSid?: string }>();
@@ -175,6 +185,58 @@ export class VoiceService {
       [log.tenant_id, conv.id, note, log.direction],
     ).catch(() => {});
     await this.db.query(`UPDATE call_logs SET conversation_id=$2 WHERE id=$1`, [logId, conv.id]).catch(() => {});
+    // If the recording already arrived, attach it now (otherwise the recording callback will).
+    await this.attachRecording(logId).catch((e) => this.logger.warn(`[voice] attachRecording: ${e?.message}`));
+  }
+
+  /** Twilio recording-status callback: store the recording URL, then try to attach it to
+   *  the call's conversation (the status and recording callbacks race; either can win). */
+  async saveRecording(logId: string, recordingUrl: string): Promise<void> {
+    if (!logId || !recordingUrl) return;
+    await this.db.query(`UPDATE call_logs SET recording_url=$2 WHERE id=$1`, [logId, recordingUrl]).catch(() => {});
+    await this.attachRecording(logId).catch((e) => this.logger.warn(`[voice] attachRecording: ${e?.message}`));
+  }
+
+  /** Download the call recording (audio) and post it as a playable message in the call
+   *  conversation. Idempotent: `recording_posted` is claimed atomically, so whichever of
+   *  the recording/status callbacks runs last (once BOTH the URL and the conversation
+   *  exist) posts it exactly once. */
+  private async attachRecording(logId: string): Promise<void> {
+    const [log] = await this.db.query(
+      `UPDATE call_logs SET recording_posted=true
+         WHERE id=$1 AND recording_posted=false
+           AND recording_url IS NOT NULL AND conversation_id IS NOT NULL
+       RETURNING tenant_id, conversation_id, recording_url, direction`,
+      [logId],
+    ).catch(() => []);
+    if (!log) return; // not ready yet (missing url or conversation), or already posted
+    const { accountSid, authToken } = await this.platformSettings.getVoice();
+    if (!accountSid || !authToken) return;
+    // Twilio recording resource → fetch the mp3 rendering with Basic auth.
+    const mp3Url = /\.mp3$/i.test(log.recording_url) ? log.recording_url : `${log.recording_url}.mp3`;
+    const auth = 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+    let buffer: Buffer | null = null;
+    for (let i = 0; i < 3 && !buffer; i++) {               // the mp3 can take a moment to render
+      const res = await fetch(mp3Url, { headers: { Authorization: auth } }).catch(() => null);
+      if (res?.ok) buffer = Buffer.from(await res.arrayBuffer());
+      else await new Promise((r) => setTimeout(r, 1500));
+    }
+    if (!buffer || buffer.length < 200) {
+      this.logger.warn(`[voice] recording download failed for log ${logId}`);
+      await this.db.query(`UPDATE call_logs SET recording_posted=false WHERE id=$1`, [logId]).catch(() => {});
+      return;
+    }
+    const uploadsDir = join(process.cwd(), 'uploads', 'messages');
+    if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
+    const filename = `call-${logId}.mp3`;
+    writeFileSync(join(uploadsDir, filename), buffer);
+    const body = `/uploads/messages/${filename}|grabacion.mp3`;
+    await this.db.query(
+      `INSERT INTO messages (tenant_id, conversation_id, body, sender_type, direction, content_type, is_private, created_at)
+       VALUES ($1, $2, $3, 'agent', $4, 'audio', false, NOW())`,
+      [log.tenant_id, log.conversation_id, body, log.direction || 'outbound'],
+    ).catch(() => {});
+    await this.db.query(`UPDATE conversations SET updated_at=NOW() WHERE id=$1`, [log.conversation_id]).catch(() => {});
   }
 
   /** Escape a string for XML attribute/text. */

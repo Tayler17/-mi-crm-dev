@@ -96,22 +96,54 @@ export class VoiceController {
     }
     // Log the agent's outbound call (finalized with duration/status by /voice/status).
     let actionAttr = '';
+    let recordAttr = '';
     const isPstn = !to.startsWith('client:');
+    const base = this.baseUrl(req);
     if (userId && isPstn) {
       const tenantId = await this.voice.getTenantId(userId);
       if (tenantId) {
         const logId = await this.voice.logOutboundCall({ tenantId, userId, from: callerId, to });
         if (logId) {
-          const base = this.baseUrl(req);
           actionAttr = ` action="${xe(`${base}/voice/status?logId=${logId}`)}" method="POST"`;
+          // Record the call (audio only); the recording is attached to the conversation
+          // when Twilio POSTs the ready URL to /voice/recording.
+          recordAttr = ` record="record-from-answer-dual" recordingStatusCallback="${xe(`${base}/voice/recording?log=${logId}`)}" recordingStatusCallbackEvent="completed"`;
         }
       }
     }
-    // Allow agent→agent (client:) as well as PSTN numbers.
-    const target = isPstn ? `<Number>${xe(to)}</Number>` : `<Client>${xe(to.slice('client:'.length))}</Client>`;
+    // Allow agent→agent (client:) as well as PSTN numbers. When the call is being recorded,
+    // the <Number> `url` plays a short "this call may be recorded" notice on the CUSTOMER's
+    // leg before the two parties are bridged (so we never announce recording when we aren't).
+    const announceAttr = recordAttr ? ` url="${xe(`${base}/voice/announce`)}"` : '';
+    const target = isPstn
+      ? `<Number${announceAttr}>${xe(to)}</Number>`
+      : `<Client>${xe(to.slice('client:'.length))}</Client>`;
     res.send(
-      `<?xml version="1.0" encoding="UTF-8"?><Response><Dial callerId="${xe(callerId)}" answerOnBridge="true"${actionAttr}>${target}</Dial></Response>`,
+      `<?xml version="1.0" encoding="UTF-8"?><Response><Dial callerId="${xe(callerId)}" answerOnBridge="true"${actionAttr}${recordAttr}>${target}</Dial></Response>`,
     );
+  }
+
+  /** Recording notice played on the CUSTOMER's leg before bridging. PUBLIC (Twilio has no JWT). */
+  @Post('announce')
+  @HttpCode(200)
+  @Header('Content-Type', 'text/xml')
+  announce(@Res() res: Response) {
+    res.send(
+      '<?xml version="1.0" encoding="UTF-8"?><Response>' +
+        '<Say language="en-GB">This call may be recorded for quality and training purposes.</Say>' +
+        '<Say language="es-MX">Esta llamada puede ser grabada con fines de calidad.</Say>' +
+      '</Response>',
+    );
+  }
+
+  /** Recording-status callback — Twilio POSTs here when the call recording is ready. PUBLIC. */
+  @Post('recording')
+  @HttpCode(200)
+  @Header('Content-Type', 'text/xml')
+  async recording(@Query('log') logId: string, @Body() body: any, @Res() res: Response) {
+    const url = String(body?.RecordingUrl ?? '');
+    if (logId && url) await this.voice.saveRecording(logId, url).catch(() => {});
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
   }
 
   /** Dial action callback — Twilio POSTs here when the outbound leg ends. Finalizes the log. */
