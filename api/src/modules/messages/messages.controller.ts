@@ -146,6 +146,14 @@ export class MessagesController {
 
     const msg = await this.service.create(cid, dto, tenantId, req.user.id);
 
+    // Bump the conversation so it rises to the top of the inbox list (ordered by updated_at).
+    // Inbound and the file-send path already do this; the text-send path did not, so our own
+    // replies left the conversation where it was until the customer wrote back.
+    await this.db.query(
+      `UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1`,
+      [cid],
+    );
+
     // Deliver through the conversation's actual channel (WA Web, Telegram, etc.)
     await this.deliverOutbound(cid, tenantId, dto.body ?? '', dto.contentType, msg.id, dto.replyToMessageId);
 
