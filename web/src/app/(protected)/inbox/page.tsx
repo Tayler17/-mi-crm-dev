@@ -1992,11 +1992,11 @@ export default function InboxPage() {
                         </span>
                         {m.direction === 'outbound' && conv?.channelType?.startsWith('whatsapp') && (() => {
                           const notEn = i.locale?.startsWith('en');
-                          // 'sent' that never reached 'delivered' after a grace period means WhatsApp
-                          // accepted it but did NOT deliver (typically free text sent outside the 24h
-                          // window). Surface it clearly instead of a silent single check.
-                          const ageMin = m.createdAt ? (Date.now() - new Date(m.createdAt).getTime()) / 60000 : 0;
-                          const undelivered = m.status === 'failed' || (m.status === 'sent' && ageMin > 10);
+                          // Only flag as undelivered when WhatsApp EXPLICITLY reports a failure.
+                          // We no longer infer non-delivery from a missing 'delivered' receipt:
+                          // coexistence numbers don't reliably send delivery receipts, so a message
+                          // can be fully delivered yet stay at 'sent' — flagging that is a false alarm.
+                          const undelivered = m.status === 'failed';
                           if (undelivered) {
                             return (
                               <span
