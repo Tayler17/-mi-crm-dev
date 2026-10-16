@@ -206,14 +206,19 @@ export class VoiceService implements OnModuleInit {
    *  the recording/status callbacks runs last (once BOTH the URL and the conversation
    *  exist) posts it exactly once. */
   private async attachRecording(logId: string): Promise<void> {
-    const [log] = await this.db.query(
+    const res: any = await this.db.query(
       `UPDATE call_logs SET recording_posted=true
          WHERE id=$1 AND recording_posted=false
            AND recording_url IS NOT NULL AND conversation_id IS NOT NULL
        RETURNING tenant_id, conversation_id, recording_url, direction`,
       [logId],
-    ).catch(() => []);
-    if (!log) return; // not ready yet (missing url or conversation), or already posted
+    ).catch(() => null);
+    // TypeORM's pg driver returns `UPDATE … RETURNING` as [rows, affectedCount] (unlike
+    // SELECT/INSERT, which return just rows), so `const [log] = …` grabbed the rows ARRAY and
+    // every field read as undefined (→ the "undefined.mp3" download). Normalize both shapes.
+    const rows: any[] = Array.isArray(res) ? (Array.isArray(res[0]) ? res[0] : res) : [];
+    const log = rows[0];
+    if (!log || !log.recording_url) return; // not ready, already posted, or nothing claimed
     // Download auth: the Twilio REST API (recordings included) accepts Basic auth with the
     // API Key SID:Secret — which is ALWAYS configured for the softphone — as well as the
     // Account SID:Auth Token. Prefer the API key (the Auth Token is often left unset, which
