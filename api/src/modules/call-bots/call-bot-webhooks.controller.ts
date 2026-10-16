@@ -66,6 +66,16 @@ export class CallBotWebhooksController {
     return { ok: true };
   }
 
+  /** Recording-status callback: Twilio posts here when a call's audio recording is ready
+   *  (inbound bot calls). handleRecording links it by CallSid and posts it to the chat. */
+  @Post('recording')
+  async recording(
+    @Body() body: Record<string, string>,
+  ): Promise<{ ok: boolean }> {
+    await this.twilioSvc.handleRecording(body);
+    return { ok: true };
+  }
+
   // ── Per-bot webhooks (legacy / backward-compatible) ──────────────────────────
 
   /** Twilio posts here when a call arrives on the bot's number. Returns TwiML. */

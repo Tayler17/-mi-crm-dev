@@ -220,6 +220,9 @@ export class CallBotTwilioService {
   /** callSid → timestamp of last activity, for TTL eviction */
   private readonly callLastSeen = new Map<string, number>();
 
+  /** callSid → recording URL that arrived (recording callback) before the call log existed. */
+  private readonly pendingRecordings = new Map<string, string>();
+
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly platformSettings: PlatformSettingsService,
@@ -499,6 +502,19 @@ export class CallBotTwilioService {
       this.logger.log(`[callbot] Call ${callSid} from ${from} — no CRM contact found (transferred=${isTransferredCall})`);
     }
 
+    // Record the inbound call (audio only) when enabled; start it via the Twilio REST API
+    // because the streaming TwiML can't carry a `record` attribute. Fire-and-forget (never
+    // blocks the live call), and only on the FIRST entry (not a transfer re-entry, to avoid
+    // a double recording/notice). Disable per platform with setting call.recording='off'.
+    let recNotice = '';
+    if (!isTransferredCall) {
+      const recSetting = String((await this.platformSettings.get('call.recording').catch(() => '')) ?? '').toLowerCase();
+      if (recSetting !== 'off') {
+        void this.startCallRecording(callSid, baseUrl);
+        recNotice = '<Say language="en-GB">This call may be recorded for quality and training purposes.</Say><Say language="es-MX">Esta llamada puede ser grabada con fines de calidad.</Say>';
+      }
+    }
+
     // Real-time mode (Media Streams): hand the call audio to our WebSocket.
     // Done AFTER contact resolution so callMeta carries the contact → the
     // conversation/call-log link to the right CRM contact, not "No contact".
@@ -520,6 +536,7 @@ export class CallBotTwilioService {
     if (useStreaming) {
       const wssUrl = baseUrl.replace(/^http/i, 'ws') + '/call-bots/twilio/media-stream';
       return twiml(`
+        ${recNotice}
         <Connect>
           <Stream url="${wssUrl}">
             <Parameter name="botId" value="${botId}"/>
@@ -632,6 +649,7 @@ ${addTagInstruction}
     const welcomeEl = await this.ttsElement(welcomeText, bot, callSid, baseUrl);
 
     return twiml(`
+      ${recNotice}
       <Gather input="speech" enhanced="true" speechModel="phone_call" action="${gather}" timeout="6" speechTimeout="auto" language="${voice.language}">
         ${welcomeEl}
       </Gather>
@@ -1501,6 +1519,57 @@ ${addTagInstruction}
     return created?.id ?? null;
   }
 
+  /** Start recording an in-progress call via the Twilio REST API (used for inbound bot calls,
+   *  whose <Connect><Stream> TwiML can't carry a `record` attribute). Fire-and-forget: a
+   *  failure never affects the live call. The recording is posted to the conversation by the
+   *  recordingStatusCallback → handleRecording. */
+  private async startCallRecording(callSid: string, baseUrl: string): Promise<void> {
+    try {
+      const [sdk, voiceCfg] = await Promise.all([
+        this.platformSettings.getVoiceSdk().catch(() => ({} as any)),
+        this.platformSettings.getVoice().catch(() => ({} as any)),
+      ]);
+      const accountSid = sdk?.accountSid || voiceCfg?.accountSid;
+      const pair = (sdk?.apiKey && sdk?.apiSecret) ? `${sdk.apiKey}:${sdk.apiSecret}`
+        : (voiceCfg?.accountSid && voiceCfg?.authToken) ? `${voiceCfg.accountSid}:${voiceCfg.authToken}` : '';
+      if (!accountSid || !pair) return;
+      const auth = 'Basic ' + Buffer.from(pair).toString('base64');
+      const form = new URLSearchParams({
+        RecordingStatusCallback: `${baseUrl}/call-bots/twilio/recording`,
+        RecordingStatusCallbackEvent: 'completed',
+        RecordingChannels: 'dual',
+        RecordingTrack: 'both',
+      }).toString();
+      await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${callSid}/Recordings.json`, {
+        method: 'POST',
+        headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form,
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch (e: any) {
+      this.logger.warn(`[callbot] startCallRecording ${callSid}: ${e?.message}`);
+    }
+  }
+
+  /** Twilio recording-status callback for an inbound bot call. Links the recording to the
+   *  call log by CallSid and reuses the voice service to download + post it as an audio
+   *  message (idempotent). If the call log doesn't exist yet, stash it for handleStatus. */
+  async handleRecording(body: Record<string, string>): Promise<void> {
+    const callSid = body.CallSid;
+    const url = body.RecordingUrl;
+    if (!callSid || !url) return;
+    const [log] = await this.db.query(
+      `SELECT id FROM call_logs WHERE call_sid=$1 ORDER BY created_at DESC LIMIT 1`,
+      [callSid],
+    ).catch(() => []);
+    if (log?.id) {
+      await this.voice.saveRecording(log.id, url).catch((e) => this.logger.warn(`[callbot] saveRecording: ${e?.message}`));
+    } else {
+      // Call log not written yet (handleStatus runs on call end) — attach when it is.
+      this.pendingRecordings.set(callSid, url);
+    }
+  }
+
   // ── Status callback (call ended) ──────────────────────────────────────────────
 
   /**
@@ -1580,19 +1649,26 @@ ${addTagInstruction}
         }
       }
 
-      await this.db.query(
+      const [newLog] = await this.db.query(
         `INSERT INTO call_logs
            (tenant_id, bot_id, direction, from_number, to_number, duration, status, outcome, recording_url, transcript,
-            contact_id, conversation_id, started_at, ended_at, created_at)
+            contact_id, conversation_id, call_sid, started_at, ended_at, created_at)
          VALUES (
            $11, $1, $2, $3, $4, $5, $6, $7, $8, $9,
-           $10, $12,
+           $10, $12, $13,
            NOW() - ($5::int * INTERVAL '1 second'),
            NOW(), NOW()
-         )`,
+         ) RETURNING id`,
         [botId, direction, body.From ?? '', body.To ?? '', duration, body.CallStatus, outcome, recordingUrl, transcript,
-         contactId, tenantId, conversationId],
+         contactId, tenantId, conversationId, body.CallSid ?? null],
       );
+      // If the call's audio recording arrived (recording callback) before this log existed,
+      // attach it now — reusing the voice service's download + "post as audio message" logic.
+      if (newLog?.id && body.CallSid && this.pendingRecordings.has(body.CallSid)) {
+        const url = this.pendingRecordings.get(body.CallSid)!;
+        this.pendingRecordings.delete(body.CallSid);
+        void this.voice.saveRecording(newLog.id, url).catch((e) => this.logger.warn(`[callbot] saveRecording: ${e?.message}`));
+      }
 
       await this.db.query(
         `UPDATE call_bots
