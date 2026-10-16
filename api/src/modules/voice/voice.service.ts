@@ -29,6 +29,9 @@ export class VoiceService implements OnModuleInit {
     // conversation exist (synchronize:false → add the columns if missing).
     await this.db.query(`ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url text`).catch(() => {});
     await this.db.query(`ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_posted boolean NOT NULL DEFAULT false`).catch(() => {});
+    // call_sid lets the recording-status callback (which only carries the Twilio CallSid)
+    // find the right call log — used for inbound call-bot recordings.
+    await this.db.query(`ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS call_sid text`).catch(() => {});
   }
 
   // Active warm-transfer sessions, keyed by conference room name.
@@ -229,17 +232,23 @@ export class VoiceService implements OnModuleInit {
     const auth = 'Basic ' + Buffer.from(pair).toString('base64');
     // Twilio recording resource → the .mp3 rendering. It can take a few seconds to be ready
     // after the "completed" event, so retry a handful of times (this runs in the background).
-    const mp3Url = /\.mp3$/i.test(log.recording_url) ? log.recording_url : `${log.recording_url}.mp3`;
+    const mp3Url = (/\.mp3$/i.test(log.recording_url) ? log.recording_url : `${log.recording_url}.mp3`).trim();
     let buffer: Buffer | null = null;
-    let lastStatus = 0;
+    let lastErr = '';
     for (let i = 0; i < 5 && !buffer; i++) {
-      const res = await fetch(mp3Url, { headers: { Authorization: auth } }).catch(() => null);
-      if (res?.ok) { buffer = Buffer.from(await res.arrayBuffer()); break; }
-      lastStatus = res?.status ?? 0;
-      await new Promise((r) => setTimeout(r, 2500));
+      try {
+        const res = await fetch(mp3Url, { headers: { Authorization: auth }, redirect: 'follow' });
+        if (res.ok) { buffer = Buffer.from(await res.arrayBuffer()); break; }
+        lastErr = `http ${res.status}`;
+      } catch (e: any) {
+        // Capture the real reason (DNS, TLS, invalid URL, connect error) — a bare rejection
+        // otherwise shows up as httpStatus=0 and tells us nothing.
+        lastErr = `${e?.cause?.code ?? e?.name ?? 'err'}: ${e?.message ?? e}`;
+      }
+      if (!buffer) await new Promise((r) => setTimeout(r, 2500));
     }
     if (!buffer || buffer.length < 200) {
-      this.logger.warn(`[voice] recording download failed for log ${logId} (httpStatus=${lastStatus})`);
+      this.logger.warn(`[voice] recording download failed for log ${logId} (${lastErr || 'empty body'}) url=${mp3Url}`);
       await this.db.query(`UPDATE call_logs SET recording_posted=false WHERE id=$1`, [logId]).catch(() => {});
       return;
     }
