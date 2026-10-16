@@ -148,6 +148,20 @@ const CHANNEL_ICONS: Record<string, string> = {
   email: '📧', chat: '💬', whatsapp: '📱', whatsapp_web: '📱', instagram: '📷', telegram: '✈️', phone: '📞',
 };
 
+/** Icon for a conversation row. Phone calls get a directional arrow so inbound (↙, green)
+ *  and outbound (↗, blue) calls are distinguishable at a glance in the list. */
+function convIcon(channelType?: string, subject?: string): React.ReactNode {
+  if (channelType === 'phone') {
+    const out = (subject || '').toLowerCase().includes('saliente');
+    return (
+      <span title={out ? 'Saliente' : 'Entrante'} style={{ color: out ? '#2563eb' : '#16a34a', fontWeight: 700, whiteSpace: 'nowrap' }}>
+        {out ? '↗' : '↙'}📞
+      </span>
+    );
+  }
+  return CHANNEL_ICONS[channelType ?? ''] ?? '💬';
+}
+
 // ── Filter bar component ──────────────────────────────────────────────────────
 
 interface FilterBarProps {
@@ -1633,7 +1647,7 @@ export default function InboxPage() {
                 )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }}>
                   <div className="inbox-conv-item-name" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                    {CHANNEL_ICONS[c.channelType] ?? '💬'}{' '}
+                    {convIcon(c.channelType, c.subject)}{' '}
                     {c.isGroup ? (
                       <>
                         <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: '#d1fae5', color: '#065f46', fontWeight: 700, lineHeight: 1.4 }}>👥</span>
@@ -1794,7 +1808,7 @@ export default function InboxPage() {
                 ) : (listConv?.contact?.fullName || listConv?.contact?.email || i.noContact)}
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {CHANNEL_ICONS[conv.channelType] ?? ''} {conv.subject || i.noSubject}
+                {convIcon(conv.channelType, conv.subject)} {conv.subject || i.noSubject}
                 {listConv?.inbox?.name && <span style={{ marginLeft: 6, opacity: .7 }}>· {listConv.inbox.name}</span>}
               </div>
             </div>
