@@ -383,78 +383,84 @@ export class WebhooksService {
     // it. full_name may hold it only for CRM display while name_verified is false.
     const { displayName: waDisplayName, nameSource: newNameSource } = resolveInboundWhatsAppName(contactName, contactPhone);
     const hasWaDisplay = !!waDisplayName;
-    const [existing] = await this.db.query(
-      `SELECT id, full_name, whatsapp_display_name, name_verified FROM contacts WHERE tenant_id=$1 AND phone=$2 LIMIT 1`,
-      [tenantId, contactPhone],
-    );
-    let contactId: string;
-    if (existing) {
-      contactId = existing.id;
-      const sets: string[] = [];
-      const params: any[] = [];
-      // Keep the WhatsApp display name in sync (CASE 9: WA name changes later).
-      if (hasWaDisplay && existing.whatsapp_display_name !== waDisplayName) {
-        params.push(waDisplayName); sets.push(`whatsapp_display_name=$${params.length}`);
-      }
-      // Backfill full_name for display ONLY when it's still the raw number placeholder
-      // and the name has NOT been verified — never overwrite a confirmed name.
-      if (hasWaDisplay && !existing.name_verified && existing.full_name === contactPhone) {
-        params.push(waDisplayName); sets.push(`full_name=$${params.length}`);
-      }
-      if (sets.length) {
-        params.push(contactId);
-        await this.db.query(
-          `UPDATE contacts SET ${sets.join(',')}, updated_at=NOW() WHERE id=$${params.length}`,
-          params,
-        ).catch(() => {});
-      }
-    } else {
-      const [newContact] = await this.db.query(
-        `INSERT INTO contacts (tenant_id, full_name, phone, whatsapp_display_name, name_verified, name_source, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,false,$5,NOW(),NOW()) RETURNING id`,
-        [tenantId, contactName, contactPhone, waDisplayName, newNameSource],
-      );
-      contactId = newContact.id;
-    }
-
-    // 2. Find or REOPEN the contact's conversation so the whole history stays in ONE chat.
-    // Look at the latest conversation regardless of status: if it was resolved, reopen it
-    // and bump session_count (each reopen still counts as a conversation for reporting).
-    // Only create a brand-new conversation when the contact has none at all.
-    const [existingConv] = await this.db.query(
-      `SELECT id, status FROM conversations
-       WHERE tenant_id=$1 AND contact_id=$2 AND connection_id=$3
-       ORDER BY created_at DESC LIMIT 1`,
-      [tenantId, contactId, connectionId],
-    );
-    let conversationId: string;
+    // Serialize ALL inbound processing for this phone in one transaction with an advisory
+    // lock, so several messages arriving at almost the same time don't each create a
+    // duplicate contact and/or a separate conversation (the race that split one contact's
+    // chat into 3 conversations). No schema change.
     let isNew = false;
-    if (existingConv) {
-      conversationId = existingConv.id;
-      if (existingConv.status === 'resolved') {
-        await this.db.query(
-          `UPDATE conversations SET status='open', session_count=session_count+1, updated_at=NOW() WHERE id=$1`,
-          [conversationId],
+    const { contactId, conversationId } = await this.db.transaction<{ contactId: string; conversationId: string }>(async (m) => {
+      await m.query(`SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`, [`inbound:${tenantId}:${contactPhone}`]);
+
+      // 1. Find or create contact.
+      const [existing] = await m.query(
+        `SELECT id, full_name, whatsapp_display_name, name_verified FROM contacts WHERE tenant_id=$1 AND phone=$2 LIMIT 1`,
+        [tenantId, contactPhone],
+      );
+      let cId: string;
+      if (existing) {
+        cId = existing.id;
+        const sets: string[] = [];
+        const params: any[] = [];
+        // Keep the WhatsApp display name in sync (CASE 9: WA name changes later).
+        if (hasWaDisplay && existing.whatsapp_display_name !== waDisplayName) {
+          params.push(waDisplayName); sets.push(`whatsapp_display_name=$${params.length}`);
+        }
+        // Backfill full_name for display ONLY when it's still the raw number placeholder
+        // and the name has NOT been verified — never overwrite a confirmed name.
+        if (hasWaDisplay && !existing.name_verified && existing.full_name === contactPhone) {
+          params.push(waDisplayName); sets.push(`full_name=$${params.length}`);
+        }
+        if (sets.length) {
+          params.push(cId);
+          await m.query(
+            `UPDATE contacts SET ${sets.join(',')}, updated_at=NOW() WHERE id=$${params.length}`,
+            params,
+          ).catch(() => {});
+        }
+      } else {
+        const [newContact] = await m.query(
+          `INSERT INTO contacts (tenant_id, full_name, phone, whatsapp_display_name, name_verified, name_source, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,false,$5,NOW(),NOW()) RETURNING id`,
+          [tenantId, contactName, contactPhone, waDisplayName, newNameSource],
         );
-        // Fresh chapter: end any lingering bot sessions (active or handed-off) so the
-        // bot starts a NEW session and picks up again. A human takeover from the previous
-        // (now-resolved) chapter must not keep the bot silent forever.
-        await this.db.query(
-          `UPDATE ai_chatbot_sessions SET status='ended', ended_at=NOW()
-             WHERE conversation_id=$1 AND status IN ('active','handed_off')`,
-          [conversationId],
-        ).catch(() => {});
+        cId = newContact.id;
       }
-    } else {
-      const [newConv] = await this.db.query(
+
+      // 2. Find or REOPEN the contact's conversation so the whole history stays in ONE chat.
+      // Reuse the latest conversation regardless of status (reopen if resolved); only create
+      // a brand-new one when the contact has none at all.
+      const [existingConv] = await m.query(
+        `SELECT id, status FROM conversations
+         WHERE tenant_id=$1 AND contact_id=$2 AND connection_id=$3
+         ORDER BY created_at DESC LIMIT 1`,
+        [tenantId, cId, connectionId],
+      );
+      if (existingConv) {
+        if (existingConv.status === 'resolved') {
+          await m.query(
+            `UPDATE conversations SET status='open', session_count=session_count+1, updated_at=NOW() WHERE id=$1`,
+            [existingConv.id],
+          );
+          // Fresh chapter: end any lingering bot sessions (active or handed-off) so the
+          // bot starts a NEW session and picks up again. A human takeover from the previous
+          // (now-resolved) chapter must not keep the bot silent forever.
+          await m.query(
+            `UPDATE ai_chatbot_sessions SET status='ended', ended_at=NOW()
+               WHERE conversation_id=$1 AND status IN ('active','handed_off')`,
+            [existingConv.id],
+          ).catch(() => {});
+        }
+        return { contactId: cId, conversationId: existingConv.id };
+      }
+      const [newConv] = await m.query(
         `INSERT INTO conversations
            (tenant_id, contact_id, inbox_id, connection_id, external_id, channel_type, status, created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,'open',NOW(),NOW()) RETURNING id`,
-        [tenantId, contactId, inboxId ?? null, connectionId, externalId, channel],
+        [tenantId, cId, inboxId ?? null, connectionId, externalId, channel],
       );
-      conversationId = newConv.id;
       isNew = true;
-    }
+      return { contactId: cId, conversationId: newConv.id };
+    });
 
     // 3. Dedup by external message ID
     const [dup] = await this.db.query(
