@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { buildInvoiceLines, formatInvoiceNumber, RawInvoiceItem } from './invoice-calc';
+import { buildInvoiceLines, formatInvoiceNumber, isInvoiceOverdue, RawInvoiceItem } from './invoice-calc';
 
 /**
  * Invoices module.
@@ -120,27 +120,34 @@ export class InvoicesService implements OnModuleInit {
   }
 
   // ── Draft invoices (Etapa 1) ────────────────────────────────────────────────
-  /** An invoice is overdue only once issued/partially-paid, with balance due, past due_date. */
-  private isOverdue(inv: any): boolean {
-    if (!['issued', 'partially_paid'].includes(inv.financial_status)) return false;
-    const balance = Number(inv.total_minor) - Number(inv.amount_paid_minor);
-    if (balance <= 0 || !inv.due_date) return false;
-    const today = new Date().toISOString().slice(0, 10);
-    return String(inv.due_date).slice(0, 10) < today;
-  }
-
-  async list(tenantId: string, limit = 200) {
-    return this.db.query(
+  /** Financial / delivery / overdue are three INDEPENDENT dimensions (Etapa 3).
+   *  Overdue is derived (never stored) so it can't drift from the financial status. */
+  async list(
+    tenantId: string,
+    filters: { status?: string; overdue?: boolean; q?: string } = {},
+    limit = 200,
+  ) {
+    const where: string[] = ['i.tenant_id = $1'];
+    const params: any[] = [tenantId];
+    if (filters.status) { params.push(filters.status); where.push(`i.financial_status = $${params.length}`); }
+    if (filters.q) {
+      params.push(`%${filters.q}%`);
+      where.push(`(i.number ILIKE $${params.length} OR c.full_name ILIKE $${params.length})`);
+    }
+    params.push(limit);
+    const rows = await this.db.query(
       `SELECT i.id, i.number, i.kind, i.financial_status, i.delivery_status, i.currency,
               i.total_minor, i.amount_paid_minor, (i.total_minor - i.amount_paid_minor) AS balance_minor,
               i.due_date, i.created_at, i.contact_id, c.full_name AS contact_name
          FROM invoices i
          LEFT JOIN contacts c ON c.id = i.contact_id
-        WHERE i.tenant_id = $1
+        WHERE ${where.join(' AND ')}
         ORDER BY i.created_at DESC
-        LIMIT $2`,
-      [tenantId, limit],
+        LIMIT $${params.length}`,
+      params,
     );
+    const withOverdue = rows.map((r: any) => ({ ...r, overdue: isInvoiceOverdue(r) }));
+    return filters.overdue ? withOverdue.filter((r: any) => r.overdue) : withOverdue;
   }
 
   async getOne(tenantId: string, id: string) {
@@ -159,7 +166,7 @@ export class InvoicesService implements OnModuleInit {
     return {
       ...inv,
       balance_minor: Number(inv.total_minor) - Number(inv.amount_paid_minor),
-      overdue: this.isOverdue(inv),
+      overdue: isInvoiceOverdue(inv),
       items,
     };
   }

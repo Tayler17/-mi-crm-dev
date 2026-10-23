@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Request, UseGuards,
+  Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Query, Request, UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -33,8 +33,17 @@ export class InvoicesController {
   }
 
   @Get()
-  list(@TenantId() tenantId: string) {
-    return this.invoices.list(tenantId);
+  list(
+    @TenantId() tenantId: string,
+    @Query('status') status?: string,
+    @Query('overdue') overdue?: string,
+    @Query('q') q?: string,
+  ) {
+    return this.invoices.list(tenantId, {
+      status: status || undefined,
+      overdue: overdue === 'true' || overdue === '1',
+      q: q || undefined,
+    });
   }
 
   @Get(':id')

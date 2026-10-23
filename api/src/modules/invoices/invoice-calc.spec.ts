@@ -1,4 +1,4 @@
-import { buildInvoiceLines } from './invoice-calc';
+import { buildInvoiceLines, isInvoiceOverdue } from './invoice-calc';
 
 describe('buildInvoiceLines', () => {
   it('computes lines and totals with per-line tax', () => {
@@ -32,5 +32,29 @@ describe('buildInvoiceLines', () => {
   it('handles fractional quantity and empty input', () => {
     expect(buildInvoiceLines([{ quantity: 1.5, unit_price_minor: 999, tax_rate: 0 }]).totals.subtotalMinor).toBe(1499);
     expect(buildInvoiceLines([]).totals).toEqual({ subtotalMinor: 0, taxMinor: 0, totalMinor: 0 });
+  });
+});
+
+describe('isInvoiceOverdue (derived, independent of delivery)', () => {
+  const today = new Date('2026-06-15T10:00:00Z');
+  const base = { financial_status: 'issued', total_minor: 1000, amount_paid_minor: 0 };
+
+  it('is overdue when issued, has balance, and due date is before today', () => {
+    expect(isInvoiceOverdue({ ...base, due_date: '2026-06-14' }, today)).toBe(true);
+  });
+  it('is NOT overdue on the due date itself (strictly before)', () => {
+    expect(isInvoiceOverdue({ ...base, due_date: '2026-06-15' }, today)).toBe(false);
+  });
+  it('is NOT overdue when due date is in the future', () => {
+    expect(isInvoiceOverdue({ ...base, due_date: '2026-06-16' }, today)).toBe(false);
+  });
+  it('drafts, paid, void and no-due-date are never overdue', () => {
+    expect(isInvoiceOverdue({ ...base, financial_status: 'draft', due_date: '2026-01-01' }, today)).toBe(false);
+    expect(isInvoiceOverdue({ ...base, financial_status: 'void', due_date: '2026-01-01' }, today)).toBe(false);
+    expect(isInvoiceOverdue({ ...base, amount_paid_minor: 1000, due_date: '2026-01-01' }, today)).toBe(false); // balance 0
+    expect(isInvoiceOverdue({ ...base, due_date: null }, today)).toBe(false);
+  });
+  it('applies to partially_paid with remaining balance', () => {
+    expect(isInvoiceOverdue({ financial_status: 'partially_paid', total_minor: 1000, amount_paid_minor: 400, due_date: '2026-06-14' }, today)).toBe(true);
   });
 });

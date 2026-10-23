@@ -33,6 +33,11 @@ export default function InvoicesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  // Filters (Etapa 3)
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterOverdue, setFilterOverdue] = useState(false);
+  const [filterQ, setFilterQ] = useState('');
+
   // Form state
   const [contactId, setContactId] = useState('');
   const [currency, setCurrency] = useState('GBP');
@@ -43,18 +48,26 @@ export default function InvoicesPage() {
 
   async function refresh() {
     setLoading(true);
-    try { setRows(await listInvoices()); } catch (e: any) { setError(e?.message || 'Error'); }
+    try {
+      setRows(await listInvoices({ status: filterStatus || undefined, overdue: filterOverdue, q: filterQ || undefined }));
+    } catch (e: any) { setError(e?.message || 'Error'); }
     finally { setLoading(false); }
   }
 
   useEffect(() => {
-    refresh();
     getContacts(1, 100).then((r) => setContacts(r.data)).catch(() => {});
     getInvoiceSettings().then((s) => {
       setCurrency((s.default_currency || 'GBP').toUpperCase());
       setDefaultTaxPct(String(Math.round((Number(s.default_tax_rate) || 0) * 10000) / 100));
     }).catch(() => {});
   }, []);
+
+  // Re-fetch when filters change (small debounce for the text search).
+  useEffect(() => {
+    const t = setTimeout(() => { refresh(); }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterStatus, filterOverdue, filterQ]);
 
   function openNew() {
     setEditingId(null); setReadOnly(false); setFormNumber(null);
@@ -159,6 +172,21 @@ export default function InvoicesPage() {
         <button className="btn btn-primary" onClick={openNew}>+ Nueva factura</button>
       </div>
 
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
+        <input className="form-input" style={{ maxWidth: 220 }} placeholder="Buscar nº o contacto…" value={filterQ} onChange={(e) => setFilterQ(e.target.value)} />
+        <select className="form-input" style={{ maxWidth: 190 }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option value="">Todos los estados</option>
+          <option value="draft">Borrador</option>
+          <option value="issued">Emitida</option>
+          <option value="partially_paid">Pago parcial</option>
+          <option value="paid">Pagada</option>
+          <option value="void">Anulada</option>
+        </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+          <input type="checkbox" checked={filterOverdue} onChange={(e) => setFilterOverdue(e.target.checked)} /> Solo vencidas
+        </label>
+      </div>
+
       {error && !showForm && <div style={{ color: '#dc2626', marginBottom: 12 }}>{error}</div>}
 
       {loading ? <div>Cargando…</div> : rows.length === 0 ? (
@@ -170,7 +198,7 @@ export default function InvoicesPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
-                {['Número', 'Contacto', 'Estado', 'Total', 'Saldo', 'Creada', ''].map((h) => (
+                {['Número', 'Contacto', 'Estado', 'Envío', 'Total', 'Saldo', 'Creada', ''].map((h) => (
                   <th key={h} style={{ padding: '10px 12px', fontWeight: 700, color: 'var(--text-muted)' }}>{h}</th>
                 ))}
               </tr>
@@ -183,8 +211,14 @@ export default function InvoicesPage() {
                   <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
                     <td style={{ padding: '10px 12px', fontWeight: 600 }}>{r.number || 'Borrador'}</td>
                     <td style={{ padding: '10px 12px' }}>{r.contact_name || contactName(r.contact_id)}</td>
-                    <td style={{ padding: '10px 12px' }}>
+                    <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                       <span style={{ background: st.bg, color: st.fg, padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>{st.label}</span>
+                      {r.overdue && <span style={{ marginLeft: 6, background: '#fee2e2', color: '#991b1b', padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>⚠ Vencida</span>}
+                    </td>
+                    <td style={{ padding: '10px 12px', fontSize: 12 }}>
+                      {r.delivery_status === 'sent'
+                        ? <span style={{ color: '#16a34a' }}>📤 Enviada</span>
+                        : <span style={{ color: 'var(--text-muted)' }}>— No enviada</span>}
                     </td>
                     <td style={{ padding: '10px 12px' }}>{formatMoney(Number(r.total_minor), r.currency)}</td>
                     <td style={{ padding: '10px 12px' }}>{formatMoney(Number(r.balance_minor), r.currency)}</td>
