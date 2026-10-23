@@ -60,3 +60,19 @@ export function buildInvoiceLines(rawItems: RawInvoiceItem[], defaultTaxRate = 0
 export function formatInvoiceNumber(prefix: string, year: number, seq: number): string {
   return `${(prefix || 'INV').toUpperCase()}-${year}-${String(seq).padStart(4, '0')}`;
 }
+
+/**
+ * Overdue is a DERIVED condition, independent of the financial and delivery statuses:
+ * an invoice is overdue only once issued/partially-paid, with a positive balance, whose
+ * due date is strictly before today. Drafts, paid, void and future-dated are never overdue.
+ */
+export function isInvoiceOverdue(
+  inv: { financial_status: string; total_minor: number | string; amount_paid_minor: number | string; due_date?: string | null },
+  today: Date = new Date(),
+): boolean {
+  if (!['issued', 'partially_paid'].includes(inv.financial_status)) return false;
+  const balance = Number(inv.total_minor) - Number(inv.amount_paid_minor);
+  if (balance <= 0 || !inv.due_date) return false;
+  const todayStr = today.toISOString().slice(0, 10);
+  return String(inv.due_date).slice(0, 10) < todayStr;
+}

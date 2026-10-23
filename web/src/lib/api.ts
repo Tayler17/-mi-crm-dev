@@ -2265,8 +2265,9 @@ export interface InvoiceListRow {
   id: string; number?: string | null; kind: string; financial_status: string;
   delivery_status: string; currency: string; total_minor: number; amount_paid_minor: number;
   balance_minor: number; due_date?: string | null; created_at: string;
-  contact_id?: string | null; contact_name?: string | null;
+  contact_id?: string | null; contact_name?: string | null; overdue?: boolean;
 }
+export interface InvoiceFilters { status?: string; overdue?: boolean; q?: string }
 export interface Invoice extends InvoiceListRow {
   deal_id?: string | null; default_tax_rate: number;
   subtotal_minor: number; tax_minor: number; notes?: string | null; terms?: string | null;
@@ -2277,7 +2278,14 @@ export interface CreateInvoiceDto {
   default_tax_rate?: number; due_date?: string | null; notes?: string | null; terms?: string | null;
   items: InvoiceItem[];
 }
-export const listInvoices = () => apiGet<InvoiceListRow[]>('/invoices');
+export const listInvoices = (filters: InvoiceFilters = {}) => {
+  const p = new URLSearchParams();
+  if (filters.status) p.set('status', filters.status);
+  if (filters.overdue) p.set('overdue', 'true');
+  if (filters.q) p.set('q', filters.q);
+  const qs = p.toString();
+  return apiGet<InvoiceListRow[]>(`/invoices${qs ? `?${qs}` : ''}`);
+};
 export const getInvoice = (id: string) => apiGet<Invoice>(`/invoices/${id}`);
 export const createInvoice = (data: CreateInvoiceDto) => apiPost<Invoice>('/invoices', data);
 export const updateInvoice = (id: string, data: CreateInvoiceDto) => apiPatch<Invoice>(`/invoices/${id}`, data);
