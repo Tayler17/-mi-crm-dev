@@ -97,6 +97,7 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   { group: '🧩 CORE CRM',      href: '/contacts',         label: 'Contactos',            icon: '👥' },
   { group: '🧩 CORE CRM',      href: '/companies',        label: 'Empresas',             icon: '🏢' },
   { group: '🧩 CORE CRM',      href: '/deals',            label: 'Deals',                icon: '💼' },
+  { group: '🧩 CORE CRM',      href: '/invoices',         label: 'Facturas',             icon: '🧾' },
   { group: '🧩 CORE CRM',      href: '/kanban',           label: 'Kanban & Pipelines',   icon: '▦' },
   { group: '🧩 CORE CRM',      href: '/tasks',            label: 'Tareas',               icon: '✓' },
   // ── Comunicación ──
