@@ -43,6 +43,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { PlansModule } from './modules/plans/plans.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { InvoicesModule } from './modules/invoices/invoices.module';
 import { BackupsModule } from './modules/backups/backups.module';
 import { WebchatModule } from './modules/webchat/webchat.module';
 import { HelpModule } from './modules/help/help.module';
@@ -140,6 +141,7 @@ import { TenantMiddleware } from './common/middleware/tenant.middleware';
     IntegrationsModule,
     PlansModule,
     BillingModule,
+    InvoicesModule,
     BackupsModule,
     WebchatModule,
     HelpModule,

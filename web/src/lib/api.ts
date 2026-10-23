@@ -148,6 +148,15 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   return handleResponse(res);
 }
 
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
+
 export async function apiDelete(path: string): Promise<void> {
   const res = await fetch(`${API_URL}${path}`, {
     method: 'DELETE',
@@ -2218,3 +2227,23 @@ export async function previewVoice(id: string): Promise<string> {
   if (!res.ok) throw new Error((await res.text().catch(() => '')) || 'No se pudo generar la muestra de voz');
   return URL.createObjectURL(await res.blob());
 }
+
+// ── Invoices — issuer settings (Ajustes → Facturación) ──────────────────────────
+export interface InvoiceSettings {
+  tenant_id?: string;
+  business_name?: string | null;
+  address?: string | null;
+  tax_id?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  logo_url?: string | null;
+  number_prefix?: string;
+  cn_prefix?: string;
+  default_currency?: string;
+  default_tax_rate?: number; // fraction, e.g. 0.2 = 20%
+  footer_terms?: string | null;
+  configured?: boolean;
+}
+export const getInvoiceSettings = () => apiGet<InvoiceSettings>('/invoices/settings');
+export const updateInvoiceSettings = (data: Partial<InvoiceSettings>) =>
+  apiPut<InvoiceSettings>('/invoices/settings', data);
