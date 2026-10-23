@@ -53,4 +53,10 @@ export class InvoicesController {
   deleteDraft(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.invoices.deleteDraft(tenantId, id);
   }
+
+  /** Emitir: asigna número sin huecos, congela los datos y vuelve la factura inmutable. */
+  @Post(':id/issue')
+  issue(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.invoices.issueInvoice(tenantId, id);
+  }
 }

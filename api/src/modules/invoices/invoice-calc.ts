@@ -55,3 +55,8 @@ export function buildInvoiceLines(rawItems: RawInvoiceItem[], defaultTaxRate = 0
   };
   return { items, totals };
 }
+
+/** Format a fiscal number like "INV-2026-0001" (sequence padded to at least 4 digits). */
+export function formatInvoiceNumber(prefix: string, year: number, seq: number): string {
+  return `${(prefix || 'INV').toUpperCase()}-${year}-${String(seq).padStart(4, '0')}`;
+}
