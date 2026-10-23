@@ -2247,3 +2247,38 @@ export interface InvoiceSettings {
 export const getInvoiceSettings = () => apiGet<InvoiceSettings>('/invoices/settings');
 export const updateInvoiceSettings = (data: Partial<InvoiceSettings>) =>
   apiPut<InvoiceSettings>('/invoices/settings', data);
+
+// ── Invoices (drafts — Etapa 1) ────────────────────────────────────────────────
+export interface InvoiceItem {
+  id?: string;
+  description: string;
+  quantity: number;
+  unit_price_minor: number;
+  discount_minor?: number;
+  tax_rate?: number | null; // fraction; null → inherit invoice default
+  line_subtotal_minor?: number;
+  line_tax_minor?: number;
+  line_total_minor?: number;
+  sort_order?: number;
+}
+export interface InvoiceListRow {
+  id: string; number?: string | null; kind: string; financial_status: string;
+  delivery_status: string; currency: string; total_minor: number; amount_paid_minor: number;
+  balance_minor: number; due_date?: string | null; created_at: string;
+  contact_id?: string | null; contact_name?: string | null;
+}
+export interface Invoice extends InvoiceListRow {
+  deal_id?: string | null; default_tax_rate: number;
+  subtotal_minor: number; tax_minor: number; notes?: string | null; terms?: string | null;
+  overdue?: boolean; items: InvoiceItem[];
+}
+export interface CreateInvoiceDto {
+  contact_id?: string | null; deal_id?: string | null; currency?: string;
+  default_tax_rate?: number; due_date?: string | null; notes?: string | null; terms?: string | null;
+  items: InvoiceItem[];
+}
+export const listInvoices = () => apiGet<InvoiceListRow[]>('/invoices');
+export const getInvoice = (id: string) => apiGet<Invoice>(`/invoices/${id}`);
+export const createInvoice = (data: CreateInvoiceDto) => apiPost<Invoice>('/invoices', data);
+export const updateInvoice = (id: string, data: CreateInvoiceDto) => apiPatch<Invoice>(`/invoices/${id}`, data);
+export const deleteInvoice = (id: string) => apiDelete(`/invoices/${id}`);
