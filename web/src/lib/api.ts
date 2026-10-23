@@ -2334,3 +2334,4 @@ export const getInvoice = (id: string) => apiGet<Invoice>(`/invoices/${id}`);
 export const createInvoice = (data: CreateInvoiceDto) => apiPost<Invoice>('/invoices', data);
 export const updateInvoice = (id: string, data: CreateInvoiceDto) => apiPatch<Invoice>(`/invoices/${id}`, data);
 export const deleteInvoice = (id: string) => apiDelete(`/invoices/${id}`);
+export const issueInvoice = (id: string) => apiPost<Invoice>(`/invoices/${id}/issue`, {});

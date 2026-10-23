@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice,
+  listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice, issueInvoice,
   getContacts, getInvoiceSettings,
   InvoiceListRow, InvoiceItem, Contact,
 } from '@/lib/api';
@@ -28,6 +28,8 @@ export default function InvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [readOnly, setReadOnly] = useState(false);
+  const [formNumber, setFormNumber] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -55,7 +57,8 @@ export default function InvoicesPage() {
   }, []);
 
   function openNew() {
-    setEditingId(null); setContactId(''); setDueDate(''); setNotes('');
+    setEditingId(null); setReadOnly(false); setFormNumber(null);
+    setContactId(''); setDueDate(''); setNotes('');
     setLines([emptyLine()]); setError(''); setShowForm(true);
   }
 
@@ -64,6 +67,8 @@ export default function InvoicesPage() {
     try {
       const inv = await getInvoice(id);
       setEditingId(id);
+      setReadOnly(inv.financial_status !== 'draft');
+      setFormNumber(inv.number || null);
       setContactId(inv.contact_id || '');
       setCurrency((inv.currency || 'GBP').toUpperCase());
       setDefaultTaxPct(String(Math.round((Number(inv.default_tax_rate) || 0) * 10000) / 100));
@@ -131,6 +136,20 @@ export default function InvoicesPage() {
     try { await deleteInvoice(id); await refresh(); } catch (e: any) { alert(e?.message || 'No se pudo eliminar'); }
   }
 
+  async function issueFromList(id: string) {
+    if (!confirm('¿Emitir esta factura? Una vez emitida NO se podrá editar ni eliminar.')) return;
+    try { await issueInvoice(id); await refresh(); } catch (e: any) { alert(e?.message || 'No se pudo emitir'); }
+  }
+
+  async function issueFromForm() {
+    if (!editingId) return;
+    if (!confirm('¿Emitir esta factura? Una vez emitida NO se podrá editar ni eliminar.')) return;
+    setSaving(true); setError('');
+    try { await issueInvoice(editingId); setShowForm(false); await refresh(); }
+    catch (e: any) { setError(e?.message || 'No se pudo emitir'); }
+    finally { setSaving(false); }
+  }
+
   const contactName = (id?: string | null) => contacts.find((c) => c.id === id)?.fullName || '—';
 
   return (
@@ -174,6 +193,7 @@ export default function InvoicesPage() {
                       {isDraft ? (
                         <>
                           <button className="btn btn-secondary" style={{ marginRight: 6 }} onClick={() => openEdit(r.id)}>Editar</button>
+                          <button className="btn btn-primary" style={{ marginRight: 6 }} onClick={() => issueFromList(r.id)}>Emitir</button>
                           <button className="btn btn-secondary" style={{ color: '#dc2626' }} onClick={() => remove(r.id)}>Eliminar</button>
                         </>
                       ) : (
@@ -192,10 +212,13 @@ export default function InvoicesPage() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: 24, zIndex: 50, overflowY: 'auto' }}>
           <div style={{ background: 'var(--bg, #fff)', borderRadius: 10, padding: 20, width: 'min(820px, 100%)', boxShadow: '0 10px 40px rgba(0,0,0,.2)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700 }}>{editingId ? 'Editar borrador' : 'Nueva factura (borrador)'}</h2>
+              <h2 style={{ fontSize: 18, fontWeight: 700 }}>
+                {!editingId ? 'Nueva factura (borrador)' : readOnly ? `Factura ${formNumber || ''} (emitida)` : 'Editar borrador'}
+              </h2>
               <button className="btn btn-secondary" onClick={() => setShowForm(false)}>✕</button>
             </div>
 
+            <fieldset disabled={readOnly} style={{ border: 'none', padding: 0, margin: 0 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 14 }}>
               <div className="form-group" style={{ gridColumn: '1 / 3', margin: 0 }}>
                 <label className="form-label" style={{ fontSize: 12 }}>Contacto</label>
@@ -264,11 +287,18 @@ export default function InvoicesPage() {
               </div>
             </div>
 
+            </fieldset>
+
             {error && <div style={{ color: '#dc2626', marginTop: 10 }}>{error}</div>}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
-              <button className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancelar</button>
-              <button className="btn btn-primary" disabled={saving} onClick={save}>{saving ? 'Guardando…' : 'Guardar borrador'}</button>
+              <button className="btn btn-secondary" onClick={() => setShowForm(false)}>{readOnly ? 'Cerrar' : 'Cancelar'}</button>
+              {!readOnly && (
+                <button className="btn btn-primary" disabled={saving} onClick={save}>{saving ? 'Guardando…' : 'Guardar borrador'}</button>
+              )}
+              {!readOnly && editingId && (
+                <button className="btn btn-primary" style={{ background: '#2563eb' }} disabled={saving} onClick={issueFromForm}>Emitir</button>
+              )}
             </div>
           </div>
         </div>

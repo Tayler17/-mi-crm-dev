@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { buildInvoiceLines, RawInvoiceItem } from './invoice-calc';
+import { buildInvoiceLines, formatInvoiceNumber, RawInvoiceItem } from './invoice-calc';
 
 /**
  * Invoices module.
@@ -238,5 +238,58 @@ export class InvoicesService implements OnModuleInit {
       await m.query(`DELETE FROM invoices WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
     });
     return { deleted: true };
+  }
+
+  // ── Issue (Etapa 2): assign a gapless number, freeze data, make immutable ────
+  async issueInvoice(tenantId: string, id: string) {
+    const inv = await this.getOne(tenantId, id); // tenant-scoped guard
+    if (!inv) throw new NotFoundException('Factura no encontrada');
+    if (inv.financial_status !== 'draft') throw new BadRequestException('Solo se pueden emitir borradores');
+    if (!inv.items || inv.items.length === 0) throw new BadRequestException('La factura no tiene líneas');
+
+    const settings = await this.getSettings(tenantId);
+    if (!settings.business_name) {
+      throw new BadRequestException('Configura los datos del emisor en Ajustes → Facturación antes de emitir.');
+    }
+
+    // Buyer snapshot (frozen) from the contact, if any.
+    let buyer: any = { contact_id: inv.contact_id ?? null, name: inv.contact_name ?? null };
+    if (inv.contact_id) {
+      const [c] = await this.db.query(
+        `SELECT full_name, email, phone FROM contacts WHERE id=$1 AND tenant_id=$2`,
+        [inv.contact_id, tenantId],
+      ).catch(() => []);
+      if (c) buyer = { contact_id: inv.contact_id, name: c.full_name, email: c.email, phone: c.phone };
+    }
+    const issuer = {
+      business_name: settings.business_name, address: settings.address, tax_id: settings.tax_id,
+      email: settings.email, phone: settings.phone, logo_url: settings.logo_url,
+    };
+
+    const kind = inv.kind || 'invoice';
+    const prefix = settings.number_prefix || 'INV';
+    const year = new Date().getFullYear();
+
+    await this.db.transaction(async (m) => {
+      // Serialize numbering per (tenant, kind, year) so concurrent issues never duplicate or
+      // skip a number — same advisory-lock technique used for the conversations webhook.
+      await m.query(`SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`, [`issnum:${tenantId}:${kind}:${year}`]);
+      const [row] = await m.query(
+        `SELECT COALESCE(MAX(number_seq),0)::int AS max FROM invoices
+          WHERE tenant_id=$1 AND kind=$2 AND number_seq IS NOT NULL
+            AND EXTRACT(YEAR FROM issued_at)=$3`,
+        [tenantId, kind, year],
+      );
+      const seq = Number(row?.max ?? 0) + 1;
+      const number = formatInvoiceNumber(prefix, year, seq);
+      await m.query(
+        `UPDATE invoices
+            SET financial_status='issued', number=$3, number_seq=$4, issued_at=NOW(),
+                issuer_snapshot=$5, buyer_snapshot=$6, updated_at=NOW()
+          WHERE id=$1 AND tenant_id=$2 AND financial_status='draft'`,
+        [id, tenantId, number, seq, JSON.stringify(issuer), JSON.stringify(buyer)],
+      );
+    });
+    return this.getOne(tenantId, id);
   }
 }
