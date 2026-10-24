@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { buildInvoiceLines, formatInvoiceNumber, isInvoiceOverdue, RawInvoiceItem } from './invoice-calc';
+import { buildInvoiceLines, formatInvoiceNumber, isInvoiceOverdue, financialStatusFor, RawInvoiceItem } from './invoice-calc';
 
 /**
  * Invoices module.
@@ -83,8 +83,31 @@ export class InvoicesService implements OnModuleInit {
       )
     `).catch((e: any) => console.error(`[invoices] invoice_items init: ${e.message}`));
 
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS invoice_payments (
+        id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id          uuid NOT NULL,
+        invoice_id         uuid NOT NULL,
+        method             text NOT NULL,              -- stripe | transfer | cash
+        direction          text NOT NULL DEFAULT 'charge', -- charge | refund
+        amount_minor       bigint NOT NULL DEFAULT 0,
+        currency           text NOT NULL DEFAULT 'GBP',
+        status             text NOT NULL DEFAULT 'succeeded', -- pending | succeeded | failed | refunded
+        payment_link_id    uuid,
+        payment_session_id text,
+        provider_ref       text,
+        received_at        timestamptz NOT NULL DEFAULT now(),
+        recorded_by        uuid,
+        note               text,
+        created_at         timestamptz NOT NULL DEFAULT now()
+      )
+    `).catch((e: any) => console.error(`[invoices] invoice_payments init: ${e.message}`));
+
     await this.db.query(`CREATE INDEX IF NOT EXISTS invoices_tenant_idx ON invoices(tenant_id)`).catch(() => {});
     await this.db.query(`CREATE INDEX IF NOT EXISTS invoice_items_invoice_idx ON invoice_items(invoice_id)`).catch(() => {});
+    await this.db.query(`CREATE INDEX IF NOT EXISTS invoice_payments_invoice_idx ON invoice_payments(invoice_id)`).catch(() => {});
+    // A provider reference is unique per tenant → a duplicate webhook can never record twice (Etapa 5).
+    await this.db.query(`CREATE UNIQUE INDEX IF NOT EXISTS invoice_payments_provref_uidx ON invoice_payments(tenant_id, provider_ref) WHERE provider_ref IS NOT NULL`).catch(() => {});
   }
 
   // ── Issuer settings (Etapa 0) ───────────────────────────────────────────────
@@ -163,12 +186,77 @@ export class InvoicesService implements OnModuleInit {
     const items = await this.db.query(
       `SELECT * FROM invoice_items WHERE invoice_id = $1 ORDER BY sort_order ASC`, [id],
     );
+    const payments = await this.db.query(
+      `SELECT id, method, direction, amount_minor, currency, status, received_at, note
+         FROM invoice_payments WHERE invoice_id = $1 ORDER BY received_at ASC`, [id],
+    );
     return {
       ...inv,
       balance_minor: Number(inv.total_minor) - Number(inv.amount_paid_minor),
       overdue: isInvoiceOverdue(inv),
       items,
+      payments,
     };
+  }
+
+  /** Σ(succeeded charges) − Σ(succeeded refunds), minor units, for one invoice. */
+  private async sumPaidMinor(m: any, invoiceId: string): Promise<number> {
+    const [row] = await m.query(
+      `SELECT COALESCE(SUM(CASE WHEN direction='refund' THEN -amount_minor ELSE amount_minor END),0)::bigint AS paid
+         FROM invoice_payments WHERE invoice_id=$1 AND status='succeeded'`,
+      [invoiceId],
+    );
+    return Number(row?.paid ?? 0);
+  }
+
+  /** Recompute amount_paid + financial_status from the ledger (ledger is the source of truth). */
+  private async recompute(m: any, invoiceId: string): Promise<void> {
+    const paid = await this.sumPaidMinor(m, invoiceId);
+    const [inv] = await m.query(`SELECT total_minor, financial_status FROM invoices WHERE id=$1`, [invoiceId]);
+    if (!inv) return;
+    const status = financialStatusFor(paid, Number(inv.total_minor), inv.financial_status);
+    await m.query(
+      `UPDATE invoices
+          SET amount_paid_minor=$2, financial_status=$3,
+              paid_at = CASE WHEN $3='paid' THEN COALESCE(paid_at, NOW()) ELSE NULL END,
+              updated_at=NOW()
+        WHERE id=$1`,
+      [invoiceId, paid, status],
+    );
+  }
+
+  // ── Payments ledger (Etapa 4): manual transfer/cash + partials, no overpay ───
+  async recordPayment(tenantId: string, invoiceId: string, userId: string | null, dto: any) {
+    const method = String(dto.method || '');
+    if (!['transfer', 'cash'].includes(method)) {
+      throw new BadRequestException('Método no soportado. En esta etapa solo transferencia o efectivo.');
+    }
+    const amount = Math.trunc(Number(dto.amount_minor) || 0);
+    if (amount <= 0) throw new BadRequestException('El monto debe ser mayor que cero.');
+
+    await this.db.transaction(async (m) => {
+      // Lock the invoice so two concurrent payments can't both pass the balance check (overpay).
+      await m.query(`SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`, [`invpay:${invoiceId}`]);
+      const [inv] = await m.query(`SELECT * FROM invoices WHERE id=$1 AND tenant_id=$2`, [invoiceId, tenantId]);
+      if (!inv) throw new NotFoundException('Factura no encontrada');
+      if (!['issued', 'partially_paid'].includes(inv.financial_status)) {
+        throw new BadRequestException('Solo se pueden registrar pagos en facturas emitidas o con pago parcial.');
+      }
+      const paid = await this.sumPaidMinor(m, invoiceId);
+      const balance = Number(inv.total_minor) - paid;
+      if (balance <= 0) throw new BadRequestException('La factura ya está pagada.');
+      if (amount > balance) {
+        throw new BadRequestException(`El pago supera el saldo pendiente. Saldo: ${balance} (unidades mínimas de ${inv.currency}).`);
+      }
+      await m.query(
+        `INSERT INTO invoice_payments
+           (tenant_id, invoice_id, method, direction, amount_minor, currency, status, received_at, recorded_by, note)
+         VALUES ($1,$2,$3,'charge',$4,$5,'succeeded',COALESCE($6::timestamptz, NOW()),$7,$8)`,
+        [tenantId, invoiceId, method, amount, inv.currency, dto.received_at || null, userId, dto.note || null],
+      );
+      await this.recompute(m, invoiceId);
+    });
+    return this.getOne(tenantId, invoiceId);
   }
 
   async createDraft(tenantId: string, userId: string | null, dto: any) {

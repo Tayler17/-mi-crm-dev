@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice, issueInvoice,
+  listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice, issueInvoice, recordInvoicePayment,
   getContacts, getInvoiceSettings,
-  InvoiceListRow, InvoiceItem, Contact,
+  InvoiceListRow, InvoiceItem, InvoicePayment, Contact,
 } from '@/lib/api';
 import { currencyDecimals, toMinor, fromMinor, formatMoney } from '@/lib/money';
 
@@ -45,6 +45,15 @@ export default function InvoicesPage() {
   const [dueDate, setDueDate] = useState('');
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<FormLine[]>([emptyLine()]);
+  const [formPayments, setFormPayments] = useState<InvoicePayment[]>([]);
+
+  // Payment modal (Etapa 4)
+  const [payRow, setPayRow] = useState<InvoiceListRow | null>(null);
+  const [payMethod, setPayMethod] = useState<'transfer' | 'cash'>('transfer');
+  const [payAmount, setPayAmount] = useState('');
+  const [payNote, setPayNote] = useState('');
+  const [paySaving, setPaySaving] = useState(false);
+  const [payError, setPayError] = useState('');
 
   async function refresh() {
     setLoading(true);
@@ -72,7 +81,7 @@ export default function InvoicesPage() {
   function openNew() {
     setEditingId(null); setReadOnly(false); setFormNumber(null);
     setContactId(''); setDueDate(''); setNotes('');
-    setLines([emptyLine()]); setError(''); setShowForm(true);
+    setLines([emptyLine()]); setFormPayments([]); setError(''); setShowForm(true);
   }
 
   async function openEdit(id: string) {
@@ -93,6 +102,7 @@ export default function InvoicesPage() {
         unitPrice: String(fromMinor(Number(it.unit_price_minor) || 0, inv.currency)),
         taxPct: it.tax_rate === null || it.tax_rate === undefined ? '' : String(Number(it.tax_rate) * 100),
       })) || [emptyLine()]);
+      setFormPayments(inv.payments || []);
       setShowForm(true);
     } catch (e: any) { setError(e?.message || 'No se pudo abrir'); }
   }
@@ -163,6 +173,27 @@ export default function InvoicesPage() {
     finally { setSaving(false); }
   }
 
+  function openPay(row: InvoiceListRow) {
+    setPayRow(row); setPayMethod('transfer');
+    setPayAmount(String(fromMinor(Number(row.balance_minor), row.currency))); // default = saldo pendiente
+    setPayNote(''); setPayError('');
+  }
+
+  async function submitPay() {
+    if (!payRow) return;
+    setPaySaving(true); setPayError('');
+    try {
+      await recordInvoicePayment(payRow.id, {
+        method: payMethod,
+        amount_minor: toMinor(Number(payAmount) || 0, payRow.currency),
+        note: payNote || undefined,
+      });
+      setPayRow(null);
+      await refresh();
+    } catch (e: any) { setPayError(e?.message || 'No se pudo registrar el pago'); }
+    finally { setPaySaving(false); }
+  }
+
   const contactName = (id?: string | null) => contacts.find((c) => c.id === id)?.fullName || '—';
 
   return (
@@ -231,7 +262,12 @@ export default function InvoicesPage() {
                           <button className="btn btn-secondary" style={{ color: '#dc2626' }} onClick={() => remove(r.id)}>Eliminar</button>
                         </>
                       ) : (
-                        <button className="btn btn-secondary" onClick={() => openEdit(r.id)}>Ver</button>
+                        <>
+                          {['issued', 'partially_paid'].includes(r.financial_status) && (
+                            <button className="btn btn-primary" style={{ marginRight: 6 }} onClick={() => openPay(r)}>Pago</button>
+                          )}
+                          <button className="btn btn-secondary" onClick={() => openEdit(r.id)}>Ver</button>
+                        </>
                       )}
                     </td>
                   </tr>
@@ -321,6 +357,18 @@ export default function InvoicesPage() {
               </div>
             </div>
 
+            {readOnly && formPayments.length > 0 && (
+              <div style={{ marginTop: 18 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>PAGOS</div>
+                {formPayments.map((p) => (
+                  <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span>{p.direction === 'refund' ? '↩ Reembolso' : '✓'} {p.method === 'cash' ? 'Efectivo' : p.method === 'transfer' ? 'Transferencia' : p.method}{p.note ? ` · ${p.note}` : ''}</span>
+                    <span>{new Date(p.received_at).toLocaleDateString()} · {formatMoney(Number(p.amount_minor), p.currency)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             </fieldset>
 
             {error && <div style={{ color: '#dc2626', marginTop: 10 }}>{error}</div>}
@@ -333,6 +381,37 @@ export default function InvoicesPage() {
               {!readOnly && editingId && (
                 <button className="btn btn-primary" style={{ background: '#2563eb' }} disabled={saving} onClick={issueFromForm}>Emitir</button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {payRow && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: 24, zIndex: 60 }}>
+          <div style={{ background: 'var(--bg, #fff)', borderRadius: 10, padding: 20, width: 'min(420px, 100%)', boxShadow: '0 10px 40px rgba(0,0,0,.2)' }}>
+            <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 4 }}>Registrar pago</h2>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>
+              {payRow.number || 'Factura'} · Saldo pendiente: <b>{formatMoney(Number(payRow.balance_minor), payRow.currency)}</b>
+            </div>
+            <div className="form-group" style={{ margin: '0 0 10px' }}>
+              <label className="form-label" style={{ fontSize: 12 }}>Método</label>
+              <select className="form-input" value={payMethod} onChange={(e) => setPayMethod(e.target.value as 'transfer' | 'cash')}>
+                <option value="transfer">Transferencia</option>
+                <option value="cash">Efectivo</option>
+              </select>
+            </div>
+            <div className="form-group" style={{ margin: '0 0 10px' }}>
+              <label className="form-label" style={{ fontSize: 12 }}>Monto ({payRow.currency})</label>
+              <input className="form-input" type="number" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+            </div>
+            <div className="form-group" style={{ margin: '0 0 10px' }}>
+              <label className="form-label" style={{ fontSize: 12 }}>Nota (opcional)</label>
+              <input className="form-input" value={payNote} onChange={(e) => setPayNote(e.target.value)} />
+            </div>
+            {payError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 8 }}>{payError}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+              <button className="btn btn-secondary" onClick={() => setPayRow(null)}>Cancelar</button>
+              <button className="btn btn-primary" disabled={paySaving} onClick={submitPay}>{paySaving ? 'Guardando…' : 'Registrar pago'}</button>
             </div>
           </div>
         </div>

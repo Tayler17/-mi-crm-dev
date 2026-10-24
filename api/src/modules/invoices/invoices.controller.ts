@@ -68,4 +68,10 @@ export class InvoicesController {
   issue(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.invoices.issueInvoice(tenantId, id);
   }
+
+  /** Registrar un pago manual (transferencia/efectivo). Parciales sí, sobrepago no. */
+  @Post(':id/payments')
+  recordPayment(@TenantId() tenantId: string, @Param('id') id: string, @Request() req: any, @Body() dto: any) {
+    return this.invoices.recordPayment(tenantId, id, req.user?.id ?? null, dto);
+  }
 }

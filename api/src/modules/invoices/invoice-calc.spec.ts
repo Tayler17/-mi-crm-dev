@@ -1,4 +1,4 @@
-import { buildInvoiceLines, isInvoiceOverdue } from './invoice-calc';
+import { buildInvoiceLines, isInvoiceOverdue, financialStatusFor } from './invoice-calc';
 
 describe('buildInvoiceLines', () => {
   it('computes lines and totals with per-line tax', () => {
@@ -56,5 +56,22 @@ describe('isInvoiceOverdue (derived, independent of delivery)', () => {
   });
   it('applies to partially_paid with remaining balance', () => {
     expect(isInvoiceOverdue({ financial_status: 'partially_paid', total_minor: 1000, amount_paid_minor: 400, due_date: '2026-06-14' }, today)).toBe(true);
+  });
+});
+
+describe('financialStatusFor (ledger-derived)', () => {
+  it('maps paid amount to the right status', () => {
+    expect(financialStatusFor(0, 1000, 'issued')).toBe('issued');
+    expect(financialStatusFor(400, 1000, 'issued')).toBe('partially_paid');
+    expect(financialStatusFor(1000, 1000, 'partially_paid')).toBe('paid');
+    expect(financialStatusFor(1200, 1000, 'issued')).toBe('paid'); // never above total in practice, but safe
+  });
+  it('never changes drafts or voids', () => {
+    expect(financialStatusFor(999, 1000, 'draft')).toBe('draft');
+    expect(financialStatusFor(1000, 1000, 'void')).toBe('void');
+  });
+  it('reverts to partially_paid / issued when a refund lowers the paid amount (Etapa 6)', () => {
+    expect(financialStatusFor(600, 1000, 'paid')).toBe('partially_paid');
+    expect(financialStatusFor(0, 1000, 'paid')).toBe('issued');
   });
 });

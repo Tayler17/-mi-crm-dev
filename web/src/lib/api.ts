@@ -2268,10 +2268,14 @@ export interface InvoiceListRow {
   contact_id?: string | null; contact_name?: string | null; overdue?: boolean;
 }
 export interface InvoiceFilters { status?: string; overdue?: boolean; q?: string }
+export interface InvoicePayment {
+  id: string; method: string; direction: string; amount_minor: number;
+  currency: string; status: string; received_at: string; note?: string | null;
+}
 export interface Invoice extends InvoiceListRow {
   deal_id?: string | null; default_tax_rate: number;
   subtotal_minor: number; tax_minor: number; notes?: string | null; terms?: string | null;
-  overdue?: boolean; items: InvoiceItem[];
+  overdue?: boolean; items: InvoiceItem[]; payments?: InvoicePayment[];
 }
 export interface CreateInvoiceDto {
   contact_id?: string | null; deal_id?: string | null; currency?: string;
@@ -2291,3 +2295,7 @@ export const createInvoice = (data: CreateInvoiceDto) => apiPost<Invoice>('/invo
 export const updateInvoice = (id: string, data: CreateInvoiceDto) => apiPatch<Invoice>(`/invoices/${id}`, data);
 export const deleteInvoice = (id: string) => apiDelete(`/invoices/${id}`);
 export const issueInvoice = (id: string) => apiPost<Invoice>(`/invoices/${id}/issue`, {});
+export const recordInvoicePayment = (
+  id: string,
+  data: { method: 'transfer' | 'cash'; amount_minor: number; note?: string; received_at?: string },
+) => apiPost<Invoice>(`/invoices/${id}/payments`, data);

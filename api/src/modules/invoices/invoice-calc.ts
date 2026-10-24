@@ -76,3 +76,15 @@ export function isInvoiceOverdue(
   const todayStr = today.toISOString().slice(0, 10);
   return String(inv.due_date).slice(0, 10) < todayStr;
 }
+
+/**
+ * Financial status derived from the payments ledger. Only recomputed for invoices already
+ * in the paid lifecycle (issued/partially_paid/paid) — drafts and voids are never changed.
+ * paidMinor = Σ(succeeded charges) − Σ(succeeded refunds), in minor units.
+ */
+export function financialStatusFor(paidMinor: number, totalMinor: number, currentStatus: string): string {
+  if (!['issued', 'partially_paid', 'paid'].includes(currentStatus)) return currentStatus;
+  if (totalMinor > 0 && paidMinor >= totalMinor) return 'paid';
+  if (paidMinor > 0) return 'partially_paid';
+  return 'issued';
+}
