@@ -2299,3 +2299,5 @@ export const recordInvoicePayment = (
   id: string,
   data: { method: 'transfer' | 'cash'; amount_minor: number; note?: string; received_at?: string },
 ) => apiPost<Invoice>(`/invoices/${id}/payments`, data);
+export const createInvoiceStripeLink = (id: string, amount_minor?: number) =>
+  apiPost<{ url: string; sessionId: string }>(`/invoices/${id}/stripe-link`, amount_minor != null ? { amount_minor } : {});

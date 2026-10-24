@@ -27,7 +27,7 @@ function makeSvc(state: { status: string; items: any[]; settings: any[] }) {
       return [];
     }),
   };
-  return { svc: new InvoicesService(db as any), captured };
+  return { svc: new InvoicesService(db as any, {} as any, {} as any), captured };
 }
 
 describe('issueInvoice (Etapa 2)', () => {
