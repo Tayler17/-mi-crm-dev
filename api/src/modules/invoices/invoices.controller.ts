@@ -48,6 +48,7 @@ export class InvoicesController {
 
   @Get(':id')
   async getOne(@TenantId() tenantId: string, @Param('id') id: string) {
+    await this.invoices.reconcileInvoiceStripe(tenantId, id).catch(() => {}); // poll fallback
     const inv = await this.invoices.getOne(tenantId, id);
     if (!inv) throw new NotFoundException('Factura no encontrada');
     return inv;
@@ -73,5 +74,12 @@ export class InvoicesController {
   @Post(':id/payments')
   recordPayment(@TenantId() tenantId: string, @Param('id') id: string, @Request() req: any, @Body() dto: any) {
     return this.invoices.recordPayment(tenantId, id, req.user?.id ?? null, dto);
+  }
+
+  /** Generar un link de pago Stripe (Connect) por el saldo o un monto parcial. */
+  @Post(':id/stripe-link')
+  stripeLink(@TenantId() tenantId: string, @Param('id') id: string, @Request() req: any, @Body() dto: any) {
+    const amountMinor = dto?.amount_minor != null ? Number(dto.amount_minor) : undefined;
+    return this.invoices.createStripeLink(tenantId, id, req.user?.id ?? null, amountMinor);
   }
 }

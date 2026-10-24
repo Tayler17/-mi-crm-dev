@@ -15,7 +15,7 @@ function makeSvc(state: { status: string; total: number; paid: number }) {
       return [];
     }),
   };
-  return { svc: new InvoicesService(db as any), captured };
+  return { svc: new InvoicesService(db as any, {} as any, {} as any), captured };
 }
 
 describe('recordPayment (Etapa 4 — manual payments, partials, no overpay)', () => {

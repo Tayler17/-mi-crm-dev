@@ -191,6 +191,41 @@ export class StripeProvider implements PaymentProvider {
     return { url: session.url, sessionId: session.id };
   }
 
+  /** Like createConnectCheckoutSession but the amount is already in the currency's MINOR units
+   *  (Stripe's `unit_amount`). Correct for every currency — does NOT assume 2 decimals. */
+  async createConnectCheckoutSessionMinor(params: {
+    accountId: string;
+    amountMinor: number;
+    currency: string;
+    description: string;
+    successUrl: string;
+    cancelUrl: string;
+    applicationFeePercent?: number;
+  }): Promise<{ url: string; sessionId: string }> {
+    const stripe = await this.sdk();
+    const amountMinor = Math.round(params.amountMinor);
+    const feePercent = params.applicationFeePercent ?? 0;
+    const appFee = feePercent > 0 ? Math.round(amountMinor * feePercent / 100) : 0;
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: 'payment',
+        line_items: [{
+          price_data: {
+            currency: params.currency.toLowerCase(),
+            product_data: { name: params.description || 'Pago' },
+            unit_amount: amountMinor,
+          },
+          quantity: 1,
+        }],
+        success_url: params.successUrl,
+        cancel_url:  params.cancelUrl,
+        ...(appFee > 0 ? { payment_intent_data: { application_fee_amount: appFee } } : {}),
+      },
+      { stripeAccount: params.accountId },
+    );
+    return { url: session.url, sessionId: session.id };
+  }
+
   /** Retrieve a checkout session on a connected account to read its current status. */
   async retrieveConnectCheckoutSession(accountId: string, sessionId: string): Promise<{ status: string; paymentStatus: string }> {
     const stripe = await this.sdk();

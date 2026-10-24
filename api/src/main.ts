@@ -35,8 +35,9 @@ async function bootstrap() {
 
   // Body parser limits: 10 MB for webhooks/media, still sane for REST
   const express = await import('express');
-  // Stripe webhook needs the raw body for signature verification
+  // Stripe webhooks need the raw body for signature verification (subscriptions + invoices).
   app.use('/billing/webhook', express.raw({ type: 'application/json' }));
+  app.use('/invoices/stripe-webhook', express.raw({ type: 'application/json' }));
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 

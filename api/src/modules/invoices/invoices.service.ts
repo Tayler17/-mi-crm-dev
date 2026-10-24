@@ -2,6 +2,8 @@ import { Injectable, OnModuleInit, BadRequestException, NotFoundException } from
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { buildInvoiceLines, formatInvoiceNumber, isInvoiceOverdue, financialStatusFor, RawInvoiceItem } from './invoice-calc';
+import { BillingService } from '../billing/billing.service';
+import { PlatformSettingsService } from '../settings/platform-settings.service';
 
 /**
  * Invoices module.
@@ -13,7 +15,11 @@ import { buildInvoiceLines, formatInvoiceNumber, isInvoiceOverdue, financialStat
  */
 @Injectable()
 export class InvoicesService implements OnModuleInit {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly billing: BillingService,
+    private readonly platformSettings: PlatformSettingsService,
+  ) {}
 
   async onModuleInit() {
     await this.db.query(`
@@ -108,6 +114,16 @@ export class InvoicesService implements OnModuleInit {
     await this.db.query(`CREATE INDEX IF NOT EXISTS invoice_payments_invoice_idx ON invoice_payments(invoice_id)`).catch(() => {});
     // A provider reference is unique per tenant → a duplicate webhook can never record twice (Etapa 5).
     await this.db.query(`CREATE UNIQUE INDEX IF NOT EXISTS invoice_payments_provref_uidx ON invoice_payments(tenant_id, provider_ref) WHERE provider_ref IS NOT NULL`).catch(() => {});
+    await this.db.query(`CREATE INDEX IF NOT EXISTS invoice_payments_session_idx ON invoice_payments(payment_session_id) WHERE payment_session_id IS NOT NULL`).catch(() => {});
+
+    // Processed Stripe (Connect) webhook events → each event is handled exactly once.
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+        event_id    text PRIMARY KEY,
+        type        text,
+        received_at timestamptz NOT NULL DEFAULT now()
+      )
+    `).catch((e: any) => console.error(`[invoices] stripe_webhook_events init: ${e.message}`));
   }
 
   // ── Issuer settings (Etapa 0) ───────────────────────────────────────────────
@@ -386,5 +402,124 @@ export class InvoicesService implements OnModuleInit {
       );
     });
     return this.getOne(tenantId, id);
+  }
+
+  // ── Stripe (Connect) payments — Etapa 5 (AISLADO del billing de suscripciones) ─
+  /** Generate a Stripe Connect checkout link for an invoice (full balance or partial).
+   *  Records a PENDING stripe payment; it turns succeeded via the Connect webhook or poll.
+   *  Amount travels in MINOR units → correct for every currency (no 2-decimal assumption). */
+  async createStripeLink(tenantId: string, invoiceId: string, userId: string | null, amountMinor?: number) {
+    const inv = await this.getOne(tenantId, invoiceId);
+    if (!inv) throw new NotFoundException('Factura no encontrada');
+    if (!['issued', 'partially_paid'].includes(inv.financial_status)) {
+      throw new BadRequestException('Solo se pueden cobrar facturas emitidas o con pago parcial.');
+    }
+    const balance = Number(inv.balance_minor);
+    if (balance <= 0) throw new BadRequestException('La factura ya está pagada.');
+    const amount = amountMinor ? Math.trunc(Number(amountMinor)) : balance;
+    if (amount <= 0) throw new BadRequestException('El monto debe ser mayor que cero.');
+    if (amount > balance) throw new BadRequestException('El pago supera el saldo pendiente.');
+
+    const account = await this.billing.getConnectAccount(tenantId);
+    if (!account?.account_id) throw new BadRequestException('No tienes una cuenta de Stripe Connect activa. Ve a Configuración → Pagos.');
+    if (!account.charges_enabled) throw new BadRequestException('Tu cuenta de Stripe aún no tiene cobros habilitados.');
+
+    const provider: any = await this.billing.getProvider(tenantId);
+    const base = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const session = await provider.createConnectCheckoutSessionMinor({
+      accountId: account.account_id,
+      amountMinor: amount,
+      currency: inv.currency,
+      description: `Factura ${inv.number || ''}`.trim(),
+      successUrl: `${base}/invoices?payment=success`,
+      cancelUrl: `${base}/invoices?payment=cancelled`,
+      applicationFeePercent: 0, // decisión: 0% de comisión inicial
+    });
+    await this.db.query(
+      `INSERT INTO invoice_payments
+         (tenant_id, invoice_id, method, direction, amount_minor, currency, status, payment_session_id, recorded_by)
+       VALUES ($1,$2,'stripe','charge',$3,$4,'pending',$5,$6)`,
+      [tenantId, invoiceId, amount, inv.currency, session.sessionId, userId],
+    );
+    return { url: session.url, sessionId: session.sessionId };
+  }
+
+  /** Mark a pending stripe payment as succeeded (IDEMPOTENT) and recompute the invoice. */
+  async markStripePaymentPaid(sessionId: string) {
+    if (!sessionId) return;
+    await this.db.transaction(async (m) => {
+      await m.query(`SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`, [`stripepay:${sessionId}`]);
+      const [pay] = await m.query(
+        `SELECT id, invoice_id FROM invoice_payments WHERE payment_session_id=$1 AND method='stripe' AND status='pending' LIMIT 1`,
+        [sessionId],
+      );
+      if (!pay) return; // not found or already processed → no-op (idempotent)
+      await m.query(`UPDATE invoice_payments SET status='succeeded', received_at=NOW() WHERE id=$1 AND status='pending'`, [pay.id]);
+      await this.recompute(m, pay.invoice_id);
+    });
+  }
+
+  async expireStripePayment(sessionId: string) {
+    if (!sessionId) return;
+    await this.db.query(
+      `UPDATE invoice_payments SET status='failed' WHERE payment_session_id=$1 AND method='stripe' AND status='pending'`,
+      [sessionId],
+    ).catch(() => {});
+  }
+
+  /** Poll fallback: reconcile this invoice's pending stripe payments against Stripe. */
+  async reconcileInvoiceStripe(tenantId: string, invoiceId: string) {
+    const pending = await this.db.query(
+      `SELECT payment_session_id FROM invoice_payments
+        WHERE tenant_id=$1 AND invoice_id=$2 AND method='stripe' AND status='pending' AND payment_session_id IS NOT NULL`,
+      [tenantId, invoiceId],
+    );
+    if (!pending.length) return;
+    const account = await this.billing.getConnectAccount(tenantId);
+    if (!account?.account_id) return;
+    const provider: any = await this.billing.getProvider(tenantId).catch(() => null);
+    if (!provider?.retrieveConnectCheckoutSession) return;
+    for (const p of pending) {
+      try {
+        const s = await provider.retrieveConnectCheckoutSession(account.account_id, p.payment_session_id);
+        if (s.status === 'complete' && s.paymentStatus === 'paid') await this.markStripePaymentPaid(p.payment_session_id);
+        else if (s.status === 'expired') await this.expireStripePayment(p.payment_session_id);
+      } catch { /* ignore individual failures */ }
+    }
+  }
+
+  // ── Connect webhook (separate endpoint; does NOT touch the subscription webhook) ─
+  async handleConnectWebhook(rawBody: Buffer | string, signature: string) {
+    const secret = await this.platformSettings.get('stripe.connect_webhook_secret').catch(() => '');
+    let event: any;
+    try {
+      if (secret) {
+        const provider: any = await this.billing.getProvider();
+        event = provider.constructWebhookEvent(rawBody, signature, secret);
+      } else {
+        event = typeof rawBody === 'string' ? JSON.parse(rawBody) : JSON.parse(Buffer.from(rawBody).toString('utf8'));
+      }
+    } catch {
+      throw new BadRequestException('Webhook signature verification failed');
+    }
+    // Dedup: a duplicate webhook delivery of the SAME event is ignored → never records twice.
+    const [fresh] = await this.db.query(
+      `INSERT INTO stripe_webhook_events (event_id, type) VALUES ($1,$2) ON CONFLICT (event_id) DO NOTHING RETURNING event_id`,
+      [event?.id, event?.type],
+    );
+    if (!fresh) return { received: true, duplicate: true };
+    await this.processConnectEvent(event).catch((e: any) => console.error('[invoices/webhook] process error', event?.type, e?.message));
+    return { received: true };
+  }
+
+  private async processConnectEvent(event: any) {
+    const obj = event?.data?.object;
+    if (!obj) return;
+    if (event.type === 'checkout.session.completed') {
+      await this.markStripePaymentPaid(obj.id);
+    } else if (event.type === 'checkout.session.expired') {
+      await this.expireStripePayment(obj.id);
+    }
+    // Everything else (incl. subscription events) is intentionally ignored here.
   }
 }

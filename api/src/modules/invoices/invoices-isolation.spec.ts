@@ -6,7 +6,7 @@ function svcWith(queryImpl: (sql: string, params?: any[]) => any) {
     query: jest.fn(queryImpl),
     transaction: jest.fn(async (cb: any) => cb(db)),
   };
-  return { svc: new InvoicesService(db as any), db };
+  return { svc: new InvoicesService(db as any, {} as any, {} as any), db };
 }
 
 describe('invoices — multi-tenant isolation', () => {

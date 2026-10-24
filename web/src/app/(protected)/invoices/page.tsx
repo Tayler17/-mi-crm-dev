@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice, issueInvoice, recordInvoicePayment,
+  listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice, issueInvoice,
+  recordInvoicePayment, createInvoiceStripeLink,
   getContacts, getInvoiceSettings,
   InvoiceListRow, InvoiceItem, InvoicePayment, Contact,
 } from '@/lib/api';
@@ -49,11 +50,12 @@ export default function InvoicesPage() {
 
   // Payment modal (Etapa 4)
   const [payRow, setPayRow] = useState<InvoiceListRow | null>(null);
-  const [payMethod, setPayMethod] = useState<'transfer' | 'cash'>('transfer');
+  const [payMethod, setPayMethod] = useState<'transfer' | 'cash' | 'stripe'>('transfer');
   const [payAmount, setPayAmount] = useState('');
   const [payNote, setPayNote] = useState('');
   const [paySaving, setPaySaving] = useState(false);
   const [payError, setPayError] = useState('');
+  const [stripeUrl, setStripeUrl] = useState('');
 
   async function refresh() {
     setLoading(true);
@@ -176,21 +178,24 @@ export default function InvoicesPage() {
   function openPay(row: InvoiceListRow) {
     setPayRow(row); setPayMethod('transfer');
     setPayAmount(String(fromMinor(Number(row.balance_minor), row.currency))); // default = saldo pendiente
-    setPayNote(''); setPayError('');
+    setPayNote(''); setPayError(''); setStripeUrl('');
   }
 
   async function submitPay() {
     if (!payRow) return;
     setPaySaving(true); setPayError('');
     try {
-      await recordInvoicePayment(payRow.id, {
-        method: payMethod,
-        amount_minor: toMinor(Number(payAmount) || 0, payRow.currency),
-        note: payNote || undefined,
-      });
-      setPayRow(null);
-      await refresh();
-    } catch (e: any) { setPayError(e?.message || 'No se pudo registrar el pago'); }
+      const amountMinor = toMinor(Number(payAmount) || 0, payRow.currency);
+      if (payMethod === 'stripe') {
+        const { url } = await createInvoiceStripeLink(payRow.id, amountMinor);
+        setStripeUrl(url); // el pago queda PENDIENTE hasta que el cliente pague el link
+        await refresh();
+      } else {
+        await recordInvoicePayment(payRow.id, { method: payMethod, amount_minor: amountMinor, note: payNote || undefined });
+        setPayRow(null);
+        await refresh();
+      }
+    } catch (e: any) { setPayError(e?.message || 'No se pudo procesar'); }
     finally { setPaySaving(false); }
   }
 
@@ -393,25 +398,44 @@ export default function InvoicesPage() {
             <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>
               {payRow.number || 'Factura'} · Saldo pendiente: <b>{formatMoney(Number(payRow.balance_minor), payRow.currency)}</b>
             </div>
-            <div className="form-group" style={{ margin: '0 0 10px' }}>
-              <label className="form-label" style={{ fontSize: 12 }}>Método</label>
-              <select className="form-input" value={payMethod} onChange={(e) => setPayMethod(e.target.value as 'transfer' | 'cash')}>
-                <option value="transfer">Transferencia</option>
-                <option value="cash">Efectivo</option>
-              </select>
-            </div>
-            <div className="form-group" style={{ margin: '0 0 10px' }}>
-              <label className="form-label" style={{ fontSize: 12 }}>Monto ({payRow.currency})</label>
-              <input className="form-input" type="number" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
-            </div>
-            <div className="form-group" style={{ margin: '0 0 10px' }}>
-              <label className="form-label" style={{ fontSize: 12 }}>Nota (opcional)</label>
-              <input className="form-input" value={payNote} onChange={(e) => setPayNote(e.target.value)} />
-            </div>
+            {stripeUrl ? (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 13, color: '#166534', marginBottom: 6 }}>✓ Link de pago generado. Envíaselo al cliente; el pago se registrará solo al pagarse.</div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input className="form-input" readOnly value={stripeUrl} onFocus={(e) => e.currentTarget.select()} />
+                  <button className="btn btn-secondary" onClick={() => navigator.clipboard?.writeText(stripeUrl)}>Copiar</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="form-group" style={{ margin: '0 0 10px' }}>
+                  <label className="form-label" style={{ fontSize: 12 }}>Método</label>
+                  <select className="form-input" value={payMethod} onChange={(e) => setPayMethod(e.target.value as 'transfer' | 'cash' | 'stripe')}>
+                    <option value="transfer">Transferencia</option>
+                    <option value="cash">Efectivo</option>
+                    <option value="stripe">Stripe (link de pago)</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ margin: '0 0 10px' }}>
+                  <label className="form-label" style={{ fontSize: 12 }}>Monto ({payRow.currency})</label>
+                  <input className="form-input" type="number" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+                </div>
+                {payMethod !== 'stripe' && (
+                  <div className="form-group" style={{ margin: '0 0 10px' }}>
+                    <label className="form-label" style={{ fontSize: 12 }}>Nota (opcional)</label>
+                    <input className="form-input" value={payNote} onChange={(e) => setPayNote(e.target.value)} />
+                  </div>
+                )}
+              </>
+            )}
             {payError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 8 }}>{payError}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
-              <button className="btn btn-secondary" onClick={() => setPayRow(null)}>Cancelar</button>
-              <button className="btn btn-primary" disabled={paySaving} onClick={submitPay}>{paySaving ? 'Guardando…' : 'Registrar pago'}</button>
+              <button className="btn btn-secondary" onClick={() => setPayRow(null)}>{stripeUrl ? 'Cerrar' : 'Cancelar'}</button>
+              {!stripeUrl && (
+                <button className="btn btn-primary" disabled={paySaving} onClick={submitPay}>
+                  {paySaving ? 'Procesando…' : payMethod === 'stripe' ? 'Generar link de pago' : 'Registrar pago'}
+                </button>
+              )}
             </div>
           </div>
         </div>
