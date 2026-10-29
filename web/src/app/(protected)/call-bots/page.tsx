@@ -425,6 +425,7 @@ type BotForm = {
   visualConfig: VisualConfig;
   promptMode: 'visual' | 'advanced';
   streamingMode: boolean;
+  voiceListenMode: string;
 };
 
 function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
@@ -539,6 +540,7 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
     visualConfig: initVC,
     promptMode: initPromptMode,
     streamingMode: (bot as any)?.streamingMode ?? false,
+    voiceListenMode: (bot as any)?.voiceListenMode || 'multilingual',
   });
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1154,6 +1156,18 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
                     {t('Fluid conversation with no silences, filters noise and lets the customer interrupt the bot. Uses the ', 'Conversación fluida sin silencios, filtra ruido y permite interrumpir al bot. Usa la ')}<strong>{t('Deepgram Aura-2 voice selected above', 'voz Deepgram Aura-2 elegida arriba')}</strong>{t(' and requires the ', ' y requiere la ')}<strong>{t('Deepgram API Key', 'API Key de Deepgram')}</strong>{t(' (Settings → Platform).', ' (Configuración → Plataforma).')}
                   </div>
+                  {form.streamingMode && (
+                    <div style={{ marginTop: 12 }}>
+                      <label className="form-label" style={{ fontSize: 12 }}>{t('Listening engine', 'Motor de escucha')}</label>
+                      <select className="form-input" value={form.voiceListenMode} onChange={(e) => upd('voiceListenMode', e.target.value)}>
+                        <option value="multilingual">{t('Multilingual (Nova-3) — understands any language', 'Multilingüe (Nova-3) — entiende cualquier idioma')}</option>
+                        <option value="english">{t('English only (Flux) — better turn-taking', 'Solo inglés (Flux) — mejores turnos')}</option>
+                      </select>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
+                        {t('Use "English only" for English-speaking clients: the bot waits for the caller to finish before replying (less talking over). Multilingual understands several languages but turn-taking is not tunable.', 'Usa "Solo inglés" para clientes de habla inglesa: el bot espera a que el cliente termine antes de responder (evita hablar encima). El multilingüe entiende varios idiomas pero no permite ajustar los turnos.')}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

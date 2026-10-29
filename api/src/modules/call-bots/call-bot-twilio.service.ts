@@ -1069,8 +1069,8 @@ ${addTagInstruction}
       ? 'IDIOMA: Detecta el idioma en que te habla el cliente y MANTENTE en ese idioma toda la llamada. NUNCA cambies de idioma por tu cuenta, ni por una palabra o frase suelta, ni a un idioma que el cliente NO está usando: si el cliente habla español, JAMÁS respondas en italiano ni en otro idioma (el español y el italiano suenan parecido, no te confundas). Solo cambia si el cliente cambia de forma CLARA y sostenida durante varias frases. Ante la duda, quédate en español.'
       : 'LANGUAGE: Detect the language the caller is speaking and STAY in that language for the whole call. NEVER switch languages on your own, over a single word or short phrase, or to a language the caller is NOT using: if the caller speaks English, NEVER reply in Italian or any other language. Only switch if the caller clearly and continuously changes language across several sentences. When in doubt, stay in English.';
     const voiceRule = isEs
-      ? 'ESTILO DE VOZ: Es una llamada. Responde en 1-2 frases cortas y deja hablar al cliente; no des monólogos. NO uses markdown, asteriscos ni listas numeradas: di las cosas de corrido y en lenguaje natural (ej. "necesito tu nombre, teléfono y dirección"), nunca "1. … 2. …".'
-      : 'VOICE STYLE: This is a phone call. Reply in 1-2 short sentences and let the caller speak; no monologues. Do NOT use markdown, asterisks or numbered lists: say things naturally in one flowing sentence (e.g. "I need your name, phone and address"), never "1. … 2. …".';
+      ? 'ESTILO DE VOZ (llamada telefónica, MUY IMPORTANTE): Responde con UNA sola frase corta por turno y luego calla para que el cliente hable; nada de monólogos. Di cada cosa UNA sola vez: NO repitas confirmaciones ni datos que ya diste. ESPERA a que el cliente TERMINE de hablar; si sus palabras llegan entrecortadas o no se entienden, no respondas aún (pide que repita solo si hace falta). NO uses markdown, asteriscos ni listas numeradas: habla de corrido y natural (ej. "necesito tu nombre, teléfono y dirección").'
+      : 'VOICE STYLE (phone call, VERY IMPORTANT): Reply with ONE short sentence per turn, then stop so the caller can speak; no monologues. Say each thing ONCE: do NOT repeat confirmations or details you already gave. WAIT for the caller to FINISH; if their words come in fragments or are unclear, do not answer yet (ask them to repeat only if needed). Do NOT use markdown, asterisks or numbered lists: speak naturally and flowing (e.g. "I need your name, phone and address").';
     const apptRule = !dentallyConnected ? '' : (isEs
       ? 'CITAS: Para disponibilidad lo único obligatorio es la FECHA; si no la dieron, pregúntala (nunca asumas hoy). El profesional es OPCIONAL. Pregunta SIEMPRE el NOMBRE del paciente y pásalo en dentally_book_appointment (más el teléfono si lo dan); NO identifiques al paciente por el número desde el que llaman, puede ser distinto. En cuanto elijan horario, agenda con dentally_book_appointment. Para un paciente NUEVO pide además fecha de nacimiento y género; para uno existente basta el nombre.'
       : 'APPOINTMENTS: The only required field for availability is the DATE; if not given, ask for it (never assume today). The practitioner is OPTIONAL. ALWAYS ask for the PATIENT\'S NAME and pass it in dentally_book_appointment (plus phone if given); do NOT identify the patient by the number they are calling from, it may be different. As soon as they pick a time, book with dentally_book_appointment. For a NEW patient also ask for date of birth and gender; for an existing one the name is enough.');
@@ -1148,6 +1148,16 @@ ${addTagInstruction}
     // the 15-39s transfer hesitation). Only OpenAI models go through think.provider here.
     const thinkModel = (ai.provider === 'openai' && ai.model) ? ai.model : 'gpt-4o';
 
+    // Listen engine, per bot. Default = Nova-3 MULTILINGUAL (understands any language; its
+    // end-of-turn detection is NOT tunable). A bot set to voice_listen_mode='english' uses
+    // Flux (ENGLISH ONLY) with a PATIENT end-of-turn — eot_threshold 0.8 and NO eager EOT so
+    // it waits for the caller to finish before replying → fixes "doesn't let the caller speak
+    // / talks over them". Flux fields verified against Deepgram docs (type/model/version/eot_*).
+    const listenEnglishFlux = String(bot.voice_listen_mode || '').toLowerCase() === 'english';
+    const listenProvider: any = listenEnglishFlux
+      ? { type: 'deepgram', model: 'flux-general-en', version: 'v2', eot_threshold: 0.8, eot_timeout_ms: 5000 }
+      : { type: 'deepgram', model: 'nova-3', language: 'multi' };
+
     return {
       type: 'Settings',
       audio: {
@@ -1164,7 +1174,7 @@ ${addTagInstruction}
         // whole Settings message → the agent never started (silent bot, no transcript) from
         // ~Oct 9. Keep only the documented fields (type/model/language). Digit formatting of
         // spoken numbers, if needed, is done by post-processing the transcript text, not here.
-        listen: { provider: { type: 'deepgram', model: 'nova-3', language: 'multi' } },
+        listen: { provider: listenProvider },
         think:  {
           provider: { type: 'open_ai', model: thinkModel, temperature: 0.7 },
           // Use OUR OpenAI key so the LLM does NATIVE tool-calling. With Deepgram's

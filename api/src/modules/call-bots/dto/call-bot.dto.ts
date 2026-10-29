@@ -55,6 +55,9 @@ export class CreateCallBotDto {
   @IsBoolean() @IsOptional()
   streamingMode?: boolean;
 
+  @IsEnum(['multilingual', 'english']) @IsOptional()
+  voiceListenMode?: string;
+
   // Accept both camelCase (TS convention) and snake_case (sent by frontend)
   @IsObject() @IsOptional()
   visualConfig?: Record<string, any>;
@@ -121,6 +124,9 @@ export class UpdateCallBotDto {
 
   @IsBoolean() @IsOptional()
   streamingMode?: boolean;
+
+  @IsEnum(['multilingual', 'english']) @IsOptional()
+  voiceListenMode?: string;
 
   @IsObject() @IsOptional()
   visualConfig?: Record<string, any>;
