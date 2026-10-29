@@ -68,6 +68,10 @@ export class CallBot {
   @Column({ name: 'streaming_mode', default: false })
   streamingMode: boolean;
 
+  // NULL/'multilingual' = Nova-3 multi (default); 'english' = Flux EN-only w/ tunable turns.
+  @Column({ name: 'voice_listen_mode', type: 'text', nullable: true })
+  voiceListenMode?: string | null;
+
   @Column({ name: 'transfer_to_number', nullable: true })
   transferToNumber?: string;
 

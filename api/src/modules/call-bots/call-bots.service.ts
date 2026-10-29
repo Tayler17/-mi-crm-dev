@@ -22,6 +22,8 @@ export class CallBotsService implements OnModuleInit {
   async onModuleInit() {
     // Real-time voice (Twilio Media Streams) toggle — no migrations in this project.
     await this.db.query(`ALTER TABLE call_bots ADD COLUMN IF NOT EXISTS streaming_mode BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
+    // Listen engine: NULL/'multilingual' = Nova-3 multi; 'english' = Flux (EN-only, tunable turns).
+    await this.db.query(`ALTER TABLE call_bots ADD COLUMN IF NOT EXISTS voice_listen_mode text`).catch(() => {});
     // Attribute a call to the human agent (softphone). Null for bot-handled calls.
     await this.db.query(`ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS user_id uuid`).catch(() => {});
   }
@@ -73,6 +75,7 @@ export class CallBotsService implements OnModuleInit {
       transferToNumber: dto.transferToNumber,
       voiceCatalogId: dto.voiceCatalogId,
       streamingMode: dto.streamingMode ?? false,
+      voiceListenMode: dto.voiceListenMode ?? null,
       status: 'draft',
       createdBy: userId,
     });
