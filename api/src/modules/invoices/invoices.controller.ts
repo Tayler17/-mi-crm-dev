@@ -82,4 +82,27 @@ export class InvoicesController {
     const amountMinor = dto?.amount_minor != null ? Number(dto.amount_minor) : undefined;
     return this.invoices.createStripeLink(tenantId, id, req.user?.id ?? null, amountMinor);
   }
+
+  // ── Reembolsos y notas de crédito (Etapa 6) — SOLO admin ────────────────────
+  /** Reembolsar una factura (Stripe o manual), total o parcial. Nunca más de lo cobrado. */
+  @Post(':id/refunds')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  refund(@TenantId() tenantId: string, @Param('id') id: string, @Request() req: any, @Body() dto: any) {
+    return this.invoices.refundInvoice(tenantId, id, req.user?.id ?? null, dto);
+  }
+
+  /** Emitir una nota de crédito (con líneas de detalle) contra una factura emitida. */
+  @Post(':id/credit-notes')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  createCreditNote(@TenantId() tenantId: string, @Param('id') id: string, @Request() req: any, @Body() dto: any) {
+    return this.invoices.createCreditNote(tenantId, req.user?.id ?? null, id, dto);
+  }
+
+  /** Listar las notas de crédito de una factura (ver = cualquier rol del tenant). */
+  @Get(':id/credit-notes')
+  listCreditNotes(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.invoices.listCreditNotes(tenantId, id);
+  }
 }

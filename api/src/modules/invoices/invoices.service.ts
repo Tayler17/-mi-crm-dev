@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { buildInvoiceLines, formatInvoiceNumber, isInvoiceOverdue, financialStatusFor, RawInvoiceItem } from './invoice-calc';
+import { buildInvoiceLines, formatInvoiceNumber, isInvoiceOverdue, financialStatusFor, financialStatusForLedger, RawInvoiceItem } from './invoice-calc';
 import { BillingService } from '../billing/billing.service';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
 
@@ -124,6 +124,48 @@ export class InvoicesService implements OnModuleInit {
         received_at timestamptz NOT NULL DEFAULT now()
       )
     `).catch((e: any) => console.error(`[invoices] stripe_webhook_events init: ${e.message}`));
+
+    // Credit notes (Etapa 6) — a SEPARATE document with its own numbering (CN-2026-0001)
+    // and detail lines. It references the original invoice but NEVER edits it (immutable).
+    // Money is in integer minor units, same model as invoices (no 2-decimal assumption).
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS credit_notes (
+        id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id       uuid NOT NULL,
+        invoice_id      uuid NOT NULL,
+        number          text,
+        number_seq      integer,
+        reason          text,
+        currency        text    NOT NULL DEFAULT 'GBP',
+        subtotal_minor  bigint  NOT NULL DEFAULT 0,
+        tax_minor       bigint  NOT NULL DEFAULT 0,
+        total_minor     bigint  NOT NULL DEFAULT 0,
+        issuer_snapshot jsonb,
+        created_by      uuid,
+        issued_at       timestamptz NOT NULL DEFAULT now(),
+        created_at      timestamptz NOT NULL DEFAULT now()
+      )
+    `).catch((e: any) => console.error(`[invoices] credit_notes init: ${e.message}`));
+
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS credit_note_items (
+        id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        credit_note_id      uuid NOT NULL,
+        description         text,
+        quantity            numeric NOT NULL DEFAULT 1,
+        unit_price_minor    bigint  NOT NULL DEFAULT 0,
+        discount_minor      bigint  NOT NULL DEFAULT 0,
+        tax_rate            numeric,
+        line_subtotal_minor bigint  NOT NULL DEFAULT 0,
+        line_tax_minor      bigint  NOT NULL DEFAULT 0,
+        line_total_minor    bigint  NOT NULL DEFAULT 0,
+        sort_order          integer NOT NULL DEFAULT 0
+      )
+    `).catch((e: any) => console.error(`[invoices] credit_note_items init: ${e.message}`));
+
+    await this.db.query(`CREATE INDEX IF NOT EXISTS credit_notes_invoice_idx ON credit_notes(invoice_id)`).catch(() => {});
+    await this.db.query(`CREATE INDEX IF NOT EXISTS credit_notes_tenant_idx ON credit_notes(tenant_id)`).catch(() => {});
+    await this.db.query(`CREATE INDEX IF NOT EXISTS credit_note_items_cn_idx ON credit_note_items(credit_note_id)`).catch(() => {});
   }
 
   // ── Issuer settings (Etapa 0) ───────────────────────────────────────────────
@@ -206,16 +248,25 @@ export class InvoicesService implements OnModuleInit {
       `SELECT id, method, direction, amount_minor, currency, status, received_at, note
          FROM invoice_payments WHERE invoice_id = $1 ORDER BY received_at ASC`, [id],
     );
+    const creditNotes = await this.db.query(
+      `SELECT id, number, reason, currency, total_minor, issued_at
+         FROM credit_notes WHERE invoice_id = $1 AND tenant_id = $2 ORDER BY issued_at ASC`, [id, tenantId],
+    );
+    const creditedMinor = creditNotes.reduce((s: number, cn: any) => s + Number(cn.total_minor || 0), 0);
     return {
       ...inv,
       balance_minor: Number(inv.total_minor) - Number(inv.amount_paid_minor),
+      // Net paid (amount_paid_minor = charges − refunds) is exactly what is left to refund.
+      refundable_minor: Math.max(0, Number(inv.amount_paid_minor)),
+      credited_minor: creditedMinor,
       overdue: isInvoiceOverdue(inv),
       items,
       payments,
+      credit_notes: creditNotes,
     };
   }
 
-  /** Σ(succeeded charges) − Σ(succeeded refunds), minor units, for one invoice. */
+  /** Σ(succeeded charges) − Σ(succeeded refunds), minor units, for one invoice (NET paid). */
   private async sumPaidMinor(m: any, invoiceId: string): Promise<number> {
     const [row] = await m.query(
       `SELECT COALESCE(SUM(CASE WHEN direction='refund' THEN -amount_minor ELSE amount_minor END),0)::bigint AS paid
@@ -225,16 +276,32 @@ export class InvoicesService implements OnModuleInit {
     return Number(row?.paid ?? 0);
   }
 
-  /** Recompute amount_paid + financial_status from the ledger (ledger is the source of truth). */
+  /** GROSS charges and GROSS refunds separately — needed to tell "never paid" from
+   *  "paid then fully refunded" (both net to 0) when deriving the financial status. */
+  private async ledgerSums(m: any, invoiceId: string): Promise<{ charged: number; refunded: number }> {
+    const [row] = await m.query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN direction='charge' THEN amount_minor ELSE 0 END),0)::bigint AS charged,
+         COALESCE(SUM(CASE WHEN direction='refund' THEN amount_minor ELSE 0 END),0)::bigint AS refunded
+         FROM invoice_payments WHERE invoice_id=$1 AND status='succeeded'`,
+      [invoiceId],
+    );
+    return { charged: Number(row?.charged ?? 0), refunded: Number(row?.refunded ?? 0) };
+  }
+
+  /** Recompute amount_paid + financial_status from the ledger (ledger is the source of truth).
+   *  Uses gross charges/refunds so a refund resolves to partially_refunded/refunded correctly
+   *  (plan §8) — never silently flips an invoice back to an incorrect status. */
   private async recompute(m: any, invoiceId: string): Promise<void> {
-    const paid = await this.sumPaidMinor(m, invoiceId);
+    const { charged, refunded } = await this.ledgerSums(m, invoiceId);
+    const paid = charged - refunded; // NET, stored as amount_paid_minor (drives the balance)
     const [inv] = await m.query(`SELECT total_minor, financial_status FROM invoices WHERE id=$1`, [invoiceId]);
     if (!inv) return;
-    const status = financialStatusFor(paid, Number(inv.total_minor), inv.financial_status);
+    const status = financialStatusForLedger(charged, refunded, Number(inv.total_minor), inv.financial_status);
     await m.query(
       `UPDATE invoices
           SET amount_paid_minor=$2, financial_status=$3,
-              paid_at = CASE WHEN $3='paid' THEN COALESCE(paid_at, NOW()) ELSE NULL END,
+              paid_at = CASE WHEN $3='paid' THEN COALESCE(paid_at, NOW()) ELSE paid_at END,
               updated_at=NOW()
         WHERE id=$1`,
       [invoiceId, paid, status],
@@ -444,8 +511,10 @@ export class InvoicesService implements OnModuleInit {
     return { url: session.url, sessionId: session.sessionId };
   }
 
-  /** Mark a pending stripe payment as succeeded (IDEMPOTENT) and recompute the invoice. */
-  async markStripePaymentPaid(sessionId: string) {
+  /** Mark a pending stripe payment as succeeded (IDEMPOTENT) and recompute the invoice.
+   *  Stores the payment_intent as provider_ref so a later refund can target this charge and
+   *  so a `charge.refunded` webhook can map the refund back to this invoice. */
+  async markStripePaymentPaid(sessionId: string, paymentIntent?: string) {
     if (!sessionId) return;
     await this.db.transaction(async (m) => {
       await m.query(`SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`, [`stripepay:${sessionId}`]);
@@ -454,7 +523,12 @@ export class InvoicesService implements OnModuleInit {
         [sessionId],
       );
       if (!pay) return; // not found or already processed → no-op (idempotent)
-      await m.query(`UPDATE invoice_payments SET status='succeeded', received_at=NOW() WHERE id=$1 AND status='pending'`, [pay.id]);
+      await m.query(
+        `UPDATE invoice_payments SET status='succeeded', received_at=NOW(),
+                provider_ref=COALESCE($2, provider_ref)
+          WHERE id=$1 AND status='pending'`,
+        [pay.id, paymentIntent || null],
+      );
       await this.recompute(m, pay.invoice_id);
     });
   }
@@ -482,7 +556,7 @@ export class InvoicesService implements OnModuleInit {
     for (const p of pending) {
       try {
         const s = await provider.retrieveConnectCheckoutSession(account.account_id, p.payment_session_id);
-        if (s.status === 'complete' && s.paymentStatus === 'paid') await this.markStripePaymentPaid(p.payment_session_id);
+        if (s.status === 'complete' && s.paymentStatus === 'paid') await this.markStripePaymentPaid(p.payment_session_id, s.paymentIntent);
         else if (s.status === 'expired') await this.expireStripePayment(p.payment_session_id);
       } catch { /* ignore individual failures */ }
     }
@@ -516,10 +590,199 @@ export class InvoicesService implements OnModuleInit {
     const obj = event?.data?.object;
     if (!obj) return;
     if (event.type === 'checkout.session.completed') {
-      await this.markStripePaymentPaid(obj.id);
+      await this.markStripePaymentPaid(obj.id, obj.payment_intent ? String(obj.payment_intent) : undefined);
     } else if (event.type === 'checkout.session.expired') {
       await this.expireStripePayment(obj.id);
+    } else if (event.type === 'charge.refunded') {
+      // Refund initiated in Stripe (dashboard) OR echoed after an API refund → reconcile the ledger.
+      await this.handleChargeRefunded(obj);
     }
     // Everything else (incl. subscription events) is intentionally ignored here.
+  }
+
+  /** Reconcile a Stripe `charge.refunded` into the ledger. Maps the charge to the invoice by its
+   *  payment_intent (stored as provider_ref on the original charge) and inserts one refund row per
+   *  Stripe refund id. UNIQUE(tenant_id, provider_ref) makes this idempotent: a refund already
+   *  recorded by the API path (or a duplicate webhook) is skipped, so money is never double-counted. */
+  async handleChargeRefunded(charge: any) {
+    const pi = charge?.payment_intent ? String(charge.payment_intent) : null;
+    if (!pi) return;
+    const [orig] = await this.db.query(
+      `SELECT tenant_id, invoice_id, currency FROM invoice_payments
+        WHERE provider_ref=$1 AND direction='charge' AND method='stripe' LIMIT 1`,
+      [pi],
+    );
+    if (!orig) return; // not one of ours (e.g. a subscription charge) → ignore
+    const refunds = Array.isArray(charge?.refunds?.data) ? charge.refunds.data : [];
+    if (!refunds.length) return;
+    await this.db.transaction(async (m) => {
+      await m.query(`SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`, [`invpay:${orig.invoice_id}`]);
+      for (const r of refunds) {
+        if (!r?.id) continue;
+        if (r.status && r.status !== 'succeeded' && r.status !== 'pending') continue;
+        await m.query(
+          `INSERT INTO invoice_payments
+             (tenant_id, invoice_id, method, direction, amount_minor, currency, status, provider_ref, note)
+           VALUES ($1,$2,'stripe','refund',$3,$4,'succeeded',$5,$6)
+           ON CONFLICT (tenant_id, provider_ref) WHERE provider_ref IS NOT NULL DO NOTHING`,
+          [orig.tenant_id, orig.invoice_id, Math.trunc(Number(r.amount) || 0), orig.currency, String(r.id), 'Reembolso Stripe'],
+        );
+      }
+      await this.recompute(m, orig.invoice_id);
+    });
+  }
+
+  // ── Refunds (Etapa 6) — admin only (enforced at the HTTP layer with @Roles('admin')) ─
+  /** Refund a paid invoice, totally or partially. Stripe refunds hit the Stripe API and are
+   *  reconciled idempotently with the `charge.refunded` webhook; manual (transfer/cash) refunds
+   *  just record a ledger row. Can NEVER refund more than the net collected. */
+  async refundInvoice(tenantId: string, invoiceId: string, userId: string | null, dto: any) {
+    const method = String(dto.method || 'stripe');
+    const reason = dto.reason || null;
+    const requested = dto.amount_minor != null ? Math.trunc(Number(dto.amount_minor)) : null;
+    if (requested != null && requested <= 0) throw new BadRequestException('El monto debe ser mayor que cero.');
+
+    await this.db.transaction(async (m) => {
+      await m.query(`SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`, [`invpay:${invoiceId}`]);
+      const [inv] = await m.query(`SELECT * FROM invoices WHERE id=$1 AND tenant_id=$2`, [invoiceId, tenantId]);
+      if (!inv) throw new NotFoundException('Factura no encontrada');
+
+      const { charged, refunded } = await this.ledgerSums(m, invoiceId);
+      const netPaid = charged - refunded; // maximum refundable
+      if (netPaid <= 0) throw new BadRequestException('No hay un pago neto que reembolsar.');
+      const amount = requested ?? netPaid;
+      if (amount > netPaid) {
+        throw new BadRequestException(`El reembolso supera lo cobrado. Máximo: ${netPaid} (unidades mínimas de ${inv.currency}).`);
+      }
+
+      if (method === 'transfer' || method === 'cash') {
+        await m.query(
+          `INSERT INTO invoice_payments
+             (tenant_id, invoice_id, method, direction, amount_minor, currency, status, recorded_by, note)
+           VALUES ($1,$2,$3,'refund',$4,$5,'succeeded',$6,$7)`,
+          [tenantId, invoiceId, method, amount, inv.currency, userId, reason],
+        );
+        await this.recompute(m, invoiceId);
+        return;
+      }
+      if (method !== 'stripe') throw new BadRequestException('Método de reembolso no soportado.');
+
+      // Stripe: refund against a specific succeeded stripe charge (identified by its payment_intent).
+      const charges = await m.query(
+        `SELECT id, amount_minor, provider_ref FROM invoice_payments
+          WHERE invoice_id=$1 AND tenant_id=$2 AND method='stripe' AND direction='charge'
+            AND status='succeeded' AND provider_ref IS NOT NULL
+          ORDER BY received_at ASC`,
+        [invoiceId, tenantId],
+      );
+      const target = dto.payment_id ? charges.find((c: any) => c.id === dto.payment_id) : charges[0];
+      if (!target) throw new BadRequestException('No hay un cargo de Stripe para reembolsar.');
+      if (amount > Number(target.amount_minor)) {
+        throw new BadRequestException('El reembolso supera el cargo seleccionado; elige otro cargo o divide el reembolso.');
+      }
+      const account = await this.billing.getConnectAccount(tenantId);
+      if (!account?.account_id) throw new BadRequestException('No tienes una cuenta de Stripe Connect activa.');
+      const provider: any = await this.billing.getProvider(tenantId);
+      const r = await provider.createConnectRefund(account.account_id, target.provider_ref, amount);
+      const status = (r.status === 'succeeded' || r.status === 'pending') ? 'succeeded' : 'failed';
+      await m.query(
+        `INSERT INTO invoice_payments
+           (tenant_id, invoice_id, method, direction, amount_minor, currency, status, provider_ref, recorded_by, note)
+         VALUES ($1,$2,'stripe','refund',$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (tenant_id, provider_ref) WHERE provider_ref IS NOT NULL DO NOTHING`,
+        [tenantId, invoiceId, amount, inv.currency, status, String(r.refundId), userId, reason],
+      );
+      await this.recompute(m, invoiceId);
+    });
+    return this.getOne(tenantId, invoiceId);
+  }
+
+  // ── Credit notes with detail lines (Etapa 6) — admin only ────────────────────
+  /** Issue a credit note against an issued invoice. It has its OWN gapless numbering
+   *  (CN-2026-0001), frozen issuer snapshot, detail lines (concepts + tax), and references the
+   *  original invoice. It does NOT edit the invoice (immutable) and does NOT move money by itself
+   *  (a refund is a separate action). Total credited can never exceed the invoice total. */
+  async createCreditNote(tenantId: string, userId: string | null, invoiceId: string, dto: any) {
+    const inv = await this.getOne(tenantId, invoiceId); // tenant-scoped guard
+    if (!inv) throw new NotFoundException('Factura no encontrada');
+    if (!['issued', 'partially_paid', 'paid', 'partially_refunded', 'refunded'].includes(inv.financial_status)) {
+      throw new BadRequestException('Solo una factura emitida puede tener nota de crédito.');
+    }
+    const defaultTaxRate = Number(dto.default_tax_rate ?? inv.default_tax_rate ?? 0) || 0;
+    const { items, totals } = buildInvoiceLines((dto.items ?? []) as RawInvoiceItem[], defaultTaxRate);
+    if (!items.length) throw new BadRequestException('La nota de crédito necesita al menos una línea.');
+    if (totals.totalMinor <= 0) throw new BadRequestException('El total de la nota de crédito debe ser mayor que cero.');
+
+    const alreadyCredited = Number(inv.credited_minor || 0);
+    if (alreadyCredited + totals.totalMinor > Number(inv.total_minor)) {
+      throw new BadRequestException('El total acreditado supera el total de la factura.');
+    }
+
+    const settings = await this.getSettings(tenantId);
+    if (!settings.business_name) {
+      throw new BadRequestException('Configura los datos del emisor en Ajustes → Facturación antes de emitir una nota de crédito.');
+    }
+    const issuer = {
+      business_name: settings.business_name, address: settings.address, tax_id: settings.tax_id,
+      email: settings.email, phone: settings.phone, logo_url: settings.logo_url,
+    };
+    const prefix = settings.cn_prefix || 'CN';
+    const year = new Date().getFullYear();
+    const currency = inv.currency;
+
+    const cnId: string = await this.db.transaction(async (m) => {
+      // Serialize credit-note numbering per (tenant, year) — gapless, same technique as invoices.
+      await m.query(`SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`, [`cnnum:${tenantId}:${year}`]);
+      const [row] = await m.query(
+        `SELECT COALESCE(MAX(number_seq),0)::int AS max FROM credit_notes
+          WHERE tenant_id=$1 AND number_seq IS NOT NULL AND EXTRACT(YEAR FROM issued_at)=$2`,
+        [tenantId, year],
+      );
+      const seq = Number(row?.max ?? 0) + 1;
+      const number = formatInvoiceNumber(prefix, year, seq);
+      const ins = await m.query(
+        `INSERT INTO credit_notes
+           (tenant_id, invoice_id, number, number_seq, reason, currency,
+            subtotal_minor, tax_minor, total_minor, issuer_snapshot, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+        [tenantId, invoiceId, number, seq, dto.reason ?? null, currency,
+         totals.subtotalMinor, totals.taxMinor, totals.totalMinor, JSON.stringify(issuer), userId],
+      );
+      const id = ins[0].id;
+      for (const it of items) {
+        await m.query(
+          `INSERT INTO credit_note_items
+             (credit_note_id, description, quantity, unit_price_minor, discount_minor, tax_rate,
+              line_subtotal_minor, line_tax_minor, line_total_minor, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [id, it.description, it.quantity, it.unit_price_minor, it.discount_minor, it.tax_rate,
+           it.line_subtotal_minor, it.line_tax_minor, it.line_total_minor, it.sort_order],
+        );
+      }
+      return id;
+    });
+    return this.getCreditNote(tenantId, cnId);
+  }
+
+  async listCreditNotes(tenantId: string, invoiceId?: string) {
+    const params: any[] = [tenantId];
+    let where = 'tenant_id=$1';
+    if (invoiceId) { params.push(invoiceId); where += ` AND invoice_id=$${params.length}`; }
+    return this.db.query(
+      `SELECT id, invoice_id, number, reason, currency, subtotal_minor, tax_minor, total_minor, issued_at
+         FROM credit_notes WHERE ${where} ORDER BY issued_at DESC`,
+      params,
+    );
+  }
+
+  async getCreditNote(tenantId: string, id: string) {
+    const [cn] = await this.db.query(
+      `SELECT * FROM credit_notes WHERE id=$1 AND tenant_id=$2`, [id, tenantId],
+    );
+    if (!cn) return null;
+    const items = await this.db.query(
+      `SELECT * FROM credit_note_items WHERE credit_note_id=$1 ORDER BY sort_order ASC`, [id],
+    );
+    return { ...cn, items };
   }
 }

@@ -226,11 +226,35 @@ export class StripeProvider implements PaymentProvider {
     return { url: session.url, sessionId: session.id };
   }
 
-  /** Retrieve a checkout session on a connected account to read its current status. */
-  async retrieveConnectCheckoutSession(accountId: string, sessionId: string): Promise<{ status: string; paymentStatus: string }> {
+  /** Retrieve a checkout session on a connected account to read its current status.
+   *  Also returns the payment_intent id so a refund can later be issued against it. */
+  async retrieveConnectCheckoutSession(accountId: string, sessionId: string): Promise<{ status: string; paymentStatus: string; paymentIntent?: string }> {
     const stripe = await this.sdk();
     const s = await stripe.checkout.sessions.retrieve(sessionId, { stripeAccount: accountId });
-    return { status: String(s.status ?? ''), paymentStatus: String(s.payment_status ?? '') };
+    return {
+      status: String(s.status ?? ''),
+      paymentStatus: String(s.payment_status ?? ''),
+      paymentIntent: s.payment_intent ? String(s.payment_intent) : undefined,
+    };
+  }
+
+  /** Refund a connected-account charge by its payment_intent. Amount is in MINOR units
+   *  (no 2-decimal assumption); omit it for a FULL refund. Returns the Stripe refund id
+   *  so the ledger can store it as provider_ref (idempotent against the webhook). */
+  async createConnectRefund(accountId: string, paymentIntentId: string, amountMinor?: number): Promise<{ refundId: string; amountMinor: number; status: string }> {
+    const stripe = await this.sdk();
+    const refund = await stripe.refunds.create(
+      {
+        payment_intent: paymentIntentId,
+        ...(amountMinor != null ? { amount: Math.round(amountMinor) } : {}),
+      },
+      { stripeAccount: accountId },
+    );
+    return {
+      refundId: String(refund.id),
+      amountMinor: Number(refund.amount ?? amountMinor ?? 0),
+      status: String(refund.status ?? ''),
+    };
   }
 
   async createTransfer(params: { accountId: string; amount: number; currency: string; description?: string }): Promise<{ transferId: string }> {

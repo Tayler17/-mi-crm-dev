@@ -3,21 +3,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice, issueInvoice,
-  recordInvoicePayment, createInvoiceStripeLink,
+  recordInvoicePayment, createInvoiceStripeLink, refundInvoice, createInvoiceCreditNote,
   getContacts, getInvoiceSettings,
-  InvoiceListRow, InvoiceItem, InvoicePayment, Contact,
+  InvoiceListRow, InvoiceItem, InvoicePayment, CreditNoteSummary, Contact,
 } from '@/lib/api';
 import { currencyDecimals, toMinor, fromMinor, formatMoney } from '@/lib/money';
 
 const CURRENCIES = ['GBP', 'EUR', 'USD', 'DOP', 'JPY', 'BHD', 'MXN', 'COP', 'BRL', 'CAD', 'AUD'];
 
 const STATUS_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
-  draft:          { bg: '#e5e7eb', fg: '#374151', label: 'Borrador' },
-  issued:         { bg: '#dbeafe', fg: '#1e40af', label: 'Emitida' },
-  partially_paid: { bg: '#fef3c7', fg: '#92400e', label: 'Pago parcial' },
-  paid:           { bg: '#dcfce7', fg: '#166534', label: 'Pagada' },
-  void:           { bg: '#fee2e2', fg: '#991b1b', label: 'Anulada' },
+  draft:               { bg: '#e5e7eb', fg: '#374151', label: 'Borrador' },
+  issued:              { bg: '#dbeafe', fg: '#1e40af', label: 'Emitida' },
+  partially_paid:      { bg: '#fef3c7', fg: '#92400e', label: 'Pago parcial' },
+  paid:                { bg: '#dcfce7', fg: '#166534', label: 'Pagada' },
+  partially_refunded:  { bg: '#ffedd5', fg: '#9a3412', label: 'Reembolso parcial' },
+  refunded:            { bg: '#f3e8ff', fg: '#6b21a8', label: 'Reembolsada' },
+  void:                { bg: '#fee2e2', fg: '#991b1b', label: 'Anulada' },
 };
+const REFUNDABLE_STATUSES = ['paid', 'partially_paid', 'partially_refunded'];
+const CREDIT_NOTE_STATUSES = ['issued', 'partially_paid', 'paid', 'partially_refunded', 'refunded'];
 
 interface FormLine { description: string; quantity: string; unitPrice: string; taxPct: string; }
 
@@ -56,6 +60,70 @@ export default function InvoicesPage() {
   const [paySaving, setPaySaving] = useState(false);
   const [payError, setPayError] = useState('');
   const [stripeUrl, setStripeUrl] = useState('');
+
+  // Refund modal (Etapa 6 — admin)
+  const [refundRow, setRefundRow] = useState<InvoiceListRow | null>(null);
+  const [refundMethod, setRefundMethod] = useState<'stripe' | 'transfer' | 'cash'>('stripe');
+  const [refundAmount, setRefundAmount] = useState('');
+  const [refundReason, setRefundReason] = useState('');
+  const [refundSaving, setRefundSaving] = useState(false);
+  const [refundError, setRefundError] = useState('');
+
+  // Credit-note modal (Etapa 6 — admin), with detail lines
+  const [cnRow, setCnRow] = useState<InvoiceListRow | null>(null);
+  const [cnReason, setCnReason] = useState('');
+  const [cnLines, setCnLines] = useState<FormLine[]>([emptyLine()]);
+  const [cnExisting, setCnExisting] = useState<CreditNoteSummary[]>([]);
+  const [cnSaving, setCnSaving] = useState(false);
+  const [cnError, setCnError] = useState('');
+
+  function openRefund(row: InvoiceListRow) {
+    setRefundRow(row);
+    setRefundMethod('stripe');
+    setRefundAmount(String(fromMinor(Number(row.amount_paid_minor), row.currency))); // default = neto cobrado
+    setRefundReason(''); setRefundError('');
+  }
+
+  async function submitRefund() {
+    if (!refundRow) return;
+    setRefundSaving(true); setRefundError('');
+    try {
+      const amountMinor = toMinor(Number(refundAmount) || 0, refundRow.currency);
+      await refundInvoice(refundRow.id, { method: refundMethod, amount_minor: amountMinor, reason: refundReason || undefined });
+      setRefundRow(null);
+      await refresh();
+    } catch (e: any) { setRefundError(e?.message || 'No se pudo reembolsar'); }
+    finally { setRefundSaving(false); }
+  }
+
+  async function openCreditNote(row: InvoiceListRow) {
+    setCnRow(row); setCnReason(''); setCnLines([emptyLine()]); setCnError(''); setCnExisting([]);
+    try { const inv = await getInvoice(row.id); setCnExisting(inv.credit_notes || []); } catch { /* ignore */ }
+  }
+
+  function setCnLine(i: number, patch: Partial<FormLine>) {
+    setCnLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  }
+
+  async function submitCreditNote() {
+    if (!cnRow) return;
+    setCnSaving(true); setCnError('');
+    try {
+      const items: InvoiceItem[] = cnLines
+        .filter((l) => l.description.trim() || Number(l.unitPrice) > 0)
+        .map((l) => ({
+          description: l.description,
+          quantity: Number(l.quantity) || 0,
+          unit_price_minor: toMinor(Number(l.unitPrice) || 0, cnRow.currency),
+          tax_rate: l.taxPct === '' ? null : Number(l.taxPct) / 100,
+        }));
+      if (!items.length) { setCnError('Añade al menos una línea.'); setCnSaving(false); return; }
+      await createInvoiceCreditNote(cnRow.id, { reason: cnReason || undefined, items });
+      setCnRow(null);
+      await refresh();
+    } catch (e: any) { setCnError(e?.message || 'No se pudo crear la nota de crédito'); }
+    finally { setCnSaving(false); }
+  }
 
   async function refresh() {
     setLoading(true);
@@ -216,6 +284,8 @@ export default function InvoicesPage() {
           <option value="issued">Emitida</option>
           <option value="partially_paid">Pago parcial</option>
           <option value="paid">Pagada</option>
+          <option value="partially_refunded">Reembolso parcial</option>
+          <option value="refunded">Reembolsada</option>
           <option value="void">Anulada</option>
         </select>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
@@ -270,6 +340,12 @@ export default function InvoicesPage() {
                         <>
                           {['issued', 'partially_paid'].includes(r.financial_status) && (
                             <button className="btn btn-primary" style={{ marginRight: 6 }} onClick={() => openPay(r)}>Pago</button>
+                          )}
+                          {REFUNDABLE_STATUSES.includes(r.financial_status) && Number(r.amount_paid_minor) > 0 && (
+                            <button className="btn btn-secondary" style={{ marginRight: 6 }} onClick={() => openRefund(r)}>Reembolsar</button>
+                          )}
+                          {CREDIT_NOTE_STATUSES.includes(r.financial_status) && (
+                            <button className="btn btn-secondary" style={{ marginRight: 6 }} onClick={() => openCreditNote(r)}>Nota crédito</button>
                           )}
                           <button className="btn btn-secondary" onClick={() => openEdit(r.id)}>Ver</button>
                         </>
@@ -436,6 +512,86 @@ export default function InvoicesPage() {
                   {paySaving ? 'Procesando…' : payMethod === 'stripe' ? 'Generar link de pago' : 'Registrar pago'}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Refund modal (Etapa 6 — admin) */}
+      {refundRow && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: 24, zIndex: 60, overflowY: 'auto' }}>
+          <div style={{ background: 'var(--bg, #fff)', borderRadius: 10, padding: 20, width: 'min(460px, 100%)', boxShadow: '0 10px 40px rgba(0,0,0,.2)' }}>
+            <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 4 }}>Reembolsar</h2>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>
+              {refundRow.number || 'Factura'} · Reembolsable: <b>{formatMoney(Number(refundRow.amount_paid_minor), refundRow.currency)}</b>
+            </div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div>
+                <label className="form-label" style={{ fontSize: 12 }}>Método</label>
+                <select className="form-input" value={refundMethod} onChange={(e) => setRefundMethod(e.target.value as any)}>
+                  <option value="stripe">Stripe (devuelve al cliente)</option>
+                  <option value="transfer">Transferencia (registrar)</option>
+                  <option value="cash">Efectivo (registrar)</option>
+                </select>
+              </div>
+              <div>
+                <label className="form-label" style={{ fontSize: 12 }}>Monto ({refundRow.currency})</label>
+                <input className="form-input" value={refundAmount} onChange={(e) => setRefundAmount(e.target.value)} />
+              </div>
+              <div>
+                <label className="form-label" style={{ fontSize: 12 }}>Motivo (opcional)</label>
+                <input className="form-input" value={refundReason} onChange={(e) => setRefundReason(e.target.value)} />
+              </div>
+            </div>
+            {refundError && <div style={{ color: '#dc2626', fontSize: 13, marginTop: 8 }}>{refundError}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+              <button className="btn btn-secondary" onClick={() => setRefundRow(null)}>Cancelar</button>
+              <button className="btn btn-primary" disabled={refundSaving} onClick={submitRefund}>
+                {refundSaving ? 'Procesando…' : 'Reembolsar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credit-note modal (Etapa 6 — admin, with detail lines) */}
+      {cnRow && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: 24, zIndex: 60, overflowY: 'auto' }}>
+          <div style={{ background: 'var(--bg, #fff)', borderRadius: 10, padding: 20, width: 'min(680px, 100%)', boxShadow: '0 10px 40px rgba(0,0,0,.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <h2 style={{ fontSize: 17, fontWeight: 700 }}>Nota de crédito</h2>
+              <button className="btn btn-secondary" onClick={() => setCnRow(null)}>✕</button>
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+              Contra {cnRow.number || 'la factura'} · Total factura: <b>{formatMoney(Number(cnRow.total_minor), cnRow.currency)}</b>
+            </div>
+            {cnExisting.length > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+                Notas de crédito previas: {cnExisting.map((c) => `${c.number} (${formatMoney(Number(c.total_minor), c.currency)})`).join(', ')}
+              </div>
+            )}
+            <div style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
+              {cnLines.map((l, i) => (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 70px 110px 80px 28px', gap: 6, alignItems: 'center' }}>
+                  <input className="form-input" placeholder="Concepto" value={l.description} onChange={(e) => setCnLine(i, { description: e.target.value })} />
+                  <input className="form-input" placeholder="Cant." value={l.quantity} onChange={(e) => setCnLine(i, { quantity: e.target.value })} />
+                  <input className="form-input" placeholder={`Precio (${cnRow.currency})`} value={l.unitPrice} onChange={(e) => setCnLine(i, { unitPrice: e.target.value })} />
+                  <input className="form-input" placeholder="IVA %" value={l.taxPct} onChange={(e) => setCnLine(i, { taxPct: e.target.value })} />
+                  <button className="btn btn-secondary" style={{ color: '#dc2626', padding: '4px 8px' }} onClick={() => setCnLines((ls) => ls.length > 1 ? ls.filter((_, idx) => idx !== i) : ls)}>×</button>
+                </div>
+              ))}
+              <button className="btn btn-secondary" style={{ justifySelf: 'start' }} onClick={() => setCnLines((ls) => [...ls, emptyLine()])}>+ Añadir línea</button>
+            </div>
+            <div>
+              <label className="form-label" style={{ fontSize: 12 }}>Motivo (opcional)</label>
+              <input className="form-input" value={cnReason} onChange={(e) => setCnReason(e.target.value)} />
+            </div>
+            {cnError && <div style={{ color: '#dc2626', fontSize: 13, marginTop: 8 }}>{cnError}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+              <button className="btn btn-secondary" onClick={() => setCnRow(null)}>Cancelar</button>
+              <button className="btn btn-primary" disabled={cnSaving} onClick={submitCreditNote}>
+                {cnSaving ? 'Creando…' : 'Emitir nota de crédito'}
+              </button>
             </div>
           </div>
         </div>

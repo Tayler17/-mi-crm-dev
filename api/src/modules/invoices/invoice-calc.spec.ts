@@ -1,4 +1,4 @@
-import { buildInvoiceLines, isInvoiceOverdue, financialStatusFor } from './invoice-calc';
+import { buildInvoiceLines, isInvoiceOverdue, financialStatusFor, financialStatusForLedger } from './invoice-calc';
 
 describe('buildInvoiceLines', () => {
   it('computes lines and totals with per-line tax', () => {
@@ -73,5 +73,31 @@ describe('financialStatusFor (ledger-derived)', () => {
   it('reverts to partially_paid / issued when a refund lowers the paid amount (Etapa 6)', () => {
     expect(financialStatusFor(600, 1000, 'paid')).toBe('partially_paid');
     expect(financialStatusFor(0, 1000, 'paid')).toBe('issued');
+  });
+});
+
+describe('financialStatusForLedger (gross charges vs refunds — Etapa 6)', () => {
+  it('behaves like the simple version when there are no refunds', () => {
+    expect(financialStatusForLedger(0, 0, 1000, 'issued')).toBe('issued');
+    expect(financialStatusForLedger(400, 0, 1000, 'issued')).toBe('partially_paid');
+    expect(financialStatusForLedger(1000, 0, 1000, 'issued')).toBe('paid');
+  });
+  it('a partial refund on a fully paid invoice → partially_refunded (NOT partially_paid)', () => {
+    // charged 1000, refunded 300 → net 700, but it IS a refund situation
+    expect(financialStatusForLedger(1000, 300, 1000, 'paid')).toBe('partially_refunded');
+  });
+  it('a full refund → refunded (distinguished from never-paid even though both net to 0)', () => {
+    expect(financialStatusForLedger(1000, 1000, 1000, 'paid')).toBe('refunded');
+    expect(financialStatusForLedger(0, 0, 1000, 'issued')).toBe('issued'); // never paid, same net 0
+  });
+  it('a refund that exceeds charges still resolves to refunded (never negative/impaga)', () => {
+    expect(financialStatusForLedger(600, 600, 1000, 'partially_paid')).toBe('refunded');
+  });
+  it('never changes drafts or voids', () => {
+    expect(financialStatusForLedger(1000, 500, 1000, 'draft')).toBe('draft');
+    expect(financialStatusForLedger(1000, 1000, 1000, 'void')).toBe('void');
+  });
+  it('recomputes an already-refunded invoice (further refund keeps it coherent)', () => {
+    expect(financialStatusForLedger(1000, 1000, 1000, 'partially_refunded')).toBe('refunded');
   });
 });

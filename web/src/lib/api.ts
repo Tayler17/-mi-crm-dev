@@ -2272,10 +2272,15 @@ export interface InvoicePayment {
   id: string; method: string; direction: string; amount_minor: number;
   currency: string; status: string; received_at: string; note?: string | null;
 }
+export interface CreditNoteSummary {
+  id: string; number?: string | null; reason?: string | null;
+  currency: string; total_minor: number; issued_at: string;
+}
 export interface Invoice extends InvoiceListRow {
   deal_id?: string | null; default_tax_rate: number;
   subtotal_minor: number; tax_minor: number; notes?: string | null; terms?: string | null;
   overdue?: boolean; items: InvoiceItem[]; payments?: InvoicePayment[];
+  refundable_minor?: number; credited_minor?: number; credit_notes?: CreditNoteSummary[];
 }
 export interface CreateInvoiceDto {
   contact_id?: string | null; deal_id?: string | null; currency?: string;
@@ -2301,3 +2306,15 @@ export const recordInvoicePayment = (
 ) => apiPost<Invoice>(`/invoices/${id}/payments`, data);
 export const createInvoiceStripeLink = (id: string, amount_minor?: number) =>
   apiPost<{ url: string; sessionId: string }>(`/invoices/${id}/stripe-link`, amount_minor != null ? { amount_minor } : {});
+
+// ── Invoices — refunds + credit notes (Etapa 6, admin only) ─────────────────────
+export const refundInvoice = (
+  id: string,
+  data: { method: 'stripe' | 'transfer' | 'cash'; amount_minor?: number; payment_id?: string; reason?: string },
+) => apiPost<Invoice>(`/invoices/${id}/refunds`, data);
+export const createInvoiceCreditNote = (
+  id: string,
+  data: { reason?: string; default_tax_rate?: number; items: InvoiceItem[] },
+) => apiPost<{ id: string; number?: string }>(`/invoices/${id}/credit-notes`, data);
+export const listInvoiceCreditNotes = (id: string) =>
+  apiGet<CreditNoteSummary[]>(`/invoices/${id}/credit-notes`);

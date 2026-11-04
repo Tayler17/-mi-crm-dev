@@ -88,3 +88,31 @@ export function financialStatusFor(paidMinor: number, totalMinor: number, curren
   if (paidMinor > 0) return 'partially_paid';
   return 'issued';
 }
+
+/**
+ * Financial status derived from the FULL ledger, distinguishing refunds (Etapa 6).
+ * We need charges and refunds SEPARATELY: a net of 0 can mean "never paid" (issued) or
+ * "paid then fully refunded" (refunded) — only the gross refund amount tells them apart.
+ *   chargedMinor  = Σ(succeeded charges)
+ *   refundedMinor = Σ(succeeded refunds)
+ * Rules (plan §8): any refund with a remaining net → partially_refunded; a refund that
+ * brings the net to zero (or below) → refunded. With NO refund it behaves like
+ * financialStatusFor. NEVER drops an issued/paid invoice back to a wrong status.
+ */
+export function financialStatusForLedger(
+  chargedMinor: number,
+  refundedMinor: number,
+  totalMinor: number,
+  currentStatus: string,
+): string {
+  if (!['issued', 'partially_paid', 'paid', 'partially_refunded', 'refunded'].includes(currentStatus)) {
+    return currentStatus;
+  }
+  const net = Number(chargedMinor) - Number(refundedMinor);
+  if (Number(refundedMinor) > 0) {
+    return net <= 0 ? 'refunded' : 'partially_refunded';
+  }
+  if (totalMinor > 0 && net >= totalMinor) return 'paid';
+  if (net > 0) return 'partially_paid';
+  return 'issued';
+}
