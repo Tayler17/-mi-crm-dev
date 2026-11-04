@@ -2318,3 +2318,22 @@ export const createInvoiceCreditNote = (
 ) => apiPost<{ id: string; number?: string }>(`/invoices/${id}/credit-notes`, data);
 export const listInvoiceCreditNotes = (id: string) =>
   apiGet<CreditNoteSummary[]>(`/invoices/${id}/credit-notes`);
+
+// ── Invoices — PDF + envío (Etapa 7) ────────────────────────────────────────────
+export const sendInvoice = (id: string, data: { channel: 'email' | 'whatsapp'; to?: string }) =>
+  apiPost<Invoice>(`/invoices/${id}/send`, data);
+
+/** Download the invoice PDF (protected endpoint → fetch with auth, then save as a file). */
+export async function downloadInvoicePdf(id: string, filename = 'factura.pdf'): Promise<void> {
+  const res = await fetch(`${API_URL}/invoices/${id}/pdf`, { headers: authHeaders() });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as any)?.message || 'No se pudo generar el PDF');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}

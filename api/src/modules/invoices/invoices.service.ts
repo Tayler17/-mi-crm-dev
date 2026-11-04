@@ -1,9 +1,16 @@
-import { Injectable, OnModuleInit, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, OnModuleInit, BadRequestException, NotFoundException, Optional } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
+import { randomBytes } from 'crypto';
+import * as nodemailer from 'nodemailer';
 import { buildInvoiceLines, formatInvoiceNumber, isInvoiceOverdue, financialStatusFor, financialStatusForLedger, RawInvoiceItem } from './invoice-calc';
+import { buildInvoicePdf } from './invoice-pdf';
+import { fromMinor, currencyDecimals } from './money';
 import { BillingService } from '../billing/billing.service';
 import { PlatformSettingsService } from '../settings/platform-settings.service';
+import { WhatsappWebService } from '../connections/whatsapp-web.service';
 
 /**
  * Invoices module.
@@ -19,6 +26,8 @@ export class InvoicesService implements OnModuleInit {
     @InjectDataSource() private readonly db: DataSource,
     private readonly billing: BillingService,
     private readonly platformSettings: PlatformSettingsService,
+    // Optional so unit tests can build the service with just (db, billing, settings).
+    @Optional() private readonly waWeb?: WhatsappWebService,
   ) {}
 
   async onModuleInit() {
@@ -40,6 +49,22 @@ export class InvoicesService implements OnModuleInit {
         updated_at       timestamptz NOT NULL DEFAULT now()
       )
     `).catch((e: any) => console.error(`[invoices] settings init: ${e.message}`));
+
+    // Defensive schema evolution: CREATE TABLE IF NOT EXISTS does NOT add columns to a table
+    // that already existed, so ensure every settings column is present on upgraded DBs.
+    for (const col of [
+      'business_name text', 'address text', 'tax_id text', 'email text', 'phone text', 'logo_url text',
+      `number_prefix text NOT NULL DEFAULT 'INV'`, `cn_prefix text NOT NULL DEFAULT 'CN'`,
+      `default_currency text NOT NULL DEFAULT 'GBP'`, 'default_tax_rate numeric NOT NULL DEFAULT 0',
+      'footer_terms text', 'created_at timestamptz NOT NULL DEFAULT now()', 'updated_at timestamptz NOT NULL DEFAULT now()',
+    ]) {
+      await this.db.query(`ALTER TABLE tenant_invoice_settings ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
+    }
+    // updateSettings relies on ON CONFLICT (tenant_id); guarantee a matching unique index exists.
+    await this.db.query(`CREATE UNIQUE INDEX IF NOT EXISTS tenant_invoice_settings_tenant_uidx ON tenant_invoice_settings(tenant_id)`).catch(() => {});
+    // Type fix: an early version created default_tax_rate as integer, so 0.2 (a 20% rate) failed
+    // with "invalid input syntax for type integer". integer→numeric is a safe no-op when already numeric.
+    await this.db.query(`ALTER TABLE tenant_invoice_settings ALTER COLUMN default_tax_rate TYPE numeric`).catch(() => {});
 
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS invoices (
@@ -73,6 +98,28 @@ export class InvoicesService implements OnModuleInit {
       )
     `).catch((e: any) => console.error(`[invoices] invoices init: ${e.message}`));
 
+    // Defensive: add any column missing from an invoices table created by an earlier version.
+    for (const col of [
+      'contact_id uuid', 'deal_id uuid', `kind text NOT NULL DEFAULT 'invoice'`, 'number text', 'number_seq integer',
+      `financial_status text NOT NULL DEFAULT 'draft'`, `delivery_status text NOT NULL DEFAULT 'not_sent'`,
+      `currency text NOT NULL DEFAULT 'GBP'`, 'default_tax_rate numeric NOT NULL DEFAULT 0',
+      'subtotal_minor bigint NOT NULL DEFAULT 0', 'tax_minor bigint NOT NULL DEFAULT 0', 'total_minor bigint NOT NULL DEFAULT 0',
+      'amount_paid_minor bigint NOT NULL DEFAULT 0', 'due_date date', 'notes text', 'terms text',
+      'issuer_snapshot jsonb', 'buyer_snapshot jsonb', 'issued_at timestamptz', 'sent_at timestamptz',
+      'paid_at timestamptz', 'voided_at timestamptz', 'created_by uuid', 'pdf_token text', 'pdf_url text',
+      'created_at timestamptz NOT NULL DEFAULT now()', 'updated_at timestamptz NOT NULL DEFAULT now()',
+    ]) {
+      await this.db.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
+    }
+    // Normalize numeric types in case an early version used integer (see settings note).
+    for (const alter of [
+      `ALTER TABLE invoices ALTER COLUMN default_tax_rate TYPE numeric`,
+      `ALTER TABLE invoices ALTER COLUMN subtotal_minor TYPE bigint`,
+      `ALTER TABLE invoices ALTER COLUMN tax_minor TYPE bigint`,
+      `ALTER TABLE invoices ALTER COLUMN total_minor TYPE bigint`,
+      `ALTER TABLE invoices ALTER COLUMN amount_paid_minor TYPE bigint`,
+    ]) { await this.db.query(alter).catch(() => {}); }
+
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS invoice_items (
         id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -88,6 +135,23 @@ export class InvoicesService implements OnModuleInit {
         sort_order          integer NOT NULL DEFAULT 0
       )
     `).catch((e: any) => console.error(`[invoices] invoice_items init: ${e.message}`));
+
+    for (const col of [
+      'description text', 'quantity numeric NOT NULL DEFAULT 1', 'unit_price_minor bigint NOT NULL DEFAULT 0',
+      'discount_minor bigint NOT NULL DEFAULT 0', 'tax_rate numeric', 'line_subtotal_minor bigint NOT NULL DEFAULT 0',
+      'line_tax_minor bigint NOT NULL DEFAULT 0', 'line_total_minor bigint NOT NULL DEFAULT 0', 'sort_order integer NOT NULL DEFAULT 0',
+    ]) {
+      await this.db.query(`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
+    }
+    for (const alter of [
+      `ALTER TABLE invoice_items ALTER COLUMN quantity TYPE numeric`,
+      `ALTER TABLE invoice_items ALTER COLUMN tax_rate TYPE numeric`,
+      `ALTER TABLE invoice_items ALTER COLUMN unit_price_minor TYPE bigint`,
+      `ALTER TABLE invoice_items ALTER COLUMN discount_minor TYPE bigint`,
+      `ALTER TABLE invoice_items ALTER COLUMN line_subtotal_minor TYPE bigint`,
+      `ALTER TABLE invoice_items ALTER COLUMN line_tax_minor TYPE bigint`,
+      `ALTER TABLE invoice_items ALTER COLUMN line_total_minor TYPE bigint`,
+    ]) { await this.db.query(alter).catch(() => {}); }
 
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS invoice_payments (
@@ -108,6 +172,17 @@ export class InvoicesService implements OnModuleInit {
         created_at         timestamptz NOT NULL DEFAULT now()
       )
     `).catch((e: any) => console.error(`[invoices] invoice_payments init: ${e.message}`));
+
+    // Defensive: invoice_payments grew across Etapa 4→5 (direction, provider_ref, payment_session_id…).
+    for (const col of [
+      'tenant_id uuid', 'invoice_id uuid', 'method text', `direction text NOT NULL DEFAULT 'charge'`,
+      'amount_minor bigint NOT NULL DEFAULT 0', `currency text NOT NULL DEFAULT 'GBP'`, `status text NOT NULL DEFAULT 'succeeded'`,
+      'payment_link_id uuid', 'payment_session_id text', 'provider_ref text', 'received_at timestamptz NOT NULL DEFAULT now()',
+      'recorded_by uuid', 'note text', 'created_at timestamptz NOT NULL DEFAULT now()',
+    ]) {
+      await this.db.query(`ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
+    }
+    await this.db.query(`ALTER TABLE invoice_payments ALTER COLUMN amount_minor TYPE bigint`).catch(() => {});
 
     await this.db.query(`CREATE INDEX IF NOT EXISTS invoices_tenant_idx ON invoices(tenant_id)`).catch(() => {});
     await this.db.query(`CREATE INDEX IF NOT EXISTS invoice_items_invoice_idx ON invoice_items(invoice_id)`).catch(() => {});
@@ -784,5 +859,181 @@ export class InvoicesService implements OnModuleInit {
       `SELECT * FROM credit_note_items WHERE credit_note_id=$1 ORDER BY sort_order ASC`, [id],
     );
     return { ...cn, items };
+  }
+
+  // ── PDF generation + sending (Etapa 7) ───────────────────────────────────────
+  private fmtMoney(minor: number | string, currency: string): string {
+    const cur = (currency || 'GBP').toUpperCase();
+    return `${fromMinor(Number(minor) || 0, cur).toFixed(currencyDecimals(cur))} ${cur}`;
+  }
+
+  private pdfDir(): string {
+    const dir = join(process.cwd(), 'uploads', 'invoices');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  private publicUrl(relPath: string): string {
+    const base = (process.env.API_PUBLIC_URL || '').replace(/\/$/, '');
+    return base ? `${base}${relPath}` : relPath;
+  }
+
+  /** Generate (or regenerate) the invoice PDF and persist its unguessable public path.
+   *  Only emitted invoices (never drafts). Reuses the existing file if present unless forced. */
+  async generateInvoicePdf(tenantId: string, invoiceId: string, opts: { force?: boolean } = {}) {
+    const inv = await this.getOne(tenantId, invoiceId);
+    if (!inv) throw new NotFoundException('Factura no encontrada');
+    if (inv.financial_status === 'draft') throw new BadRequestException('Emite la factura antes de generar el PDF.');
+    if (!opts.force && inv.pdf_token && inv.pdf_url) {
+      const existing = join(this.pdfDir(), `${inv.pdf_token}.pdf`);
+      if (existsSync(existing)) return { url: this.publicUrl(inv.pdf_url), path: existing, relPath: inv.pdf_url as string };
+    }
+    const token = randomBytes(16).toString('hex');
+    const filename = `${token}.pdf`;
+    const absPath = join(this.pdfDir(), filename);
+    const relPath = `/uploads/invoices/${filename}`;
+    await buildInvoicePdf(absPath, {
+      docTitle: inv.kind === 'quote' ? 'COTIZACIÓN' : 'FACTURA',
+      number: inv.number,
+      currency: inv.currency,
+      issuer: inv.issuer_snapshot || {},
+      buyer: inv.buyer_snapshot || { name: inv.contact_name },
+      items: inv.items || [],
+      subtotal_minor: inv.subtotal_minor,
+      tax_minor: inv.tax_minor,
+      total_minor: inv.total_minor,
+      amount_paid_minor: inv.amount_paid_minor,
+      due_date: inv.due_date,
+      issued_at: inv.issued_at,
+      notes: inv.notes,
+      terms: inv.terms,
+    });
+    await this.db.query(
+      `UPDATE invoices SET pdf_token=$2, pdf_url=$3, updated_at=NOW() WHERE id=$1 AND tenant_id=$4`,
+      [invoiceId, token, relPath, tenantId],
+    );
+    return { url: this.publicUrl(relPath), path: absPath, relPath };
+  }
+
+  /** Ensure the PDF exists and return its absolute path + a friendly filename (for streaming). */
+  async getInvoicePdfPath(tenantId: string, invoiceId: string): Promise<{ path: string; filename: string }> {
+    const { path } = await this.generateInvoicePdf(tenantId, invoiceId);
+    const inv = await this.getOne(tenantId, invoiceId);
+    const base = inv?.kind === 'quote' ? 'Cotizacion' : 'Factura';
+    const filename = `${base}-${inv?.number || invoiceId}.pdf`.replace(/[^\w.\-]/g, '_');
+    return { path, filename };
+  }
+
+  /** Mark the invoice as sent. Sending NEVER changes the FINANCIAL status — only the
+   *  independent DELIVERY dimension (Etapa 3). */
+  private async markSent(tenantId: string, invoiceId: string) {
+    await this.db.query(
+      `UPDATE invoices SET delivery_status='sent', sent_at=COALESCE(sent_at, NOW()), updated_at=NOW()
+        WHERE id=$1 AND tenant_id=$2`,
+      [invoiceId, tenantId],
+    );
+  }
+
+  private async recordOutboundMsg(tenantId: string, conversationId: string, body: string, contentType: string) {
+    await this.db.query(
+      `INSERT INTO messages (tenant_id, conversation_id, body, content_type, direction, sender_type, is_private, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,'outbound','system',false,NOW(),NOW())`,
+      [tenantId, conversationId, body, contentType],
+    ).catch(() => {});
+    await this.db.query(
+      `UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1 AND tenant_id=$2`,
+      [conversationId, tenantId],
+    ).catch(() => {});
+  }
+
+  /** Send the invoice by email (SMTP + PDF attached) or WhatsApp (document/link into the
+   *  contact's conversation). Does NOT touch the message controller's delivery hot-path. */
+  async sendInvoice(tenantId: string, invoiceId: string, dto: { channel: 'email' | 'whatsapp'; to?: string }) {
+    const inv = await this.getOne(tenantId, invoiceId);
+    if (!inv) throw new NotFoundException('Factura no encontrada');
+    if (inv.financial_status === 'draft') throw new BadRequestException('Emite la factura antes de enviarla.');
+    const channel = String(dto.channel || '');
+    if (!['email', 'whatsapp'].includes(channel)) throw new BadRequestException('Canal no soportado. Usa email o whatsapp.');
+    const label = inv.number || 'factura';
+    const noun = inv.kind === 'quote' ? 'Cotización' : 'Factura';
+
+    // Validate cheap preconditions BEFORE generating the PDF.
+    const emailTo = channel === 'email' ? (dto.to || inv.buyer_snapshot?.email || null) : null;
+    if (channel === 'email' && !emailTo) throw new BadRequestException('No hay email del destinatario. Indícalo.');
+    if (channel === 'whatsapp' && !inv.contact_id) throw new BadRequestException('La factura no tiene contacto asociado.');
+
+    const { url, path, relPath } = await this.generateInvoicePdf(tenantId, invoiceId);
+
+    if (channel === 'email') {
+      const to = emailTo as string;
+      const smtp = await this.platformSettings.getSMTP().catch(() => null);
+      if (!smtp?.host || smtp.host === 'mailhog') {
+        throw new BadRequestException('No hay SMTP configurado en Ajustes → Plataforma.');
+      }
+      const transport = nodemailer.createTransport({
+        host: smtp.host, port: smtp.port, secure: smtp.secure,
+        auth: smtp.user ? { user: smtp.user, pass: smtp.password } : undefined,
+      });
+      const issuerName = inv.issuer_snapshot?.business_name || 'AutoMarkIQ';
+      await transport.sendMail({
+        from: smtp.from || smtp.user,
+        to,
+        subject: `${noun} ${label}`,
+        html: `<p>Hola,</p><p>Adjuntamos tu ${noun.toLowerCase()} <b>${label}</b> por un total de ${this.fmtMoney(inv.total_minor, inv.currency)}.</p>`
+          + `<p>También la puedes ver aquí: <a href="${url}">${url}</a></p><p>Saludos,<br>${issuerName}</p>`,
+        attachments: [{ filename: `${label}.pdf`, path }],
+      });
+      await this.markSent(tenantId, invoiceId);
+      return this.getOne(tenantId, invoiceId);
+    }
+
+    if (channel === 'whatsapp') {
+      await this.sendInvoiceWhatsapp(tenantId, inv, relPath, url, `${noun} ${label} — ${this.fmtMoney(inv.total_minor, inv.currency)}`);
+      await this.markSent(tenantId, invoiceId);
+      return this.getOne(tenantId, invoiceId);
+    }
+    throw new BadRequestException('Canal no soportado. Usa email o whatsapp.');
+  }
+
+  /** WhatsApp sending reusing the EXISTING outbound services (not the controller hot-path):
+   *  WA Web sends the PDF as a document via WhatsappWebService; Cloud API sends a text with the
+   *  public link (a document link would need Meta media upload; the link is robust + unverifiable
+   *  on staging anyway). Picks the contact's most recent WhatsApp conversation. */
+  private async sendInvoiceWhatsapp(tenantId: string, inv: any, relPath: string, url: string, caption: string) {
+    if (!inv.contact_id) throw new BadRequestException('La factura no tiene contacto asociado.');
+    const [conv] = await this.db.query(
+      `SELECT c.id, c.channel_type, c.connection_id, c.external_id,
+              cc.channel_type AS conn_channel_type, cc.credentials
+         FROM conversations c
+         LEFT JOIN channel_connections cc ON cc.id = c.connection_id
+        WHERE c.tenant_id=$1 AND c.contact_id=$2
+          AND COALESCE(cc.channel_type, c.channel_type) IN ('whatsapp','whatsapp_web')
+        ORDER BY c.last_message_at DESC NULLS LAST, c.updated_at DESC LIMIT 1`,
+      [tenantId, inv.contact_id],
+    );
+    if (!conv) throw new BadRequestException('El contacto no tiene una conversación de WhatsApp. Escríbele primero desde el inbox.');
+    const channelType = conv.conn_channel_type ?? conv.channel_type;
+
+    if (channelType === 'whatsapp_web') {
+      if (!this.waWeb) throw new BadRequestException('Servicio de WhatsApp Web no disponible.');
+      const ok = await this.waWeb.sendFile(conv.connection_id, conv.external_id, relPath, 'file', caption);
+      if (!ok) throw new BadRequestException('No se pudo enviar por WhatsApp Web (sesión desconectada).');
+      await this.recordOutboundMsg(tenantId, conv.id, relPath, 'file');
+      return;
+    }
+    // Cloud API
+    const creds = conv.credentials ?? {};
+    const phoneId = creds.phoneNumberId, token = creds.accessToken, to = conv.external_id;
+    if (!phoneId || !token || !to) throw new BadRequestException('La conexión de WhatsApp (Cloud API) está incompleta.');
+    const body = `${caption}\n${url}`;
+    const res = await (globalThis as any).fetch(`https://graph.facebook.com/v19.0/${phoneId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body } }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const data: any = await res.json().catch(() => null);
+    if (data?.error) throw new BadRequestException(`WhatsApp rechazó el envío: ${data.error.message || 'error'}`);
+    await this.recordOutboundMsg(tenantId, conv.id, body, 'text');
   }
 }

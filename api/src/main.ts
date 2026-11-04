@@ -44,7 +44,9 @@ async function bootstrap() {
   // Serve public upload directories (conversation media, content images)
   // kb-pdfs are NOT served publicly — accessed only via protected API
   const uploadsDir = join(process.cwd(), 'uploads');
-  const subDirs = ['content', 'messages', 'chat'];
+  // 'invoices' holds generated invoice/credit-note PDFs, served at an UNGUESSABLE token
+  // path so a WhatsApp/email link resolves (the filename is a random token, not the id).
+  const subDirs = ['content', 'messages', 'chat', 'invoices'];
   for (const sub of subDirs) {
     const dir = join(uploadsDir, sub);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });

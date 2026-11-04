@@ -206,6 +206,6 @@ Facturas formales con **pagos Stripe/transferencia/efectivo, pagos parciales, re
   - ✅ Etapa 4 — ledger de pagos manuales (transferencia/efectivo + parciales)
   - ✅ Etapa 5 — pago Stripe (Connect) + webhook aislado + idempotencia
   - ✅ **Etapa 6 — reembolsos (Stripe total/parcial + manual) + notas de crédito con líneas.** 71/71 tests verdes. UI: modales de reembolso y nota de crédito + estados `partially_refunded`/`refunded`.
-  - ⏳ Etapa 7 — PDF (PDFKit) + envío (WhatsApp/email) — **pendiente de aprobación**
-  - ⏳ Etapa 8 — frontend completo (verlas en contacto/deal, PDF, etc.)
+  - ✅ **Etapa 7 — PDF (PDFKit) + envío (email SMTP con PDF adjunto / WhatsApp documento o enlace).** 76/76 tests. UI: botones PDF + Enviar. Nota: el PDF se prueba en staging; el **envío** necesita canales conectados (no verificable en staging) — construido, sin verificar hasta tener canales. NO toca el hot-path de mensajería de producción.
+  - ⏳ Etapa 8 — frontend completo (verlas en contacto/deal, etc.)
   - ⏳ Etapa 9 — historial + IA + feature flag
