@@ -198,3 +198,14 @@ Facturas formales con **pagos Stripe/transferencia/efectivo, pagos parciales, re
 ## 16. Estado de ejecución
 - **Diseño funcional Fase 1: APROBADO** por el usuario.
 - **Etapa 0 autorizada SOLO en staging**, con criterios de aceptación documentados. Condiciones: no tocar producción; no afectar Stripe Billing de AutoMarkIQ ni los payment links existentes; aislamiento multi-tenant + RBAC; ejecutar pruebas; informar archivos/componentes modificados; mostrar resultados de pruebas **antes** de avanzar a Etapa 1; **no continuar a etapas siguientes sin aprobación**.
+- **Progreso (solo rama `staging`, NO producción):**
+  - ✅ Etapa 0 — cimientos (dinero/monedas, Ajustes→Facturación, RBAC)
+  - ✅ Etapa 1 — borradores (CRUD + cálculo) con UI
+  - ✅ Etapa 2 — emitir (numeración sin huecos, inmutabilidad, snapshots)
+  - ✅ Etapa 3 — estados separados (financiero/envío/vencimiento)
+  - ✅ Etapa 4 — ledger de pagos manuales (transferencia/efectivo + parciales)
+  - ✅ Etapa 5 — pago Stripe (Connect) + webhook aislado + idempotencia
+  - ✅ **Etapa 6 — reembolsos (Stripe total/parcial + manual) + notas de crédito con líneas.** 71/71 tests verdes. UI: modales de reembolso y nota de crédito + estados `partially_refunded`/`refunded`.
+  - ⏳ Etapa 7 — PDF (PDFKit) + envío (WhatsApp/email) — **pendiente de aprobación**
+  - ⏳ Etapa 8 — frontend completo (verlas en contacto/deal, PDF, etc.)
+  - ⏳ Etapa 9 — historial + IA + feature flag
