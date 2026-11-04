@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice, issueInvoice,
   recordInvoicePayment, createInvoiceStripeLink, refundInvoice, createInvoiceCreditNote,
+  sendInvoice, downloadInvoicePdf,
   getContacts, getInvoiceSettings,
   InvoiceListRow, InvoiceItem, InvoicePayment, CreditNoteSummary, Contact,
 } from '@/lib/api';
@@ -94,6 +95,60 @@ export default function InvoicesPage() {
       await refresh();
     } catch (e: any) { setRefundError(e?.message || 'No se pudo reembolsar'); }
     finally { setRefundSaving(false); }
+  }
+
+  // In-app confirm modal — native window.confirm()/alert() are blocked in the app webview,
+  // so a native confirm returns false and the action silently aborts. Use our own dialog.
+  const [confirmState, setConfirmState] = useState<{ message: string; confirmLabel: string; onConfirm: () => void | Promise<void> } | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [toast, setToast] = useState('');
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(''), 3500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  function askConfirm(message: string, onConfirm: () => void | Promise<void>, confirmLabel = 'Confirmar') {
+    setConfirmState({ message, confirmLabel, onConfirm });
+  }
+  async function runConfirm() {
+    if (!confirmState) return;
+    setConfirmBusy(true);
+    try { await confirmState.onConfirm(); setConfirmState(null); }
+    catch (e: any) { setConfirmState(null); setError(e?.message || 'La acción falló'); }
+    finally { setConfirmBusy(false); }
+  }
+
+  // Send modal (Etapa 7)
+  const [sendRow, setSendRow] = useState<InvoiceListRow | null>(null);
+  const [sendChannel, setSendChannel] = useState<'email' | 'whatsapp'>('email');
+  const [sendTo, setSendTo] = useState('');
+  const [sendSaving, setSendSaving] = useState(false);
+  const [sendError, setSendError] = useState('');
+  const [sendOk, setSendOk] = useState('');
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null);
+
+  function openSend(row: InvoiceListRow) {
+    setSendRow(row); setSendChannel('email'); setSendTo(''); setSendError(''); setSendOk('');
+  }
+
+  async function submitSend() {
+    if (!sendRow) return;
+    setSendSaving(true); setSendError(''); setSendOk('');
+    try {
+      await sendInvoice(sendRow.id, { channel: sendChannel, to: sendTo || undefined });
+      setSendOk(sendChannel === 'email' ? 'Enviada por email.' : 'Enviada por WhatsApp.');
+      await refresh();
+    } catch (e: any) { setSendError(e?.message || 'No se pudo enviar'); }
+    finally { setSendSaving(false); }
+  }
+
+  async function downloadPdf(row: InvoiceListRow) {
+    setPdfBusy(row.id);
+    try { await downloadInvoicePdf(row.id, `${row.number || 'factura'}.pdf`); }
+    catch (e: any) { setError(e?.message || 'No se pudo generar el PDF'); }
+    finally { setPdfBusy(null); }
   }
 
   async function openCreditNote(row: InvoiceListRow) {
@@ -224,23 +279,33 @@ export default function InvoicesPage() {
     finally { setSaving(false); }
   }
 
-  async function remove(id: string) {
-    if (!confirm('¿Eliminar este borrador?')) return;
-    try { await deleteInvoice(id); await refresh(); } catch (e: any) { alert(e?.message || 'No se pudo eliminar'); }
+  function remove(id: string) {
+    setError('');
+    askConfirm('¿Eliminar este borrador?', async () => {
+      await deleteInvoice(id);
+      await refresh();
+      setToast('Borrador eliminado.');
+    }, 'Eliminar');
   }
 
-  async function issueFromList(id: string) {
-    if (!confirm('¿Emitir esta factura? Una vez emitida NO se podrá editar ni eliminar.')) return;
-    try { await issueInvoice(id); await refresh(); } catch (e: any) { alert(e?.message || 'No se pudo emitir'); }
+  function issueFromList(id: string) {
+    setError('');
+    askConfirm('¿Emitir esta factura? Una vez emitida NO se podrá editar ni eliminar.', async () => {
+      await issueInvoice(id);
+      await refresh();
+      setToast('Factura emitida.');
+    }, 'Emitir');
   }
 
-  async function issueFromForm() {
+  function issueFromForm() {
     if (!editingId) return;
-    if (!confirm('¿Emitir esta factura? Una vez emitida NO se podrá editar ni eliminar.')) return;
-    setSaving(true); setError('');
-    try { await issueInvoice(editingId); setShowForm(false); await refresh(); }
-    catch (e: any) { setError(e?.message || 'No se pudo emitir'); }
-    finally { setSaving(false); }
+    setError('');
+    askConfirm('¿Emitir esta factura? Una vez emitida NO se podrá editar ni eliminar.', async () => {
+      await issueInvoice(editingId);
+      setShowForm(false);
+      await refresh();
+      setToast('Factura emitida.');
+    }, 'Emitir');
   }
 
   function openPay(row: InvoiceListRow) {
@@ -347,6 +412,8 @@ export default function InvoicesPage() {
                           {CREDIT_NOTE_STATUSES.includes(r.financial_status) && (
                             <button className="btn btn-secondary" style={{ marginRight: 6 }} onClick={() => openCreditNote(r)}>Nota crédito</button>
                           )}
+                          <button className="btn btn-secondary" style={{ marginRight: 6 }} disabled={pdfBusy === r.id} onClick={() => downloadPdf(r)}>{pdfBusy === r.id ? 'PDF…' : 'PDF'}</button>
+                          <button className="btn btn-secondary" style={{ marginRight: 6 }} onClick={() => openSend(r)}>Enviar</button>
                           <button className="btn btn-secondary" onClick={() => openEdit(r.id)}>Ver</button>
                         </>
                       )}
@@ -594,6 +661,63 @@ export default function InvoicesPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Send modal (Etapa 7) */}
+      {sendRow && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: 24, zIndex: 60, overflowY: 'auto' }}>
+          <div style={{ background: 'var(--bg, #fff)', borderRadius: 10, padding: 20, width: 'min(440px, 100%)', boxShadow: '0 10px 40px rgba(0,0,0,.2)' }}>
+            <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 4 }}>Enviar {sendRow.number || 'factura'}</h2>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>Se adjunta el PDF (email) o se envía a su conversación de WhatsApp.</div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div>
+                <label className="form-label" style={{ fontSize: 12 }}>Canal</label>
+                <select className="form-input" value={sendChannel} onChange={(e) => setSendChannel(e.target.value as any)}>
+                  <option value="email">Email (PDF adjunto)</option>
+                  <option value="whatsapp">WhatsApp</option>
+                </select>
+              </div>
+              {sendChannel === 'email' && (
+                <div>
+                  <label className="form-label" style={{ fontSize: 12 }}>Email (opcional si el contacto ya tiene)</label>
+                  <input className="form-input" placeholder="cliente@correo.com" value={sendTo} onChange={(e) => setSendTo(e.target.value)} />
+                </div>
+              )}
+            </div>
+            {sendError && <div style={{ color: '#dc2626', fontSize: 13, marginTop: 8 }}>{sendError}</div>}
+            {sendOk && <div style={{ color: '#16a34a', fontSize: 13, marginTop: 8 }}>{sendOk}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+              <button className="btn btn-secondary" onClick={() => setSendRow(null)}>{sendOk ? 'Cerrar' : 'Cancelar'}</button>
+              {!sendOk && (
+                <button className="btn btn-primary" disabled={sendSaving} onClick={submitSend}>
+                  {sendSaving ? 'Enviando…' : 'Enviar'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* In-app confirm dialog (native confirm() is blocked in the app webview) */}
+      {confirmState && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 24, zIndex: 70 }}>
+          <div style={{ background: 'var(--bg, #fff)', borderRadius: 10, padding: 22, width: 'min(420px, 100%)', boxShadow: '0 10px 40px rgba(0,0,0,.2)' }}>
+            <div style={{ fontSize: 14, marginBottom: 18 }}>{confirmState.message}</div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button className="btn btn-secondary" disabled={confirmBusy} onClick={() => setConfirmState(null)}>Cancelar</button>
+              <button className="btn btn-primary" disabled={confirmBusy} onClick={runConfirm}>
+                {confirmBusy ? 'Procesando…' : confirmState.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success toast */}
+      {toast && (
+        <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: '#166534', color: '#fff', padding: '10px 18px', borderRadius: 8, fontSize: 14, zIndex: 80, boxShadow: '0 6px 24px rgba(0,0,0,.25)' }}>
+          {toast}
         </div>
       )}
     </div>

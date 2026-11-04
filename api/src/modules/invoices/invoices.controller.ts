@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Query, Request, UseGuards,
+  Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Query, Request, Res, UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -104,5 +104,19 @@ export class InvoicesController {
   @Get(':id/credit-notes')
   listCreditNotes(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.invoices.listCreditNotes(tenantId, id);
+  }
+
+  // ── PDF + envío (Etapa 7) ───────────────────────────────────────────────────
+  /** Descargar el PDF de la factura (lo genera si no existe). */
+  @Get(':id/pdf')
+  async pdf(@TenantId() tenantId: string, @Param('id') id: string, @Res() res: any) {
+    const { path, filename } = await this.invoices.getInvoicePdfPath(tenantId, id);
+    res.download(path, filename);
+  }
+
+  /** Enviar la factura por email (PDF adjunto) o WhatsApp (documento/enlace). */
+  @Post(':id/send')
+  send(@TenantId() tenantId: string, @Param('id') id: string, @Body() dto: { channel: 'email' | 'whatsapp'; to?: string }) {
+    return this.invoices.sendInvoice(tenantId, id, dto);
   }
 }
