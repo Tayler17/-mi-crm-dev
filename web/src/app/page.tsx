@@ -546,7 +546,7 @@ export default function LandingPage() {
             <div style={{ fontSize: 13 }}>{t.footer_tag}</div>
           </div>
           <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
-            {[['#features', t.nav_features],['#pricing', t.nav_pricing],['/login', t.nav_login],['/register', t.nav_cta]].map(([href,label]) => (
+            {[['#features', t.nav_features],['#pricing', t.nav_pricing],['/blog', 'Blog'],['/login', t.nav_login],['/register', t.nav_cta]].map(([href,label]) => (
               <a key={href} href={href} style={{ color: '#94a3b8', textDecoration: 'none', fontSize: 14, transition: 'color 0.15s' }}
                 onMouseEnter={e => (e.currentTarget.style.color='#fff')}
                 onMouseLeave={e => (e.currentTarget.style.color='#94a3b8')}>
