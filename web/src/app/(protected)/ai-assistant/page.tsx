@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { aiAgentChat, type AiAgentAction } from '@/lib/api';
+import { assistantStorageKey, LEGACY_ASSISTANT_KEY } from '@/lib/assistant-storage';
 import { useLangCtx } from '@/lib/lang-context';
 import { cleanForSpeech } from '@/lib/speech';
 
@@ -39,12 +40,18 @@ export default function AiAssistantPage() {
   useEffect(() => { try { setAutoRead(localStorage.getItem('amkAssistantAutoRead') === '1'); } catch {} }, []);
   const toggleAutoRead = () => setAutoRead((v) => { const nv = !v; try { localStorage.setItem('amkAssistantAutoRead', nv ? '1' : '0'); } catch {} if (!nv) { try { window.speechSynthesis?.cancel(); } catch {} } return nv; });
 
-  // Persist the chat so it survives refresh/navigation.
+  // Persist the chat so it survives refresh/navigation — scoped per workspace+user.
   useEffect(() => {
-    try { const saved = localStorage.getItem('aiAssistantChat'); if (saved) setMessages(JSON.parse(saved)); } catch {}
+    try {
+      const saved = localStorage.getItem(assistantStorageKey());
+      if (saved) setMessages(JSON.parse(saved));
+      // Remove the old GLOBAL key (unscoped) that leaked the conversation across
+      // workspaces on the same browser. Not migrated on purpose, to stop the bleed.
+      localStorage.removeItem(LEGACY_ASSISTANT_KEY);
+    } catch {}
   }, []);
   useEffect(() => {
-    try { localStorage.setItem('aiAssistantChat', JSON.stringify(messages)); } catch {}
+    try { localStorage.setItem(assistantStorageKey(), JSON.stringify(messages)); } catch {}
   }, [messages]);
   useEffect(() => { if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight; }, [messages, sending, interim]);
 
