@@ -34,6 +34,13 @@ export class BlogAdminController {
     return this.svc.create(body);
   }
 
+  /** Generate a draft article from a topic using the platform AI (owner reviews before saving). */
+  @Post('draft')
+  draft(@Body() body: { topic?: string; tone?: string; language?: string }, @Request() req: any) {
+    this.assertOwner(req);
+    return this.svc.generateDraft(String(body?.topic || ''), { tone: body?.tone, language: body?.language });
+  }
+
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: BlogPostInput, @Request() req: any) {
     this.assertOwner(req);

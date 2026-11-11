@@ -1,6 +1,17 @@
 import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import axios from 'axios';
+import { PlatformSettingsService } from '../settings/platform-settings.service';
+
+export interface BlogDraft {
+  title: string;
+  excerpt: string;
+  body: string;
+  tags: string[];
+  seoTitle: string;
+  seoDescription: string;
+}
 
 /** Blog / News — a PLATFORM-level resource (AutoMarkIQ's own marketing blog), NOT per-tenant.
  *  Owner writes & publishes; the public landing (/blog) reads only published posts.
@@ -43,7 +54,10 @@ export interface BlogPostInput {
 @Injectable()
 export class BlogService implements OnModuleInit {
   private readonly logger = new Logger(BlogService.name);
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly platformSettings: PlatformSettingsService,
+  ) {}
 
   async onModuleInit() {
     await this.db.query(`
@@ -220,5 +234,74 @@ export class BlogService implements OnModuleInit {
 
   async remove(id: string): Promise<void> {
     await this.db.query(`DELETE FROM blog_posts WHERE id=$1`, [id]);
+  }
+
+  // ── AI draft (Fase 3) ─────────────────────────────────────────────────────────
+  /** Draft a full article from a topic using the platform AI. Returns structured
+   *  fields the owner reviews/edits before saving — this NEVER saves anything. */
+  async generateDraft(topic: string, opts: { tone?: string; language?: string } = {}): Promise<BlogDraft> {
+    const t = String(topic || '').trim();
+    if (!t) throw new BadRequestException('Indica un tema para generar el borrador.');
+
+    const ai = await this.platformSettings.getAI().catch(() => ({ apiKey: '', provider: '', model: '' }));
+    if (!ai?.apiKey) throw new BadRequestException('Falta configurar la IA de la plataforma (Ajustes → Plataforma).');
+
+    const tone = opts.tone || 'profesional y cercano';
+    const lang = (opts.language || 'es').toLowerCase().startsWith('en') ? 'inglés' : 'español';
+    const prompt = `Eres redactor de marketing de contenidos para AutoMarkIQ, una plataforma de CRM con bots de IA, WhatsApp, automatización y atención al cliente.
+Escribe un artículo de blog en ${lang} sobre el siguiente tema: "${t}".
+Tono: ${tone}. Extensión: 400-700 palabras. Público: dueños de pequeños y medianos negocios.
+Devuelve ÚNICAMENTE un objeto JSON válido (sin texto antes ni después, sin bloques de código \`\`\`), con esta forma exacta:
+{
+  "title": "título atractivo del artículo",
+  "excerpt": "resumen de 1 o 2 frases para el listado",
+  "body": "el artículo completo en Markdown (usa ##, ###, listas con -, **negrita**; NO incluyas el título como encabezado H1)",
+  "tags": ["tag1","tag2","tag3"],
+  "seoTitle": "título para buscadores, máximo 60 caracteres",
+  "seoDescription": "meta description para Google, máximo 155 caracteres"
+}`;
+
+    const raw = await this.callAi(ai, prompt);
+    const parsed = this.parseDraftJson(raw);
+    return {
+      title: String(parsed.title || t).slice(0, 180),
+      excerpt: String(parsed.excerpt || ''),
+      body: String(parsed.body || ''),
+      tags: Array.isArray(parsed.tags) ? parsed.tags.map((x: any) => String(x).trim()).filter(Boolean).slice(0, 10) : [],
+      seoTitle: String(parsed.seoTitle || '').slice(0, 70),
+      seoDescription: String(parsed.seoDescription || '').slice(0, 160),
+    };
+  }
+
+  private async callAi(ai: { apiKey: string; provider: string; model: string }, prompt: string): Promise<string> {
+    const provider = (ai.provider || 'openai').toLowerCase();
+    if (provider === 'anthropic') {
+      const res = await axios.post(
+        'https://api.anthropic.com/v1/messages',
+        { model: ai.model || 'claude-haiku-4-5-20251001', max_tokens: 1800, messages: [{ role: 'user', content: prompt }] },
+        { headers: { 'x-api-key': ai.apiKey, 'anthropic-version': '2023-06-01' }, timeout: 40000 },
+      );
+      return String(res.data?.content?.[0]?.text || '');
+    }
+    // Default: OpenAI (chat completions).
+    const res = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      { model: ai.model || 'gpt-4o-mini', temperature: 0.7, max_tokens: 1800, messages: [{ role: 'user', content: prompt }] },
+      { headers: { Authorization: `Bearer ${ai.apiKey}` }, timeout: 40000 },
+    );
+    return String(res.data?.choices?.[0]?.message?.content || '');
+  }
+
+  private parseDraftJson(raw: string): any {
+    let s = String(raw || '').trim();
+    s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, ''); // strip code fences if any
+    const first = s.indexOf('{');
+    const last = s.lastIndexOf('}');
+    if (first >= 0 && last > first) s = s.slice(first, last + 1);
+    try {
+      return JSON.parse(s);
+    } catch {
+      throw new BadRequestException('La IA no devolvió un formato válido. Intenta de nuevo o ajusta el tema.');
+    }
   }
 }
