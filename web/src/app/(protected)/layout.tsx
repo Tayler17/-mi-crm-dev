@@ -115,7 +115,7 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   // ── Marketing ──
   { group: '📢 MARKETING',     href: '/campaigns',        label: 'Campañas',             icon: '📣', minRole: 'admin' },
   { group: '📢 MARKETING',     href: '/content',          label: 'Marketing Content',    icon: '📝', minRole: 'admin' },
-  { group: '📢 MARKETING',     href: '/blog',             label: 'Blog / Noticias',      icon: '📰', minRole: 'owner' },
+  { group: '📢 MARKETING',     href: '/blog-admin',       label: 'Blog / Noticias',      icon: '📰', minRole: 'owner' },
   { group: '📢 MARKETING',     href: '/contact-lists',    label: 'Listas de Contactos',  icon: '📋', minRole: 'admin' },
   // ── Configuración ──
   { group: '⚙️ CONFIGURACIÓN', href: '/connections',      label: 'Conexiones',           icon: '🔌', minRole: 'admin' },
