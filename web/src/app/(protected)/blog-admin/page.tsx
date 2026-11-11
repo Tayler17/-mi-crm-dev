@@ -5,6 +5,7 @@ import {
   adminListBlogPosts, adminGetBlogPost, createBlogPost, updateBlogPost,
   setBlogPostPublished, deleteBlogPost, generateBlogDraft, BlogPost, BlogPostInput,
 } from '@/lib/api';
+import { useLangCtx } from '@/lib/lang-context';
 
 function isOwner(): boolean {
   if (typeof window === 'undefined') return false;
@@ -32,6 +33,7 @@ const emptyForm = (): FormState => ({
 });
 
 export default function BlogAdminPage() {
+  const { lang } = useLangCtx(); // generate the draft in the user's UI language
   const [owner, setOwner] = useState(false);
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,7 +81,7 @@ export default function BlogAdminPage() {
     if (!genTopic.trim()) { setError('Escribe un tema para que la IA redacte el borrador.'); return; }
     setGenerating(true); setError('');
     try {
-      const d = await generateBlogDraft(genTopic.trim());
+      const d = await generateBlogDraft(genTopic.trim(), undefined, lang);
       setForm((f) => ({
         ...f,
         title: d.title || f.title,
