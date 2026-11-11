@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { aiAgentChat } from '@/lib/api';
 import { cleanForSpeech } from '@/lib/speech';
+import { assistantStorageKey, LEGACY_ASSISTANT_KEY } from '@/lib/assistant-storage';
 
 interface Msg { role: 'user' | 'assistant'; content: string }
 
@@ -54,10 +55,14 @@ export function BusinessAssistantFab({ lang }: { lang: string }) {
   // Shared history with the /ai-assistant page (same localStorage key) so context
   // survives closing the button, navigating, or switching between the two views.
   function loadHistory() {
-    try { const saved = localStorage.getItem('aiAssistantChat'); if (saved) messagesRef.current = JSON.parse(saved); } catch {}
+    try {
+      const saved = localStorage.getItem(assistantStorageKey());
+      if (saved) messagesRef.current = JSON.parse(saved);
+      localStorage.removeItem(LEGACY_ASSISTANT_KEY); // drop the old global key that bled across workspaces
+    } catch {}
   }
   function saveHistory() {
-    try { localStorage.setItem('aiAssistantChat', JSON.stringify(messagesRef.current.slice(-40))); } catch {}
+    try { localStorage.setItem(assistantStorageKey(), JSON.stringify(messagesRef.current.slice(-40))); } catch {}
   }
 
   async function send(textArg?: string) {
