@@ -2378,6 +2378,12 @@ export const setBlogPostPublished = (id: string, publish: boolean) =>
   apiPost<BlogPost>(`/blog-admin/${id}/publish?publish=${publish}`, {});
 export const deleteBlogPost = (id: string) => apiDelete(`/blog-admin/${id}`);
 
+export interface BlogDraft {
+  title: string; excerpt: string; body: string; tags: string[]; seoTitle: string; seoDescription: string;
+}
+export const generateBlogDraft = (topic: string, tone?: string, language?: string) =>
+  apiPost<BlogDraft>('/blog-admin/draft', { topic, tone, language });
+
 // Público (lo usarán las páginas /blog en la Fase 2)
 export const getPublicBlogPosts = (tag?: string) =>
   apiGet<BlogPost[]>(`/blog${tag ? `?tag=${encodeURIComponent(tag)}` : ''}`);

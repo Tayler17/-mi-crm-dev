@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import {
   adminListBlogPosts, adminGetBlogPost, createBlogPost, updateBlogPost,
-  setBlogPostPublished, deleteBlogPost, BlogPost, BlogPostInput,
+  setBlogPostPublished, deleteBlogPost, generateBlogDraft, BlogPost, BlogPostInput,
 } from '@/lib/api';
 
 function isOwner(): boolean {
@@ -44,6 +44,10 @@ export default function BlogAdminPage() {
   const [saving, setSaving] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
+  // AI draft (Fase 3)
+  const [genTopic, setGenTopic] = useState('');
+  const [generating, setGenerating] = useState(false);
+
   useEffect(() => { setOwner(isOwner()); }, []);
   useEffect(() => { if (owner) load(); else setLoading(false); }, [owner]);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 3000); return () => clearTimeout(t); }, [toast]);
@@ -70,6 +74,28 @@ export default function BlogAdminPage() {
   }
 
   const set = (k: keyof FormState, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  async function generate() {
+    if (!genTopic.trim()) { setError('Escribe un tema para que la IA redacte el borrador.'); return; }
+    setGenerating(true); setError('');
+    try {
+      const d = await generateBlogDraft(genTopic.trim());
+      setForm((f) => ({
+        ...f,
+        title: d.title || f.title,
+        excerpt: d.excerpt || f.excerpt,
+        body: d.body || f.body,
+        tags: (d.tags && d.tags.length ? d.tags.join(', ') : f.tags),
+        seoTitle: d.seoTitle || f.seoTitle,
+        seoDescription: d.seoDescription || f.seoDescription,
+      }));
+      setToast('Borrador generado ✓ Revísalo y guarda.');
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo generar el borrador.');
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   async function save() {
     if (!form.title.trim()) { setError('El título es obligatorio.'); return; }
@@ -127,6 +153,7 @@ export default function BlogAdminPage() {
         <Editor
           form={form} set={set} saving={saving}
           isNew={editingId === ''}
+          genTopic={genTopic} setGenTopic={setGenTopic} generating={generating} onGenerate={generate}
           onCancel={() => { setEditingId(null); setError(''); }}
           onSave={save}
         />
@@ -186,13 +213,37 @@ export default function BlogAdminPage() {
   );
 }
 
-function Editor({ form, set, saving, isNew, onCancel, onSave }: {
+function Editor({ form, set, saving, isNew, genTopic, setGenTopic, generating, onGenerate, onCancel, onSave }: {
   form: FormState; set: (k: keyof FormState, v: string) => void; saving: boolean;
-  isNew: boolean; onCancel: () => void; onSave: () => void;
+  isNew: boolean;
+  genTopic: string; setGenTopic: (v: string) => void; generating: boolean; onGenerate: () => void;
+  onCancel: () => void; onSave: () => void;
 }) {
   return (
     <div style={{ border: '1px solid var(--border, #e5e7eb)', borderRadius: 12, padding: 18 }}>
       <h2 style={{ fontSize: 17, fontWeight: 700, marginTop: 0 }}>{isNew ? 'Nueva entrada' : 'Editar entrada'}</h2>
+
+      {/* AI draft (Fase 3): write a topic → fill the fields with an AI-generated draft to review. */}
+      <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 10, padding: 12, marginBottom: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#5b21b6' }}>✨ Generar borrador con IA</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input
+            className="form-input" style={{ flex: 1, minWidth: 220 }}
+            value={genTopic}
+            onChange={(e) => setGenTopic(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !generating) { e.preventDefault(); onGenerate(); } }}
+            placeholder="Tema del artículo, ej: 5 formas de automatizar WhatsApp en tu negocio"
+            disabled={generating}
+          />
+          <button className="btn btn-primary" disabled={generating} onClick={onGenerate}>
+            {generating ? 'Generando…' : 'Generar'}
+          </button>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+          Rellena título, resumen, contenido, tags y SEO con un borrador. Siempre revísalo antes de publicar.
+        </div>
+      </div>
+
       <div style={{ display: 'grid', gap: 12 }}>
         <Field label="Título *">
           <input className="form-input" value={form.title} onChange={(e) => set('title', e.target.value)} />
