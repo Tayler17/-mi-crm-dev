@@ -549,6 +549,10 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [previewingVoice, setPreviewingVoice] = useState(false);
+  // Templates start collapsed when the bot already has a prompt, so they can't be clicked by accident.
+  const [showTemplates, setShowTemplates] = useState(() => !(bot?.systemPrompt ?? '').trim());
+  // Template awaiting confirmation (set when applying would overwrite existing content).
+  const [pendingTpl, setPendingTpl] = useState<BotTemplate | null>(null);
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
   function upd<K extends keyof BotForm>(k: K, v: BotForm[K]) {
@@ -587,6 +591,14 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
   }
 
   function applyTemplate(tmpl: BotTemplate) {
+    // Guard against losing work: if the prompt or welcome message already have
+    // content, ask for confirmation through a modal before overwriting.
+    const hasContent = !!(form.systemPrompt.trim() || form.welcomeMessage.trim());
+    if (hasContent) { setPendingTpl(tmpl); return; }
+    doApplyTemplate(tmpl);
+  }
+
+  function doApplyTemplate(tmpl: BotTemplate) {
     setForm((p) => {
       const newVC: VisualConfig = {
         ...p.visualConfig,
@@ -606,6 +618,7 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
         promptMode: 'advanced',
       };
     });
+    setShowTemplates(false);
     setDirty(true);
   }
 
@@ -655,6 +668,36 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 680, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+
+        {/* Confirm overwrite with template */}
+        {pendingTpl && (
+          <div
+            className="modal-overlay"
+            style={{ zIndex: 1100 }}
+            onClick={(e) => { e.stopPropagation(); setPendingTpl(null); }}
+          >
+            <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <div className="modal-title">{t('Apply template?', '¿Aplicar plantilla?')}</div>
+                <button className="modal-close" onClick={() => setPendingTpl(null)}>×</button>
+              </div>
+              <div className="modal-body" style={{ fontSize: 14, lineHeight: 1.5 }}>
+                {t('This will replace the current prompt and messages. Continue?', 'Esto reemplazará el prompt y los mensajes actuales. ¿Continuar?')}
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={() => setPendingTpl(null)}>
+                  {t('Cancel', 'Cancelar')}
+                </button>
+                <button
+                  className="btn btn-danger"
+                  onClick={() => { const tmpl = pendingTpl; setPendingTpl(null); doApplyTemplate(tmpl); }}
+                >
+                  {t('Replace', 'Reemplazar')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Header */}
         <div className="modal-header" style={{ gap: 10 }}>
@@ -747,9 +790,20 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
 
               {/* Templates */}
               <div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
-                  ⚡ {t('Quick-start templates', 'Plantillas para empezar rápido')}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    ⚡ {t('Quick-start templates', 'Plantillas para empezar rápido')}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ padding: '4px 10px', fontSize: 12, flexShrink: 0 }}
+                    onClick={() => setShowTemplates((v) => !v)}
+                  >
+                    {showTemplates ? t('Hide', 'Ocultar') : t('Use a template', 'Usar plantilla')}
+                  </button>
                 </div>
+                {showTemplates && (<>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                   {CALL_BOT_TEMPLATES.map((tmpl) => {
                     const callTplLabelMap: Record<string, string> = {
@@ -786,6 +840,7 @@ function BotModal({ bot, queues, inboxes, voices, isOwner, onSave, onClose }: {
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
                   {t('Applying a template fills in the emoji, color, messages and base prompt. You can customize it afterwards.', 'Aplicar una plantilla rellena el emoji, color, mensajes y prompt base. Puedes personalizar después.')}
                 </div>
+                </>)}
               </div>
 
             </div>

@@ -429,6 +429,10 @@ function BotModal({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // Templates start collapsed when the bot already has a prompt, so they can't be clicked by accident.
+  const [showTemplates, setShowTemplates] = useState(() => !(bot?.system_prompt ?? '').trim());
+  // Template awaiting confirmation (set when applying would overwrite existing content).
+  const [pendingTpl, setPendingTpl] = useState<typeof BOT_TEMPLATES[0] | null>(null);
 
   // Generic updater — marks form dirty
   function upd(partial: Partial<BotForm>) {
@@ -477,6 +481,14 @@ function BotModal({
   }
 
   function applyTemplate(tpl: typeof BOT_TEMPLATES[0]) {
+    // Guard against losing work: if the prompt or welcome message already have
+    // content, ask for confirmation through a modal before overwriting.
+    const hasContent = !!(form.system_prompt.trim() || form.welcome_message.trim());
+    if (hasContent) { setPendingTpl(tpl); return; }
+    doApplyTemplate(tpl);
+  }
+
+  function doApplyTemplate(tpl: typeof BOT_TEMPLATES[0]) {
     setDirty(true);
     const newName = form.name || tpl.label;
     const newVc: VisualConfig = {
@@ -493,6 +505,7 @@ function BotModal({
       welcome_message: p.welcome_message || tpl.welcomeMessage,
     }));
     setPromptMode('advanced');
+    setShowTemplates(false);
     setTab('behavior');
   }
 
@@ -521,6 +534,36 @@ function BotModal({
         }}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* ── Confirm overwrite with template ──────────────────────── */}
+        {pendingTpl && (
+          <div
+            className="modal-overlay"
+            style={{ zIndex: 1100 }}
+            onClick={(e) => { e.stopPropagation(); setPendingTpl(null); }}
+          >
+            <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header" style={{ flexShrink: 0 }}>
+                <div className="modal-title">{t('Apply template?', '¿Aplicar plantilla?')}</div>
+                <button className="modal-close" onClick={() => setPendingTpl(null)}>×</button>
+              </div>
+              <div className="modal-body" style={{ fontSize: 14, lineHeight: 1.5 }}>
+                {t('This will replace the current prompt and messages. Continue?', 'Esto reemplazará el prompt y los mensajes actuales. ¿Continuar?')}
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={() => setPendingTpl(null)}>
+                  {t('Cancel', 'Cancelar')}
+                </button>
+                <button
+                  className="btn btn-danger"
+                  onClick={() => { const tpl = pendingTpl; setPendingTpl(null); doApplyTemplate(tpl); }}
+                >
+                  {t('Replace', 'Reemplazar')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── Header ────────────────────────────────────────────────── */}
         <div className="modal-header" style={{ flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -656,9 +699,20 @@ function BotModal({
 
                   {/* Templates */}
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
-                      {t('Quick-start templates', 'Plantillas de inicio rápido')}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        {t('Quick-start templates', 'Plantillas de inicio rápido')}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ padding: '4px 10px', fontSize: 12, flexShrink: 0 }}
+                        onClick={() => setShowTemplates((v) => !v)}
+                      >
+                        {showTemplates ? t('Hide', 'Ocultar') : t('Use a template', 'Usar plantilla')}
+                      </button>
                     </div>
+                    {showTemplates && (<>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                       {BOT_TEMPLATES.map((tpl) => {
                         const tplDescMap: Record<string, string> = {
@@ -689,6 +743,7 @@ function BotModal({
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
                       💡 {t('Applying a template pre-configures the prompt and messages. You can edit them afterwards.', 'Al aplicar una plantilla se preconfigura el prompt y los mensajes. Puedes editarlos después.')}
                     </div>
+                    </>)}
                   </div>
                 </div>
               )}
