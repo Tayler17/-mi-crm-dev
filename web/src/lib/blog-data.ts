@@ -2,7 +2,10 @@
 // These run in Server Components, so they fetch the public API directly (no auth,
 // no localStorage) and are cached/revalidated for performance + SEO.
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+// These fetches run on the SERVER (inside the web container). Prefer the internal
+// service URL (e.g. http://api:4000) so SSR doesn't depend on the public IP being
+// reachable from inside the Docker network; fall back to the public API URL.
+const API_URL = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 export interface PublicBlogPost {
   id: string;
