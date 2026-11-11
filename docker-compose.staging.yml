@@ -94,6 +94,9 @@ services:
     container_name: crm_staging_web
     environment:
       NEXT_PUBLIC_API_URL: http://${STAGING_HOST:-localhost}:4001
+      # Server-side (SSR) fetches — e.g. the public blog pages — use the internal
+      # API service name so they don't depend on the public IP from inside the network.
+      INTERNAL_API_URL: http://api:4000
     ports:
       - "3001:3000"
     networks:
