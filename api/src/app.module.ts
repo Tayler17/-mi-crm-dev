@@ -54,6 +54,7 @@ import { OutboundWebhooksModule } from './modules/outbound-webhooks/outbound-web
 import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module';
 import { ContentModule } from './modules/content/content.module';
 import { VoicesModule } from './modules/voices/voices.module';
+import { BlogModule } from './modules/blog/blog.module';
 import { HealthModule } from './modules/health/health.module';
 import { TenantMiddleware } from './common/middleware/tenant.middleware';
 
@@ -150,6 +151,7 @@ import { TenantMiddleware } from './common/middleware/tenant.middleware';
     CustomFieldsModule,
     ContentModule,
     VoicesModule,
+    BlogModule,
     HealthModule,
   ],
   providers: [

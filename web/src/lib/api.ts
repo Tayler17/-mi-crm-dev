@@ -2218,3 +2218,49 @@ export async function previewVoice(id: string): Promise<string> {
   if (!res.ok) throw new Error((await res.text().catch(() => '')) || 'No se pudo generar la muestra de voz');
   return URL.createObjectURL(await res.blob());
 }
+
+// ── Blog / Noticias (recurso de plataforma, gestionado por el owner) ───────────
+export interface BlogPost {
+  id: string;
+  slug: string;
+  title: string;
+  excerpt?: string | null;
+  coverImageUrl?: string | null;
+  body?: string | null;
+  status: string; // 'draft' | 'published'
+  tags: string[];
+  seoTitle?: string | null;
+  seoDescription?: string | null;
+  author?: string | null;
+  publishedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BlogPostInput {
+  title?: string;
+  slug?: string;
+  excerpt?: string;
+  coverImageUrl?: string;
+  body?: string;
+  tags?: string[];
+  seoTitle?: string;
+  seoDescription?: string;
+  author?: string;
+  status?: string;
+}
+
+// Owner (panel de gestión)
+export const adminListBlogPosts = () => apiGet<BlogPost[]>('/blog-admin');
+export const adminGetBlogPost = (id: string) => apiGet<BlogPost>(`/blog-admin/${id}`);
+export const createBlogPost = (data: BlogPostInput) => apiPost<BlogPost>('/blog-admin', data);
+export const updateBlogPost = (id: string, data: BlogPostInput) => apiPatch<BlogPost>(`/blog-admin/${id}`, data);
+export const setBlogPostPublished = (id: string, publish: boolean) =>
+  apiPost<BlogPost>(`/blog-admin/${id}/publish?publish=${publish}`, {});
+export const deleteBlogPost = (id: string) => apiDelete(`/blog-admin/${id}`);
+
+// Público (lo usarán las páginas /blog en la Fase 2)
+export const getPublicBlogPosts = (tag?: string) =>
+  apiGet<BlogPost[]>(`/blog${tag ? `?tag=${encodeURIComponent(tag)}` : ''}`);
+export const getPublicBlogPost = (slug: string) =>
+  apiGet<BlogPost>(`/blog/${encodeURIComponent(slug)}`);
