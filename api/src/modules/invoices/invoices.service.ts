@@ -259,11 +259,11 @@ export class InvoicesService implements OnModuleInit {
       `INSERT INTO tenant_invoice_settings
          (tenant_id, business_name, address, tax_id, email, phone, logo_url,
           number_prefix, cn_prefix, default_currency, default_tax_rate, footer_terms, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'INV'),COALESCE($9,'CN'),COALESCE($10,'GBP'),COALESCE($11,0),$12,NOW())
+       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'INV'),COALESCE($9,'CN'),COALESCE($10,'GBP'),COALESCE($11::numeric,0),$12,NOW())
        ON CONFLICT (tenant_id) DO UPDATE SET
          business_name=$2, address=$3, tax_id=$4, email=$5, phone=$6, logo_url=$7,
          number_prefix=COALESCE($8,'INV'), cn_prefix=COALESCE($9,'CN'),
-         default_currency=COALESCE($10,'GBP'), default_tax_rate=COALESCE($11,0),
+         default_currency=COALESCE($10,'GBP'), default_tax_rate=COALESCE($11::numeric,0),
          footer_terms=$12, updated_at=NOW()`,
       [
         tenantId, dto.business_name ?? null, dto.address ?? null, dto.tax_id ?? null,
