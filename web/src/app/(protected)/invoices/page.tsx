@@ -440,10 +440,7 @@ export default function InvoicesPage() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 14 }}>
               <div className="form-group" style={{ gridColumn: '1 / 3', margin: 0 }}>
                 <label className="form-label" style={{ fontSize: 12 }}>Contacto</label>
-                <select className="form-input" value={contactId} onChange={(e) => setContactId(e.target.value)}>
-                  <option value="">— Sin contacto —</option>
-                  {contacts.map((c) => <option key={c.id} value={c.id}>{c.fullName || c.email || c.phone}</option>)}
-                </select>
+                <ContactPicker contacts={contacts} value={contactId} onChange={setContactId} />
               </div>
               <div className="form-group" style={{ margin: 0 }}>
                 <label className="form-label" style={{ fontSize: 12 }}>Moneda</label>
@@ -718,6 +715,46 @@ export default function InvoicesPage() {
       {toast && (
         <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: '#166534', color: '#fff', padding: '10px 18px', borderRadius: 8, fontSize: 14, zIndex: 80, boxShadow: '0 6px 24px rgba(0,0,0,.25)' }}>
           {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Searchable contact picker: type a name/email/phone to filter. Filters the
+ *  already-loaded contacts client-side, so it's instant even with many contacts. */
+function ContactPicker({ contacts, value, onChange }: {
+  contacts: Contact[]; value: string; onChange: (id: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const label = (c: Contact) => c.fullName || c.email || c.phone || '(sin nombre)';
+  const selected = contacts.find((c) => c.id === value) || null;
+  const q = query.trim().toLowerCase();
+  const filtered = (q
+    ? contacts.filter((c) => `${c.fullName || ''} ${c.email || ''} ${c.phone || ''}`.toLowerCase().includes(q))
+    : contacts
+  ).slice(0, 50);
+
+  const opt: React.CSSProperties = { padding: '8px 12px', cursor: 'pointer', fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        className="form-input"
+        value={open ? query : (selected ? label(selected) : '')}
+        placeholder="Buscar contacto por nombre…"
+        onFocus={() => { setOpen(true); setQuery(''); }}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      />
+      {open && (
+        <div style={{ position: 'absolute', zIndex: 30, top: '100%', left: 0, right: 0, marginTop: 2, maxHeight: 260, overflowY: 'auto', background: 'var(--bg-card, #fff)', border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, boxShadow: '0 10px 28px rgba(0,0,0,.14)' }}>
+          <div onMouseDown={() => { onChange(''); setOpen(false); }} style={{ ...opt, color: 'var(--text-muted)' }}>— Sin contacto —</div>
+          {filtered.map((c) => (
+            <div key={c.id} onMouseDown={() => { onChange(c.id); setOpen(false); }} style={opt}>{label(c)}</div>
+          ))}
+          {filtered.length === 0 && <div style={{ padding: '8px 12px', color: 'var(--text-muted)', fontSize: 13 }}>Sin resultados</div>}
         </div>
       )}
     </div>
