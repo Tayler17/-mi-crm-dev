@@ -5,7 +5,7 @@ import {
   listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice, issueInvoice,
   recordInvoicePayment, createInvoiceStripeLink, refundInvoice, createInvoiceCreditNote,
   sendInvoice, downloadInvoicePdf,
-  getContacts, getInvoiceSettings,
+  getAllContacts, getInvoiceSettings,
   InvoiceListRow, InvoiceItem, InvoicePayment, CreditNoteSummary, Contact,
 } from '@/lib/api';
 import { currencyDecimals, toMinor, fromMinor, formatMoney } from '@/lib/money';
@@ -189,7 +189,7 @@ export default function InvoicesPage() {
   }
 
   useEffect(() => {
-    getContacts(1, 100).then((r) => setContacts(r.data)).catch(() => {});
+    getAllContacts().then(setContacts).catch(() => {});
     getInvoiceSettings().then((s) => {
       setCurrency((s.default_currency || 'GBP').toUpperCase());
       setDefaultTaxPct(String(Math.round((Number(s.default_tax_rate) || 0) * 10000) / 100));

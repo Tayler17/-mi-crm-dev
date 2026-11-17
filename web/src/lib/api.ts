@@ -203,6 +203,20 @@ export const getContacts = (page = 1, limit = 100, search = '') => {
   if (search) p.set('search', search);
   return apiGet<ContactsPage>(`/contacts?${p}`);
 };
+/** Fetch EVERY contact (paginates through all pages). For pickers/dropdowns that
+ *  must list all contacts — the backend caps each page at 500. */
+export async function getAllContacts(search = ''): Promise<Contact[]> {
+  const limit = 500;
+  const first = await getContacts(1, limit, search);
+  let all = first.data || [];
+  const total = Number(first.total ?? all.length);
+  for (let page = 2; all.length < total; page++) {
+    const r = await getContacts(page, limit, search);
+    if (!r.data?.length) break;
+    all = all.concat(r.data);
+  }
+  return all;
+}
 export const exportAllContacts = (search = '') => {
   const p = new URLSearchParams();
   if (search) p.set('search', search);
