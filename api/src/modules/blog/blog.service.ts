@@ -266,6 +266,7 @@ export class BlogService implements OnModuleInit {
     const tags = this.normalizeTags(art.tags ?? meta.tags ?? meta.keywords);
     const seoTitle = (String(art.seo_title ?? meta.seo_title ?? meta.title ?? '').slice(0, 70)) || null;
     const seoDescription = (String(art.seo_description ?? meta.description ?? '').slice(0, 160)) || null;
+    const author = (String(art.author ?? art.source ?? body?.source ?? '').slice(0, 80)) || null;
     const status = event.includes('generated') ? 'draft' : 'published'; // generated → borrador
 
     if (extId) {
@@ -274,10 +275,11 @@ export class BlogService implements OnModuleInit {
         await this.db.query(
           `UPDATE blog_posts SET title=$2, excerpt=$3, cover_image_url=$4, body=$5, content_format='html',
                tags=$6, seo_title=$7, seo_description=$8, status=$9,
+               author = COALESCE($10, author),
                published_at = CASE WHEN $9='published' THEN COALESCE(published_at, now()) ELSE NULL END,
                updated_at=now()
             WHERE id=$1`,
-          [existing.id, title, excerpt, cover, html, tags, seoTitle, seoDescription, status],
+          [existing.id, title, excerpt, cover, html, tags, seoTitle, seoDescription, status, author],
         );
         return { ok: true, id: existing.id, action: 'updated' };
       }
@@ -288,7 +290,7 @@ export class BlogService implements OnModuleInit {
          (slug, title, excerpt, cover_image_url, body, content_format, status, tags, seo_title, seo_description, author, external_id, published_at)
        VALUES ($1,$2,$3,$4,$5,'html',$6,$7,$8,$9,$10,$11, CASE WHEN $6='published' THEN now() ELSE NULL END)
        RETURNING id`,
-      [slug, title, excerpt, cover, html, status, tags, seoTitle, seoDescription, 'GrandRanker', extId],
+      [slug, title, excerpt, cover, html, status, tags, seoTitle, seoDescription, author, extId],
     );
     return { ok: true, id: created?.id, action: 'created' };
   }
