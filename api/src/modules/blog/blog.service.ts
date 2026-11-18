@@ -243,56 +243,79 @@ export class BlogService implements OnModuleInit {
   // ── Ingesta externa (GrandRanker "Custom API" webhook) ──────────────────────────
   /** Receive an article pushed by GrandRanker (or any tool with this contract). Validated by a
    *  Bearer token (platform setting blog.ingest_token). Idempotent by external_id. Content is HTML. */
-  async ingestExternal(authHeader: string | undefined, body: any): Promise<{ ok: boolean; id?: string; action: string }> {
+  async ingestExternal(authHeader: string | undefined, body: any): Promise<{ ok: boolean; action: string; created?: number; updated?: number; deleted?: number; skipped?: number; processed?: number }> {
     const expected = (await this.platformSettings.get('blog.ingest_token').catch(() => '')) as string;
     if (!expected) throw new BadRequestException('Falta configurar el token de ingesta del blog (Ajustes → Plataforma).');
     const token = String(authHeader || '').replace(/^Bearer\s+/i, '').trim();
     if (!token || token !== expected) throw new UnauthorizedException('Token de ingesta inválido.');
 
-    const event = String(body?.event || body?.type || 'article.published').toLowerCase();
-    const art = body?.data || body?.article || body || {};
-    const extId = String(art.id ?? art.article_id ?? art.external_id ?? body?.id ?? '').trim() || null;
+    // Event: GrandRanker uses "event_type" (e.g. "publish_articles" / "delete_articles").
+    const eventType = String(body?.event_type || body?.event || body?.type || 'publish').toLowerCase();
+    const isDelete = /delete|unpublish|remove/.test(eventType);
 
-    if (event.includes('deleted')) {
-      if (extId) await this.db.query(`DELETE FROM blog_posts WHERE external_id=$1`, [extId]).catch(() => {});
-      return { ok: true, action: 'deleted' };
-    }
+    // Payload shape: GrandRanker (and compatible tools) send a BATCH: { data: { articles: [...] } }.
+    // Fall back to a single-article shape for other senders.
+    const container = body?.data ?? body ?? {};
+    const articles: any[] = Array.isArray(container?.articles) ? container.articles
+      : Array.isArray(body?.articles) ? body.articles
+      : [body?.data?.article ?? body?.article ?? body?.data ?? body ?? {}];
 
-    const meta = art.metadata ?? art.meta ?? {};
-    const title = String(art.title ?? art.name ?? 'Sin título').trim();
-    const html = String(art.content ?? art.html ?? art.body ?? '');
-    const excerpt = (String(art.excerpt ?? art.summary ?? meta.description ?? '').slice(0, 500)) || null;
-    const cover = (String(art.image_url ?? art.image ?? art.cover ?? meta.image ?? '')) || null;
-    const tags = this.normalizeTags(art.tags ?? meta.tags ?? meta.keywords);
-    const seoTitle = (String(art.seo_title ?? meta.seo_title ?? meta.title ?? '').slice(0, 70)) || null;
-    const seoDescription = (String(art.seo_description ?? meta.description ?? '').slice(0, 160)) || null;
-    const author = (String(art.author ?? art.source ?? body?.source ?? '').slice(0, 80)) || null;
-    const status = event.includes('generated') ? 'draft' : 'published'; // generated → borrador
+    let created = 0, updated = 0, deleted = 0, skipped = 0;
+    for (const art of (articles || [])) {
+      const extId = String(art?.id ?? art?.article_id ?? art?.external_id ?? '').trim() || null;
 
-    if (extId) {
-      const [existing] = await this.db.query(`SELECT id FROM blog_posts WHERE external_id=$1 LIMIT 1`, [extId]);
-      if (existing) {
-        await this.db.query(
-          `UPDATE blog_posts SET title=$2, excerpt=$3, cover_image_url=$4, body=$5, content_format='html',
-               tags=$6, seo_title=$7, seo_description=$8, status=$9,
-               author = COALESCE($10, author),
-               published_at = CASE WHEN $9='published' THEN COALESCE(published_at, now()) ELSE NULL END,
-               updated_at=now()
-            WHERE id=$1`,
-          [existing.id, title, excerpt, cover, html, tags, seoTitle, seoDescription, status, author],
-        );
-        return { ok: true, id: existing.id, action: 'updated' };
+      if (isDelete) {
+        if (extId) { await this.db.query(`DELETE FROM blog_posts WHERE external_id=$1`, [extId]).catch(() => {}); deleted++; }
+        else skipped++;
+        continue;
       }
+
+      const meta = art?.metadata ?? art?.meta ?? {};
+      const title = String(art?.title ?? art?.name ?? '').trim();
+      const htmlBody = String(art?.content_html ?? art?.content ?? art?.html ?? '').trim();
+      const mdBody = String(art?.content_markdown ?? art?.body ?? '').trim();
+      const fmt = htmlBody ? 'html' : 'markdown';
+      const bodyContent = htmlBody || mdBody;
+
+      // Guard: ignore empty payloads (e.g. a bare "Send Test") so they NEVER create empty posts.
+      if (!title && !bodyContent) { skipped++; continue; }
+
+      const excerpt = (String(art?.subtitle ?? art?.excerpt ?? art?.summary ?? art?.meta_description ?? meta.description ?? '').slice(0, 500)) || null;
+      const cover = (String(art?.image_url ?? art?.image ?? art?.cover ?? meta.image ?? '')) || null;
+      const tags = this.normalizeTags(art?.tags ?? meta.tags ?? meta.keywords);
+      const seoTitle = (String(art?.meta_title ?? art?.seo_title ?? meta.title ?? '').slice(0, 70)) || null;
+      const seoDescription = (String(art?.meta_description ?? art?.seo_description ?? meta.description ?? '').slice(0, 160)) || null;
+      const author = (String(art?.author_name ?? art?.author ?? art?.source ?? '').slice(0, 80)) || null;
+      const status = /generated|draft/.test(eventType) ? 'draft' : 'published';
+      const finalTitle = title || 'Sin título';
+
+      if (extId) {
+        const [existing] = await this.db.query(`SELECT id FROM blog_posts WHERE external_id=$1 LIMIT 1`, [extId]);
+        if (existing) {
+          await this.db.query(
+            `UPDATE blog_posts SET title=$2, excerpt=$3, cover_image_url=$4, body=$5, content_format=$11,
+                 tags=$6, seo_title=$7, seo_description=$8, status=$9,
+                 author = COALESCE($10, author),
+                 published_at = CASE WHEN $9='published' THEN COALESCE(published_at, now()) ELSE NULL END,
+                 updated_at=now()
+              WHERE id=$1`,
+            [existing.id, finalTitle, excerpt, cover, bodyContent, tags, seoTitle, seoDescription, status, author, fmt],
+          );
+          updated++;
+          continue;
+        }
+      }
+      const slug = await this.ensureUniqueSlug(art?.slug || finalTitle);
+      await this.db.query(
+        `INSERT INTO blog_posts
+           (slug, title, excerpt, cover_image_url, body, content_format, status, tags, seo_title, seo_description, author, external_id, published_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, CASE WHEN $7='published' THEN now() ELSE NULL END)`,
+        [slug, finalTitle, excerpt, cover, bodyContent, fmt, status, tags, seoTitle, seoDescription, author, extId],
+      );
+      created++;
     }
-    const slug = await this.ensureUniqueSlug(art.slug || title);
-    const [created] = await this.db.query(
-      `INSERT INTO blog_posts
-         (slug, title, excerpt, cover_image_url, body, content_format, status, tags, seo_title, seo_description, author, external_id, published_at)
-       VALUES ($1,$2,$3,$4,$5,'html',$6,$7,$8,$9,$10,$11, CASE WHEN $6='published' THEN now() ELSE NULL END)
-       RETURNING id`,
-      [slug, title, excerpt, cover, html, status, tags, seoTitle, seoDescription, author, extId],
-    );
-    return { ok: true, id: created?.id, action: 'created' };
+
+    return { ok: true, action: isDelete ? 'deleted' : 'upserted', created, updated, deleted, skipped, processed: (articles || []).length };
   }
 
   // ── AI draft (Fase 3) ─────────────────────────────────────────────────────────
