@@ -35,7 +35,8 @@ export default async function BlogArticlePage({ params }: { params: any }) {
   const post = await fetchBlogPost(String(slug));
   if (!post) notFound();
 
-  const html = renderMarkdown(post.body || '');
+  // GrandRanker sends ready HTML; owner posts are Markdown.
+  const html = post.contentFormat === 'html' ? (post.body || '') : renderMarkdown(post.body || '');
 
   return (
     <div className="blog-wrap">

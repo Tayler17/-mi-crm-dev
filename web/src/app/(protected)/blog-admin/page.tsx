@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import {
   adminListBlogPosts, adminGetBlogPost, createBlogPost, updateBlogPost,
-  setBlogPostPublished, deleteBlogPost, generateBlogDraft, BlogPost, BlogPostInput,
+  setBlogPostPublished, deleteBlogPost, generateBlogDraft,
+  getPlatformSettings, updatePlatformSettings, API_URL, BlogPost, BlogPostInput,
 } from '@/lib/api';
 import { useLangCtx } from '@/lib/lang-context';
 
@@ -50,8 +51,32 @@ export default function BlogAdminPage() {
   const [genTopic, setGenTopic] = useState('');
   const [generating, setGenerating] = useState(false);
 
+  // GrandRanker ingest (webhook)
+  const [grToken, setGrToken] = useState('');
+  const [grConfigured, setGrConfigured] = useState(false);
+  const [grSaving, setGrSaving] = useState(false);
+  const webhookUrl = `${API_URL}/blog/ingest`;
+
   useEffect(() => { setOwner(isOwner()); }, []);
   useEffect(() => { if (owner) load(); else setLoading(false); }, [owner]);
+  useEffect(() => {
+    if (!owner) return;
+    getPlatformSettings().then((p) => { const e = p['blog.ingest_token']; setGrConfigured(!!e?.masked); if (e?.masked) setGrToken('••••••••'); }).catch(() => {});
+  }, [owner]);
+
+  function genGrToken() {
+    const t = 'grk_' + Array.from(crypto.getRandomValues(new Uint8Array(24))).map((b) => b.toString(16).padStart(2, '0')).join('');
+    setGrToken(t); setGrConfigured(false);
+  }
+  async function saveGrToken() {
+    if (!grToken || grToken === '••••••••') { setToast('Genera o escribe un token primero.'); return; }
+    setGrSaving(true); setError('');
+    try {
+      await updatePlatformSettings({ 'blog.ingest_token': grToken });
+      setGrConfigured(true); setGrToken('••••••••'); setToast('Token de GrandRanker guardado ✓');
+    } catch (e: any) { setError(e?.message || 'No se pudo guardar el token'); }
+    finally { setGrSaving(false); }
+  }
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 3000); return () => clearTimeout(t); }, [toast]);
 
   async function load() {
@@ -211,6 +236,39 @@ export default function BlogAdminPage() {
           </table>
         </div>
       )}
+
+      {editingId === null && (
+        <div style={{ marginTop: 26, border: '1px solid var(--border, #e5e7eb)', borderRadius: 12, padding: '16px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>🔌 Conectar GrandRanker</h2>
+            <span style={{ background: grConfigured ? '#ecfdf5' : '#f3f4f6', color: grConfigured ? '#065f46' : '#6b7280', padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
+              {grConfigured ? 'Conectado' : 'Sin conectar'}
+            </span>
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 0 }}>
+            En GrandRanker, crea un destino <b>Custom API / Webhook</b> con esta URL y el token como <code>Authorization: Bearer</code>. Cada artículo que publiques allí aparecerá automáticamente en tu blog.
+          </p>
+
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>URL del webhook</label>
+          <div style={{ display: 'flex', gap: 8, margin: '4px 0 14px' }}>
+            <input readOnly value={webhookUrl} style={{ ...inp, fontFamily: 'monospace', fontSize: 13 }} onFocus={(e) => e.currentTarget.select()} />
+            <button className="btn" style={btnGhost} onClick={() => { navigator.clipboard?.writeText(webhookUrl); setToast('URL copiada ✓'); }}>Copiar</button>
+          </div>
+
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Token de autenticación (Bearer)</label>
+          <div style={{ display: 'flex', gap: 8, margin: '4px 0 6px', flexWrap: 'wrap' }}>
+            <input value={grToken} onChange={(e) => { setGrToken(e.target.value); setGrConfigured(false); }} placeholder="Genera o pega un token" style={{ ...inp, fontFamily: 'monospace', fontSize: 13, minWidth: 240 }} />
+            <button className="btn" style={btnGhost} onClick={genGrToken}>Generar</button>
+            {grToken && grToken !== '••••••••' && (
+              <button className="btn" style={btnGhost} onClick={() => { navigator.clipboard?.writeText(grToken); setToast('Token copiado ✓'); }}>Copiar token</button>
+            )}
+            <button className="btn btn-primary" onClick={saveGrToken} disabled={grSaving}>{grSaving ? 'Guardando…' : 'Guardar'}</button>
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 4 }}>
+            Copia el token ahora: por seguridad no se vuelve a mostrar una vez guardado.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -302,3 +360,4 @@ const th: React.CSSProperties = { padding: '10px 14px', fontSize: 12, fontWeight
 const td: React.CSSProperties = { padding: '10px 14px', verticalAlign: 'top' };
 const btnGhost: React.CSSProperties = { padding: '5px 12px', fontSize: 13, border: '1px solid var(--border, #e5e7eb)', background: 'transparent', borderRadius: 8 };
 const btnDanger: React.CSSProperties = { padding: '5px 12px', fontSize: 13, border: '1px solid #fecaca', color: '#b91c1c', background: 'transparent', borderRadius: 8 };
+const inp: React.CSSProperties = { flex: 1, padding: '7px 10px', border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, background: 'var(--bg, #fff)', color: 'var(--text, inherit)' };
