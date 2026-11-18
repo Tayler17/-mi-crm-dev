@@ -177,7 +177,7 @@ export class InvoicesService implements OnModuleInit {
     for (const col of [
       'tenant_id uuid', 'invoice_id uuid', 'method text', `direction text NOT NULL DEFAULT 'charge'`,
       'amount_minor bigint NOT NULL DEFAULT 0', `currency text NOT NULL DEFAULT 'GBP'`, `status text NOT NULL DEFAULT 'succeeded'`,
-      'payment_link_id uuid', 'payment_session_id text', 'provider_ref text', 'received_at timestamptz NOT NULL DEFAULT now()',
+      'payment_link_id uuid', 'payment_session_id text', 'payment_url text', 'provider_ref text', 'received_at timestamptz NOT NULL DEFAULT now()',
       'recorded_by uuid', 'note text', 'created_at timestamptz NOT NULL DEFAULT now()',
     ]) {
       await this.db.query(`ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
@@ -330,12 +330,20 @@ export class InvoicesService implements OnModuleInit {
          FROM credit_notes WHERE invoice_id = $1 AND tenant_id = $2 ORDER BY issued_at ASC`, [id, tenantId],
     );
     const creditedMinor = creditNotes.reduce((s: number, cn: any) => s + Number(cn.total_minor || 0), 0);
+    // Active (still pending) Stripe payment link, so the UI can re-copy/resend it instead of
+    // losing it after the modal closes. Most recent pending stripe session with a stored URL.
+    const [pendingLink] = await this.db.query(
+      `SELECT payment_url FROM invoice_payments
+        WHERE invoice_id=$1 AND method='stripe' AND status='pending' AND COALESCE(payment_url,'') <> ''
+        ORDER BY received_at DESC LIMIT 1`, [id],
+    );
     return {
       ...inv,
       balance_minor: Number(inv.total_minor) - Number(inv.amount_paid_minor),
       // Net paid (amount_paid_minor = charges − refunds) is exactly what is left to refund.
       refundable_minor: Math.max(0, Number(inv.amount_paid_minor)),
       credited_minor: creditedMinor,
+      stripe_payment_link: pendingLink?.payment_url || null,
       overdue: isInvoiceOverdue(inv),
       items,
       payments,
@@ -581,9 +589,9 @@ export class InvoicesService implements OnModuleInit {
     });
     await this.db.query(
       `INSERT INTO invoice_payments
-         (tenant_id, invoice_id, method, direction, amount_minor, currency, status, payment_session_id, recorded_by)
-       VALUES ($1,$2,'stripe','charge',$3,$4,'pending',$5,$6)`,
-      [tenantId, invoiceId, amount, inv.currency, session.sessionId, userId],
+         (tenant_id, invoice_id, method, direction, amount_minor, currency, status, payment_session_id, payment_url, recorded_by)
+       VALUES ($1,$2,'stripe','charge',$3,$4,'pending',$5,$6,$7)`,
+      [tenantId, invoiceId, amount, inv.currency, session.sessionId, session.url, userId],
     );
     return { url: session.url, sessionId: session.sessionId };
   }
@@ -1037,5 +1045,81 @@ export class InvoicesService implements OnModuleInit {
     const data: any = await res.json().catch(() => null);
     if (data?.error) throw new BadRequestException(`WhatsApp rechazó el envío: ${data.error.message || 'error'}`);
     await this.recordOutboundMsg(tenantId, conv.id, body, 'text');
+  }
+
+  /** Send the Stripe payment link to the contact by email or WhatsApp. Reuses the pending link
+   *  (so it's never lost) or generates a fresh checkout session if there is none. */
+  async sendPaymentLink(tenantId: string, invoiceId: string, userId: string | null, dto: { channel: 'email' | 'whatsapp'; to?: string }) {
+    const channel = String(dto.channel || '');
+    if (!['email', 'whatsapp'].includes(channel)) throw new BadRequestException('Canal no soportado. Usa email o whatsapp.');
+    const inv = await this.getOne(tenantId, invoiceId);
+    if (!inv) throw new NotFoundException('Factura no encontrada');
+    if (!['issued', 'partially_paid'].includes(inv.financial_status)) {
+      throw new BadRequestException('Solo se puede cobrar una factura emitida o con pago parcial.');
+    }
+    let url: string = inv.stripe_payment_link || '';
+    if (!url) url = (await this.createStripeLink(tenantId, invoiceId, userId)).url;
+
+    const label = inv.number || 'factura';
+    const amount = this.fmtMoney(inv.balance_minor, inv.currency);
+    const text = `Pago de la factura ${label} (${amount}). Puedes pagar de forma segura aquí: ${url}`;
+
+    if (channel === 'email') {
+      const to = dto.to || inv.buyer_snapshot?.email || null;
+      if (!to) throw new BadRequestException('No hay email del destinatario. Indícalo.');
+      const smtp = await this.platformSettings.getSMTP().catch(() => null);
+      if (!smtp?.host || smtp.host === 'mailhog') throw new BadRequestException('No hay SMTP configurado en Ajustes → Plataforma.');
+      const transport = nodemailer.createTransport({
+        host: smtp.host, port: smtp.port, secure: smtp.secure,
+        auth: smtp.user ? { user: smtp.user, pass: smtp.password } : undefined,
+      });
+      const issuerName = inv.issuer_snapshot?.business_name || 'AutoMarkIQ';
+      await transport.sendMail({
+        from: smtp.from || smtp.user, to,
+        subject: `Pago de la factura ${label}`,
+        html: `<p>Hola,</p><p>Puedes pagar la factura <b>${label}</b> (${amount}) de forma segura aquí:</p><p><a href="${url}">${url}</a></p><p>Saludos,<br>${issuerName}</p>`,
+      });
+      return { ok: true, url };
+    }
+
+    if (!inv.contact_id) throw new BadRequestException('La factura no tiene contacto asociado.');
+    await this.sendTextToContactWhatsapp(tenantId, inv.contact_id, text);
+    return { ok: true, url };
+  }
+
+  /** Send a plain-text WhatsApp message to the contact's most recent WA conversation
+   *  (WA Web or Cloud API). Reuses the outbound services, NOT the controller hot-path. */
+  private async sendTextToContactWhatsapp(tenantId: string, contactId: string, text: string) {
+    const [conv] = await this.db.query(
+      `SELECT c.id, c.channel_type, c.connection_id, c.external_id,
+              cc.channel_type AS conn_channel_type, cc.credentials
+         FROM conversations c
+         LEFT JOIN channel_connections cc ON cc.id = c.connection_id
+        WHERE c.tenant_id=$1 AND c.contact_id=$2
+          AND COALESCE(cc.channel_type, c.channel_type) IN ('whatsapp','whatsapp_web')
+        ORDER BY c.last_message_at DESC NULLS LAST, c.updated_at DESC LIMIT 1`,
+      [tenantId, contactId],
+    );
+    if (!conv) throw new BadRequestException('El contacto no tiene una conversación de WhatsApp. Escríbele primero desde el inbox.');
+    const channelType = conv.conn_channel_type ?? conv.channel_type;
+    if (channelType === 'whatsapp_web') {
+      if (!this.waWeb) throw new BadRequestException('Servicio de WhatsApp Web no disponible.');
+      const ok = await this.waWeb.sendMessage(conv.connection_id, conv.external_id, text);
+      if (!ok) throw new BadRequestException('No se pudo enviar por WhatsApp Web (sesión desconectada).');
+      await this.recordOutboundMsg(tenantId, conv.id, text, 'text');
+      return;
+    }
+    const creds = conv.credentials ?? {};
+    const phoneId = creds.phoneNumberId, token = creds.accessToken, to = conv.external_id;
+    if (!phoneId || !token || !to) throw new BadRequestException('La conexión de WhatsApp (Cloud API) está incompleta.');
+    const res = await (globalThis as any).fetch(`https://graph.facebook.com/v19.0/${phoneId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: text } }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const data: any = await res.json().catch(() => null);
+    if (data?.error) throw new BadRequestException(`WhatsApp rechazó el envío: ${data.error.message || 'error'}`);
+    await this.recordOutboundMsg(tenantId, conv.id, text, 'text');
   }
 }

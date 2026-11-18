@@ -123,4 +123,10 @@ export class InvoicesController {
   send(@TenantId() tenantId: string, @Param('id') id: string, @Body() dto: { channel: 'email' | 'whatsapp'; to?: string }) {
     return this.invoices.sendInvoice(tenantId, id, dto);
   }
+
+  /** Enviar el LINK de pago (Stripe) al contacto por email o WhatsApp. Reusa el link pendiente. */
+  @Post(':id/send-payment-link')
+  sendPaymentLink(@TenantId() tenantId: string, @Param('id') id: string, @Request() req: any, @Body() dto: { channel: 'email' | 'whatsapp'; to?: string }) {
+    return this.invoices.sendPaymentLink(tenantId, id, req.user?.id ?? null, dto);
+  }
 }
