@@ -131,7 +131,6 @@ const NAV: { href: string; label: string; icon: string; minRole?: Role; group: N
   { group: '⚙️ CONFIGURACIÓN', href: '/appointments',     label: 'Schedules',            icon: '📅' },
   // ── Admin ──
   { group: '🏢 ADMIN',         href: '/billing',           label: 'Mi Plan & Uso',       icon: '💳', minRole: 'admin' },
-  { group: '💬 COMUNICACIÓN',  href: '/settings/payments', label: 'Pagos',                icon: '💳', planFeature: 'has_stripe_connect' },
   { group: '🏢 ADMIN',         href: '/users',             label: 'Usuarios',             icon: '👤', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/plans',            label: 'Planes & Billing',     icon: '🏦', minRole: 'admin' },
   { group: '🏢 ADMIN',         href: '/backups',          label: 'Backups',              icon: '💾', minRole: 'admin' },
