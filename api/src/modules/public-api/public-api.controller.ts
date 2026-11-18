@@ -259,4 +259,164 @@ export class PublicApiController {
       params,
     );
   }
+
+  // ── Invoices (external mirror) ───────────────────────────────────────────────
+  // An invoice CREATED and OWNED by the tenant's external system (e.g. tscouriers),
+  // pushed here so it lives in the CRM linked to a contact and the bots can chase
+  // payment. Read-only in the CRM: no Stripe, no PDF generation — the source system
+  // owns collection. Idempotent per (tenant, source, external_id).
+
+  private toMinor(amount: any, amountMinor: any): number {
+    if (amountMinor !== undefined && amountMinor !== null && amountMinor !== '') {
+      const n = Number(String(amountMinor).replace(/[^0-9-]/g, ''));
+      return Number.isFinite(n) ? Math.round(n) : 0;
+    }
+    if (amount === undefined || amount === null || amount === '') return 0;
+    const n = Number(String(amount).replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(n) ? Math.round(n * 100) : 0;
+  }
+
+  private mapInvoiceStatus(s: any): string {
+    const v = String(s ?? '').trim().toLowerCase();
+    if (['paid', 'pagada', 'pagado', 'complete', 'completed'].includes(v)) return 'paid';
+    if (['void', 'voided', 'cancelled', 'canceled', 'anulada', 'anulado'].includes(v)) return 'void';
+    if (['partially_paid', 'partial'].includes(v)) return 'partially_paid';
+    return 'issued'; // pending / unpaid / sent / open / '' → emitted (what the bots chase)
+  }
+
+  private async findOrCreateContact(tenantId: string, c: { name?: string; phone?: string; email?: string }): Promise<string | null> {
+    const name = String(c?.name ?? '').trim();
+    const phone = String(c?.phone ?? '').trim();
+    const email = String(c?.email ?? '').trim();
+    const tries: Array<[string, string]> = [];
+    if (phone) tries.push(['phone', phone]);
+    if (email) tries.push(['email', email]);
+    if (name) tries.push(['full_name', name]);
+    for (const [col, val] of tries) {
+      const [hit] = await this.db.query(
+        `SELECT id FROM contacts WHERE tenant_id=$1 AND ${col} ILIKE $2 ORDER BY updated_at DESC LIMIT 1`,
+        [tenantId, val],
+      );
+      if (hit) return hit.id as string;
+    }
+    if (!name && !phone && !email) return null;
+    const [row] = await this.db.query(
+      `INSERT INTO contacts (tenant_id, full_name, phone, email, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,NOW(),NOW()) RETURNING id`,
+      [tenantId, name || phone || email || 'Cliente', phone || null, email || null],
+    );
+    return row.id as string;
+  }
+
+  private async getInvoiceRow(tenantId: string, id: string, action: string) {
+    const [invoice] = await this.db.query(
+      `SELECT i.id, i.number, i.external_id, i.source, i.financial_status, i.currency,
+              i.total_minor, i.amount_paid_minor, i.due_date, i.contact_id, ct.full_name AS contact_name,
+              i.external_url, i.created_at, i.updated_at
+       FROM invoices i LEFT JOIN contacts ct ON ct.id = i.contact_id
+       WHERE i.id=$1 AND i.tenant_id=$2`,
+      [id, tenantId],
+    );
+    return { action, invoice };
+  }
+
+  @Post('invoices')
+  async upsertInvoice(@ApiTenantId() tenantId: string, @Body() dto: any) {
+    const externalId = String(dto?.external_id ?? dto?.id ?? '').trim();
+    if (!externalId) return { error: 'external_id_required' };
+    const source = (String(dto?.source ?? 'external').trim() || 'external').slice(0, 40);
+
+    const client = dto?.client && typeof dto.client === 'object' ? dto.client : {
+      name: dto?.client_name ?? (typeof dto?.client === 'string' ? dto.client : undefined) ?? dto?.customer,
+      phone: dto?.client_phone ?? dto?.phone,
+      email: dto?.client_email ?? dto?.email,
+    };
+    const contactId = await this.findOrCreateContact(tenantId, client);
+
+    const currency = (String(dto?.currency ?? 'GBP').trim().toUpperCase().slice(0, 3)) || 'GBP';
+    const totalMinor = this.toMinor(dto?.amount ?? dto?.total, dto?.amount_minor ?? dto?.total_minor);
+    const status = this.mapInvoiceStatus(dto?.status);
+    const paidMinor = status === 'paid' ? totalMinor : this.toMinor(dto?.amount_paid, dto?.amount_paid_minor);
+    const number = (String(dto?.number ?? externalId).trim()) || externalId;
+    const dueDate = dto?.due_date ? String(dto.due_date) : null;
+    const externalUrl = (String(dto?.pdf_url ?? dto?.document_url ?? dto?.url ?? '').trim()) || null;
+    const notes = (String(dto?.notes ?? dto?.reference ?? '').trim()) || null;
+    const buyerJson = JSON.stringify({ name: client?.name ?? null, phone: client?.phone ?? null, email: client?.email ?? null, reference: dto?.reference ?? null });
+
+    const [existing] = await this.db.query(
+      `SELECT id FROM invoices WHERE tenant_id=$1 AND source=$2 AND external_id=$3 LIMIT 1`,
+      [tenantId, source, externalId],
+    );
+
+    if (existing) {
+      await this.db.query(
+        `UPDATE invoices SET contact_id=COALESCE($4, contact_id), number=$5, currency=$6,
+             subtotal_minor=$7, tax_minor=0, total_minor=$7, amount_paid_minor=$8,
+             financial_status=$9, due_date=$10, external_url=COALESCE($11, external_url),
+             notes=COALESCE($12, notes), buyer_snapshot=$13::jsonb,
+             paid_at = CASE WHEN $9='paid' THEN COALESCE(paid_at, NOW()) ELSE paid_at END,
+             voided_at = CASE WHEN $9='void' THEN COALESCE(voided_at, NOW()) ELSE voided_at END,
+             updated_at=NOW()
+           WHERE id=$1 AND tenant_id=$2 AND source=$3`,
+        [existing.id, tenantId, source, contactId, number, currency, totalMinor, paidMinor, status, dueDate, externalUrl, notes, buyerJson],
+      );
+      return this.getInvoiceRow(tenantId, existing.id, 'updated');
+    }
+
+    const [row] = await this.db.query(
+      `INSERT INTO invoices
+         (tenant_id, contact_id, kind, number, financial_status, delivery_status, currency,
+          subtotal_minor, tax_minor, total_minor, amount_paid_minor, due_date, notes,
+          buyer_snapshot, external_url, source, external_id, issued_at, paid_at, voided_at, created_at, updated_at)
+       VALUES ($1,$2,'invoice',$3,$4,'not_sent',$5,$6,0,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,NOW(),
+               CASE WHEN $4='paid' THEN NOW() ELSE NULL END,
+               CASE WHEN $4='void' THEN NOW() ELSE NULL END,
+               NOW(),NOW())
+       RETURNING id`,
+      [tenantId, contactId, number, status, currency, totalMinor, paidMinor, dueDate, notes, buyerJson, externalUrl, source, externalId],
+    );
+    return this.getInvoiceRow(tenantId, row.id, 'created');
+  }
+
+  @Patch('invoices/:externalId')
+  async updateInvoiceStatus(@ApiTenantId() tenantId: string, @Param('externalId') externalId: string, @Body() dto: any) {
+    const source = (String(dto?.source ?? 'external').trim() || 'external').slice(0, 40);
+    const [inv] = await this.db.query(
+      `SELECT id, total_minor FROM invoices WHERE tenant_id=$1 AND source=$2 AND external_id=$3 LIMIT 1`,
+      [tenantId, source, String(externalId)],
+    );
+    if (!inv) return { error: 'not_found' };
+    const sets: string[] = []; const params: any[] = [inv.id, tenantId];
+    if (dto?.status !== undefined) {
+      const status = this.mapInvoiceStatus(dto.status);
+      params.push(status); const si = params.length;
+      sets.push(`financial_status=$${si}`);
+      sets.push(`paid_at = CASE WHEN $${si}='paid' THEN COALESCE(paid_at, NOW()) ELSE paid_at END`);
+      sets.push(`voided_at = CASE WHEN $${si}='void' THEN COALESCE(voided_at, NOW()) ELSE voided_at END`);
+      if (status === 'paid') { params.push(Number(inv.total_minor)); sets.push(`amount_paid_minor=$${params.length}`); }
+    }
+    if (dto?.due_date !== undefined) { params.push(dto.due_date ? String(dto.due_date) : null); sets.push(`due_date=$${params.length}`); }
+    if (!sets.length) return this.getInvoiceRow(tenantId, inv.id, 'unchanged');
+    await this.db.query(`UPDATE invoices SET ${sets.join(',')}, updated_at=NOW() WHERE id=$1 AND tenant_id=$2`, params);
+    return this.getInvoiceRow(tenantId, inv.id, 'updated');
+  }
+
+  @Get('invoices')
+  async listInvoices(@ApiTenantId() tenantId: string, @Query('source') source?: string, @Query('page') page = '1', @Query('limit') limit = '50') {
+    const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 100);
+    const off = (Math.max(parseInt(page, 10) || 1, 1) - 1) * lim;
+    const params: any[] = [tenantId];
+    let where = 'i.tenant_id=$1 AND i.external_id IS NOT NULL';
+    if (source && source.trim()) { params.push(source.trim()); where += ` AND i.source=$${params.length}`; }
+    const [{ total }] = await this.db.query(`SELECT COUNT(*)::int AS total FROM invoices i WHERE ${where}`, params);
+    const rows = await this.db.query(
+      `SELECT i.id, i.number, i.external_id, i.source, i.financial_status, i.currency,
+              i.total_minor, i.amount_paid_minor, i.due_date, i.contact_id, ct.full_name AS contact_name,
+              i.created_at, i.updated_at
+       FROM invoices i LEFT JOIN contacts ct ON ct.id = i.contact_id
+       WHERE ${where} ORDER BY i.created_at DESC LIMIT ${lim} OFFSET ${off}`,
+      params,
+    );
+    return { total, page: parseInt(page, 10) || 1, limit: lim, data: rows };
+  }
 }
