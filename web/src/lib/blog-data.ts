@@ -14,6 +14,7 @@ export interface PublicBlogPost {
   excerpt?: string | null;
   coverImageUrl?: string | null;
   body?: string | null;
+  contentFormat?: string | null; // 'markdown' | 'html'
   tags: string[];
   seoTitle?: string | null;
   seoDescription?: string | null;

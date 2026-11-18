@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, Header } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Header, Headers, Body, HttpCode } from '@nestjs/common';
 import { BlogService } from './blog.service';
 
 /** PUBLIC blog endpoints (no auth) — consumed by the landing's /blog pages.
@@ -16,6 +16,14 @@ export class BlogController {
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });
+  }
+
+  /** Inbound webhook for GrandRanker's "Custom API" (and compatible tools). Public, but
+   *  authenticated by a Bearer token. Creates/updates/deletes a blog post from the payload. */
+  @Post('ingest')
+  @HttpCode(200)
+  ingest(@Headers('authorization') auth: string, @Body() body: any) {
+    return this.svc.ingestExternal(auth, body);
   }
 
   @Get(':slug')

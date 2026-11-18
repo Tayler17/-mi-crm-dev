@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, UnauthorizedException, OnModuleInit, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import axios from 'axios';
@@ -30,6 +30,7 @@ const FULL_COLS = `
   id, slug, title, excerpt,
   cover_image_url AS "coverImageUrl",
   body, status, tags,
+  content_format  AS "contentFormat",
   seo_title       AS "seoTitle",
   seo_description AS "seoDescription",
   author,
@@ -84,6 +85,8 @@ export class BlogService implements OnModuleInit {
       'slug text', `title text NOT NULL DEFAULT ''`, 'excerpt text', 'cover_image_url text', 'body text',
       `status text NOT NULL DEFAULT 'draft'`, `tags text[] NOT NULL DEFAULT '{}'`, 'seo_title text',
       'seo_description text', 'author text', 'published_at timestamptz',
+      `content_format text NOT NULL DEFAULT 'markdown'`, // 'markdown' (owner) | 'html' (GrandRanker)
+      'external_id text', // GrandRanker article id, for idempotent upsert on re-publish/update
       'created_at timestamptz NOT NULL DEFAULT now()', 'updated_at timestamptz NOT NULL DEFAULT now()',
     ]) {
       await this.db.query(`ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
@@ -91,6 +94,7 @@ export class BlogService implements OnModuleInit {
     await this.db.query(`CREATE UNIQUE INDEX IF NOT EXISTS blog_posts_slug_uidx ON blog_posts(slug) WHERE slug IS NOT NULL`).catch(() => {});
     await this.db.query(`CREATE INDEX IF NOT EXISTS blog_posts_status_idx ON blog_posts(status)`).catch(() => {});
     await this.db.query(`CREATE INDEX IF NOT EXISTS blog_posts_published_idx ON blog_posts(published_at DESC)`).catch(() => {});
+    await this.db.query(`CREATE INDEX IF NOT EXISTS blog_posts_extid_idx ON blog_posts(external_id) WHERE external_id IS NOT NULL`).catch(() => {});
   }
 
   // ── Slug helpers ──────────────────────────────────────────────────────────────
@@ -234,6 +238,59 @@ export class BlogService implements OnModuleInit {
 
   async remove(id: string): Promise<void> {
     await this.db.query(`DELETE FROM blog_posts WHERE id=$1`, [id]);
+  }
+
+  // ── Ingesta externa (GrandRanker "Custom API" webhook) ──────────────────────────
+  /** Receive an article pushed by GrandRanker (or any tool with this contract). Validated by a
+   *  Bearer token (platform setting blog.ingest_token). Idempotent by external_id. Content is HTML. */
+  async ingestExternal(authHeader: string | undefined, body: any): Promise<{ ok: boolean; id?: string; action: string }> {
+    const expected = (await this.platformSettings.get('blog.ingest_token').catch(() => '')) as string;
+    if (!expected) throw new BadRequestException('Falta configurar el token de ingesta del blog (Ajustes → Plataforma).');
+    const token = String(authHeader || '').replace(/^Bearer\s+/i, '').trim();
+    if (!token || token !== expected) throw new UnauthorizedException('Token de ingesta inválido.');
+
+    const event = String(body?.event || body?.type || 'article.published').toLowerCase();
+    const art = body?.data || body?.article || body || {};
+    const extId = String(art.id ?? art.article_id ?? art.external_id ?? body?.id ?? '').trim() || null;
+
+    if (event.includes('deleted')) {
+      if (extId) await this.db.query(`DELETE FROM blog_posts WHERE external_id=$1`, [extId]).catch(() => {});
+      return { ok: true, action: 'deleted' };
+    }
+
+    const meta = art.metadata ?? art.meta ?? {};
+    const title = String(art.title ?? art.name ?? 'Sin título').trim();
+    const html = String(art.content ?? art.html ?? art.body ?? '');
+    const excerpt = (String(art.excerpt ?? art.summary ?? meta.description ?? '').slice(0, 500)) || null;
+    const cover = (String(art.image_url ?? art.image ?? art.cover ?? meta.image ?? '')) || null;
+    const tags = this.normalizeTags(art.tags ?? meta.tags ?? meta.keywords);
+    const seoTitle = (String(art.seo_title ?? meta.seo_title ?? meta.title ?? '').slice(0, 70)) || null;
+    const seoDescription = (String(art.seo_description ?? meta.description ?? '').slice(0, 160)) || null;
+    const status = event.includes('generated') ? 'draft' : 'published'; // generated → borrador
+
+    if (extId) {
+      const [existing] = await this.db.query(`SELECT id FROM blog_posts WHERE external_id=$1 LIMIT 1`, [extId]);
+      if (existing) {
+        await this.db.query(
+          `UPDATE blog_posts SET title=$2, excerpt=$3, cover_image_url=$4, body=$5, content_format='html',
+               tags=$6, seo_title=$7, seo_description=$8, status=$9,
+               published_at = CASE WHEN $9='published' THEN COALESCE(published_at, now()) ELSE NULL END,
+               updated_at=now()
+            WHERE id=$1`,
+          [existing.id, title, excerpt, cover, html, tags, seoTitle, seoDescription, status],
+        );
+        return { ok: true, id: existing.id, action: 'updated' };
+      }
+    }
+    const slug = await this.ensureUniqueSlug(art.slug || title);
+    const [created] = await this.db.query(
+      `INSERT INTO blog_posts
+         (slug, title, excerpt, cover_image_url, body, content_format, status, tags, seo_title, seo_description, author, external_id, published_at)
+       VALUES ($1,$2,$3,$4,$5,'html',$6,$7,$8,$9,$10,$11, CASE WHEN $6='published' THEN now() ELSE NULL END)
+       RETURNING id`,
+      [slug, title, excerpt, cover, html, status, tags, seoTitle, seoDescription, 'GrandRanker', extId],
+    );
+    return { ok: true, id: created?.id, action: 'created' };
   }
 
   // ── AI draft (Fase 3) ─────────────────────────────────────────────────────────
