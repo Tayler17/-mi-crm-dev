@@ -2347,6 +2347,7 @@ export interface Invoice extends InvoiceListRow {
   subtotal_minor: number; tax_minor: number; notes?: string | null; terms?: string | null;
   overdue?: boolean; items: InvoiceItem[]; payments?: InvoicePayment[];
   refundable_minor?: number; credited_minor?: number; credit_notes?: CreditNoteSummary[];
+  stripe_payment_link?: string | null;
 }
 export interface CreateInvoiceDto {
   contact_id?: string | null; deal_id?: string | null; currency?: string;
@@ -2390,6 +2391,8 @@ export const listInvoiceCreditNotes = (id: string) =>
 // ── Invoices — PDF + envío (Etapa 7) ────────────────────────────────────────────
 export const sendInvoice = (id: string, data: { channel: 'email' | 'whatsapp'; to?: string }) =>
   apiPost<Invoice>(`/invoices/${id}/send`, data);
+export const sendInvoicePaymentLink = (id: string, data: { channel: 'email' | 'whatsapp'; to?: string }) =>
+  apiPost<{ ok: boolean; url: string }>(`/invoices/${id}/send-payment-link`, data);
 
 /** Download the invoice PDF (protected endpoint → fetch with auth, then save as a file). */
 export async function downloadInvoicePdf(id: string, filename = 'factura.pdf'): Promise<void> {

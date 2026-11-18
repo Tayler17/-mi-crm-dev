@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice, issueInvoice,
   recordInvoicePayment, createInvoiceStripeLink, refundInvoice, createInvoiceCreditNote,
-  sendInvoice, downloadInvoicePdf,
+  sendInvoice, sendInvoicePaymentLink, downloadInvoicePdf,
   getAllContacts, getInvoiceSettings,
   InvoiceListRow, InvoiceItem, InvoicePayment, CreditNoteSummary, Contact,
 } from '@/lib/api';
@@ -324,10 +324,21 @@ export default function InvoicesPage() {
     }, 'Emitir');
   }
 
-  function openPay(row: InvoiceListRow) {
+  async function openPay(row: InvoiceListRow) {
     setPayRow(row); setPayMethod('transfer');
     setPayAmount(String(fromMinor(Number(row.balance_minor), row.currency))); // default = saldo pendiente
     setPayNote(''); setPayError(''); setStripeUrl('');
+    // Re-show an existing pending Stripe link so it's never lost after closing the modal.
+    try { const inv = await getInvoice(row.id); if (inv?.stripe_payment_link) setStripeUrl(inv.stripe_payment_link); } catch { /* ignore */ }
+  }
+
+  async function sendPayLink(channel: 'whatsapp' | 'email') {
+    if (!payRow) return;
+    setPayError('');
+    try {
+      await sendInvoicePaymentLink(payRow.id, { channel });
+      setToast(channel === 'whatsapp' ? 'Link enviado por WhatsApp ✓' : 'Link enviado por email ✓');
+    } catch (e: any) { setPayError(e?.message || 'No se pudo enviar el link'); }
   }
 
   async function submitPay() {
@@ -556,10 +567,14 @@ export default function InvoicesPage() {
             </div>
             {stripeUrl ? (
               <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 13, color: '#166534', marginBottom: 6 }}>✓ Link de pago generado. Envíaselo al cliente; el pago se registrará solo al pagarse.</div>
+                <div style={{ fontSize: 13, color: '#166534', marginBottom: 6 }}>✓ Link de pago activo. El pago se registra solo al pagarse. No se pierde: puedes volver a copiarlo o enviarlo.</div>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <input className="form-input" readOnly value={stripeUrl} onFocus={(e) => e.currentTarget.select()} />
-                  <button className="btn btn-secondary" onClick={() => navigator.clipboard?.writeText(stripeUrl)}>Copiar</button>
+                  <button className="btn btn-secondary" onClick={() => { navigator.clipboard?.writeText(stripeUrl); setToast('Link copiado ✓'); }}>Copiar</button>
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={() => sendPayLink('whatsapp')}>📲 Enviar por WhatsApp</button>
+                  <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={() => sendPayLink('email')}>✉️ Enviar por email</button>
                 </div>
               </div>
             ) : (
