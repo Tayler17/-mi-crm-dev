@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { getInvoiceSettings, updateInvoiceSettings, InvoiceSettings } from '@/lib/api';
+import { PaymentsSettingsContent } from '@/components/PaymentsSettings';
 
 // Common currencies for the picker (the backend accepts any ISO code; decimals are
 // derived per currency, so JPY/BHD etc. are handled correctly even if not listed here).
@@ -14,6 +15,7 @@ export default function InvoiceSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [tab, setTab] = useState<'datos' | 'pagos'>('datos');
 
   useEffect(() => {
     getInvoiceSettings()
@@ -40,11 +42,28 @@ export default function InvoiceSettingsPage() {
   // default_tax_rate is stored as a fraction (0.2); the form edits it as a percentage.
   const taxPct = Math.round(((Number(form.default_tax_rate) || 0) * 100 + Number.EPSILON) * 100) / 100;
 
-  if (loading) return <div style={{ padding: 24 }}>Cargando…</div>;
+  const tabBtn = (key: 'datos' | 'pagos'): React.CSSProperties => ({
+    padding: '8px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 14,
+    borderBottom: tab === key ? '2px solid var(--primary)' : '2px solid transparent',
+    color: tab === key ? 'var(--primary)' : 'var(--text-muted)', fontWeight: tab === key ? 600 : 400,
+  });
 
   return (
-    <div style={{ padding: '20px 24px', maxWidth: 720 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>🧾 Facturación</h1>
+    <div style={{ padding: '20px 24px', maxWidth: 820 }}>
+      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 10 }}>🧾 Facturación</h1>
+      <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', marginBottom: 18 }}>
+        <button style={tabBtn('datos')} onClick={() => setTab('datos')}>Datos de facturación</button>
+        <button style={tabBtn('pagos')} onClick={() => setTab('pagos')}>Pagos / Stripe</button>
+      </div>
+
+      {tab === 'pagos' ? (
+        <Suspense fallback={<div style={{ padding: 24, color: 'var(--text-muted)' }}>Cargando…</div>}>
+          <PaymentsSettingsContent />
+        </Suspense>
+      ) : loading ? (
+        <div style={{ padding: 24 }}>Cargando…</div>
+      ) : (
+      <div style={{ maxWidth: 720 }}>
       <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 20 }}>
         Datos legales y fiscales de tu empresa que aparecerán en las facturas. Debes completarlos
         <b> antes de emitir</b> una factura (los borradores se pueden crear sin esto).
@@ -100,6 +119,8 @@ export default function InvoiceSettingsPage() {
         </button>
         {msg && <span style={{ fontSize: 13, color: msg.ok ? '#16a34a' : '#dc2626' }}>{msg.text}</span>}
       </div>
+      </div>
+      )}
     </div>
   );
 }
