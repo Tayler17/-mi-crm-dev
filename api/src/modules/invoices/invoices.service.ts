@@ -107,6 +107,8 @@ export class InvoicesService implements OnModuleInit {
       'amount_paid_minor bigint NOT NULL DEFAULT 0', 'due_date date', 'notes text', 'terms text',
       'issuer_snapshot jsonb', 'buyer_snapshot jsonb', 'issued_at timestamptz', 'sent_at timestamptz',
       'paid_at timestamptz', 'voided_at timestamptz', 'created_by uuid', 'pdf_token text', 'pdf_url text',
+      // External mirror (invoices pushed in from another system via the public API, read-only in the CRM).
+      'source text', 'external_id text', 'external_url text',
       'created_at timestamptz NOT NULL DEFAULT now()', 'updated_at timestamptz NOT NULL DEFAULT now()',
     ]) {
       await this.db.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
@@ -185,6 +187,8 @@ export class InvoicesService implements OnModuleInit {
     await this.db.query(`ALTER TABLE invoice_payments ALTER COLUMN amount_minor TYPE bigint`).catch(() => {});
 
     await this.db.query(`CREATE INDEX IF NOT EXISTS invoices_tenant_idx ON invoices(tenant_id)`).catch(() => {});
+    // A source+external_id is unique per tenant → a re-sent webhook upserts, never duplicates.
+    await this.db.query(`CREATE UNIQUE INDEX IF NOT EXISTS invoices_source_extid_uidx ON invoices(tenant_id, source, external_id) WHERE external_id IS NOT NULL`).catch(() => {});
     await this.db.query(`CREATE INDEX IF NOT EXISTS invoice_items_invoice_idx ON invoice_items(invoice_id)`).catch(() => {});
     await this.db.query(`CREATE INDEX IF NOT EXISTS invoice_payments_invoice_idx ON invoice_payments(invoice_id)`).catch(() => {});
     // A provider reference is unique per tenant → a duplicate webhook can never record twice (Etapa 5).
