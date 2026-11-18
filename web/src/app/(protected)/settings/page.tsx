@@ -875,7 +875,7 @@ export default function SettingsPage() {
     'elevenlabs.api_key': '',
     'deepgram.api_key': '',
     'call.streaming_global': 'off',
-    'stripe.secret_key': '', 'stripe.webhook_secret': '', 'stripe.publishable_key': '',
+    'stripe.secret_key': '', 'stripe.webhook_secret': '', 'stripe.publishable_key': '', 'stripe.connect_webhook_secret': '',
     'backup.enabled': 'false', 'backup.cron': '0 2 * * *', 'backup.retention_days': '7',
     'backup.s3_bucket': '', 'backup.s3_region': 'us-east-1',
     'backup.s3_access_key': '', 'backup.s3_secret_key': '', 'backup.s3_prefix': 'backups/',
@@ -967,6 +967,7 @@ export default function SettingsPage() {
         'call.streaming_global': p['call.streaming_global']?.value || 'off',
         'stripe.secret_key':    p['stripe.secret_key']?.masked     ? '••••••••' : (p['stripe.secret_key']?.value || ''),
         'stripe.webhook_secret':p['stripe.webhook_secret']?.masked ? '••••••••' : (p['stripe.webhook_secret']?.value || ''),
+        'stripe.connect_webhook_secret':p['stripe.connect_webhook_secret']?.masked ? '••••••••' : (p['stripe.connect_webhook_secret']?.value || ''),
         'stripe.publishable_key':p['stripe.publishable_key']?.value || '',
         'backup.enabled':         p['backup.enabled']?.value         || 'false',
         'backup.cron':            p['backup.cron']?.value            || '0 2 * * *',
@@ -1842,6 +1843,17 @@ export default function SettingsPage() {
                   onChange={(e) => setPlatformForm((p) => ({ ...p, 'stripe.webhook_secret': e.target.value }))}
                   placeholder="whsec_••••••••••••••••••••••••••••••••" />
                 {platformCfg['stripe.webhook_secret']?.masked && platformForm['stripe.webhook_secret'] === '••••••••' && (
+                  <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
+                )}
+              </div>
+            </Row>
+            <Row label="Connect Webhook Secret (Facturas)" hint="Webhook de Connected accounts para /invoices/stripe-webhook → Signing secret. Concilia pagos/reembolsos de facturas.">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" type="password" style={{ flex: 1, maxWidth: 400 }}
+                  value={platformForm['stripe.connect_webhook_secret']}
+                  onChange={(e) => setPlatformForm((p) => ({ ...p, 'stripe.connect_webhook_secret': e.target.value }))}
+                  placeholder="whsec_••••••••••••••••••••••••••••••••" />
+                {platformCfg['stripe.connect_webhook_secret']?.masked && platformForm['stripe.connect_webhook_secret'] === '••••••••' && (
                   <span style={{ fontSize: 11, padding: '5px 10px', background: '#dcfce7', color: '#15803d', borderRadius: 6, whiteSpace: 'nowrap' }}>{i.aiKeyConfigured}</span>
                 )}
               </div>
