@@ -5,9 +5,10 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   getDealDetail, updateDeal, deleteDeal, updateDealStage,
   getPipelineStages, getCallBots, initiateCall,
-  getContacts, getCompanies, createConnectPaymentLink,
-  type DealDetail, type PipelineStage, type CallBot,
+  getContacts, getCompanies, createConnectPaymentLink, listInvoices,
+  type DealDetail, type PipelineStage, type CallBot, type InvoiceListRow,
 } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { useLangCtx } from '@/lib/lang-context';
 import { APP } from '@/lib/i18n/app';
@@ -416,11 +417,12 @@ export default function DealDetailPage() {
   const [detail, setDetail] = useState<DealDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'tasks' | 'conversations' | 'calls' | 'notes' | 'activity' | 'custom'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'tasks' | 'conversations' | 'calls' | 'notes' | 'activity' | 'custom' | 'invoices'>('overview');
   const [showEdit, setShowEdit] = useState(false);
   const [showDial, setShowDial] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [expandedTranscript, setExpandedTranscript] = useState<string | null>(null);
+  const [invoices, setInvoices] = useState<InvoiceListRow[]>([]);
 
   const dealStatusLabels: Record<string, string> = {
     open: i.ctctDealActive, active: i.ctctDealActive,
@@ -442,6 +444,7 @@ export default function DealDetailPage() {
       .then(setDetail)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+    listInvoices({ dealId: id }).then(setInvoices).catch(() => {});
   }, [id]);
 
   async function reload() { const d = await getDealDetail(id); setDetail(d); }
@@ -553,11 +556,36 @@ export default function DealDetailPage() {
           ['calls',          `${i.dealTabCalls} (${calls.length})`],
           ['notes',          `${i.ctctTabNotes} (${detail.notes.length})`],
           ['activity',       `${i.ctctTabActivity} (${detail.activities.length})`],
+          ['invoices',       `Facturas (${invoices.length})`],
           ['custom',         i.dealTabCustom],
         ] as const).map(([key, label]) => (
           <button key={key} style={tabStyle(key)} onClick={() => setActiveTab(key as any)}>{label}</button>
         ))}
       </div>
+
+      {/* Tab: Invoices (Etapa 8) */}
+      {activeTab === 'invoices' && (
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>Facturas</span>
+            <a className="btn btn-primary" style={{ fontSize: 12 }} href={`/invoices?new=1&deal_id=${id}`}>+ Nueva factura</a>
+          </div>
+          {invoices.length === 0 ? (
+            <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 20 }}>Sin facturas para este deal.</div>
+          ) : invoices.map((inv) => (
+            <a key={inv.id} href={`/invoices?open=${inv.id}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)', textDecoration: 'none', color: 'inherit' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{inv.number || 'Borrador'}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  {(({ draft: 'Borrador', issued: 'Emitida', partially_paid: 'Pago parcial', paid: 'Pagada', partially_refunded: 'Reembolso parcial', refunded: 'Reembolsada', void: 'Anulada' } as Record<string, string>)[inv.financial_status]) || inv.financial_status}
+                  {inv.due_date ? ` · vence ${String(inv.due_date).slice(0, 10)}` : ''}
+                </div>
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{formatMoney(inv.total_minor, inv.currency)}</div>
+            </a>
+          ))}
+        </div>
+      )}
 
       {activeTab === 'overview' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>

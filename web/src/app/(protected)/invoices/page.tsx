@@ -46,6 +46,7 @@ export default function InvoicesPage() {
 
   // Form state
   const [contactId, setContactId] = useState('');
+  const [formDealId, setFormDealId] = useState('');
   const [currency, setCurrency] = useState('GBP');
   const [defaultTaxPct, setDefaultTaxPct] = useState('0');
   const [dueDate, setDueDate] = useState('');
@@ -108,6 +109,19 @@ export default function InvoicesPage() {
     const t = setTimeout(() => setToast(''), 3500);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // Deep links from the contact/deal pages (Etapa 8): open an invoice, or open the
+  // create form prefilled with a contact/deal. Client-only (reads window) → runs once.
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const openId = sp.get('open');
+    const cid = sp.get('contact_id') || '';
+    const did = sp.get('deal_id') || '';
+    const isNew = sp.get('new') === '1';
+    if (openId) { openEdit(openId); }
+    else if (isNew || cid || did) { openNew(); if (cid) setContactId(cid); if (did) setFormDealId(did); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function askConfirm(message: string, onConfirm: () => void | Promise<void>, confirmLabel = 'Confirmar') {
     setConfirmState({ message, confirmLabel, onConfirm });
@@ -205,7 +219,7 @@ export default function InvoicesPage() {
 
   function openNew() {
     setEditingId(null); setReadOnly(false); setFormNumber(null);
-    setContactId(''); setDueDate(''); setNotes('');
+    setContactId(''); setFormDealId(''); setDueDate(''); setNotes('');
     setLines([emptyLine()]); setFormPayments([]); setError(''); setShowForm(true);
   }
 
@@ -217,6 +231,7 @@ export default function InvoicesPage() {
       setReadOnly(inv.financial_status !== 'draft');
       setFormNumber(inv.number || null);
       setContactId(inv.contact_id || '');
+      setFormDealId(inv.deal_id || '');
       setCurrency((inv.currency || 'GBP').toUpperCase());
       setDefaultTaxPct(String(Math.round((Number(inv.default_tax_rate) || 0) * 10000) / 100));
       setDueDate(inv.due_date ? String(inv.due_date).slice(0, 10) : '');
@@ -265,6 +280,7 @@ export default function InvoicesPage() {
         }));
       const payload = {
         contact_id: contactId || null,
+        deal_id: formDealId || null,
         currency,
         default_tax_rate: (Number(defaultTaxPct) || 0) / 100,
         due_date: dueDate || null,

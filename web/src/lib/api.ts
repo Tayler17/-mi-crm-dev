@@ -2281,7 +2281,7 @@ export interface InvoiceListRow {
   balance_minor: number; due_date?: string | null; created_at: string;
   contact_id?: string | null; contact_name?: string | null; overdue?: boolean;
 }
-export interface InvoiceFilters { status?: string; overdue?: boolean; q?: string }
+export interface InvoiceFilters { status?: string; overdue?: boolean; q?: string; contactId?: string; dealId?: string }
 export interface InvoicePayment {
   id: string; method: string; direction: string; amount_minor: number;
   currency: string; status: string; received_at: string; note?: string | null;
@@ -2306,6 +2306,8 @@ export const listInvoices = (filters: InvoiceFilters = {}) => {
   if (filters.status) p.set('status', filters.status);
   if (filters.overdue) p.set('overdue', 'true');
   if (filters.q) p.set('q', filters.q);
+  if (filters.contactId) p.set('contact_id', filters.contactId);
+  if (filters.dealId) p.set('deal_id', filters.dealId);
   const qs = p.toString();
   return apiGet<InvoiceListRow[]>(`/invoices${qs ? `?${qs}` : ''}`);
 };
