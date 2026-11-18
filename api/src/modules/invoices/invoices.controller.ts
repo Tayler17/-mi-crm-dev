@@ -38,11 +38,15 @@ export class InvoicesController {
     @Query('status') status?: string,
     @Query('overdue') overdue?: string,
     @Query('q') q?: string,
+    @Query('contact_id') contactId?: string,
+    @Query('deal_id') dealId?: string,
   ) {
     return this.invoices.list(tenantId, {
       status: status || undefined,
       overdue: overdue === 'true' || overdue === '1',
       q: q || undefined,
+      contactId: contactId || undefined,
+      dealId: dealId || undefined,
     });
   }
 

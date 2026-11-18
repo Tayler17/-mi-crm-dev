@@ -280,12 +280,14 @@ export class InvoicesService implements OnModuleInit {
    *  Overdue is derived (never stored) so it can't drift from the financial status. */
   async list(
     tenantId: string,
-    filters: { status?: string; overdue?: boolean; q?: string } = {},
+    filters: { status?: string; overdue?: boolean; q?: string; contactId?: string; dealId?: string } = {},
     limit = 200,
   ) {
     const where: string[] = ['i.tenant_id = $1'];
     const params: any[] = [tenantId];
     if (filters.status) { params.push(filters.status); where.push(`i.financial_status = $${params.length}`); }
+    if (filters.contactId) { params.push(filters.contactId); where.push(`i.contact_id = $${params.length}`); }
+    if (filters.dealId) { params.push(filters.dealId); where.push(`i.deal_id = $${params.length}`); }
     if (filters.q) {
       params.push(`%${filters.q}%`);
       where.push(`(i.number ILIKE $${params.length} OR c.full_name ILIKE $${params.length})`);

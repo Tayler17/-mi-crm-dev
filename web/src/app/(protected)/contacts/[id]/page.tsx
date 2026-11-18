@@ -5,9 +5,10 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   getContactProfile, updateContact, deleteContact, getTags,
   addContactTag, removeContactTag, getCompanies, formatMessagePreview,
-  getContactCalls, confirmContactName,
-  type ContactProfile, type Tag, type CallLog,
+  getContactCalls, confirmContactName, listInvoices,
+  type ContactProfile, type Tag, type CallLog, type InvoiceListRow,
 } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { useLangCtx } from '@/lib/lang-context';
 import { APP } from '@/lib/i18n/app';
@@ -177,10 +178,11 @@ export default function ContactProfilePage() {
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'deals' | 'conversations' | 'calls' | 'notes' | 'activity'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'deals' | 'conversations' | 'calls' | 'notes' | 'activity' | 'invoices'>('overview');
   const [showEdit, setShowEdit] = useState(false);
   const [showTagPicker, setShowTagPicker] = useState(false);
   const [calls, setCalls] = useState<CallLog[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceListRow[]>([]);
   const [confirmingName, setConfirmingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const [confirmingSaving, setConfirmingSaving] = useState(false);
@@ -199,6 +201,7 @@ export default function ContactProfilePage() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
     getContactCalls(id).then(setCalls).catch(() => {});
+    listInvoices({ contactId: id }).then(setInvoices).catch(() => {});
   }, [id]);
 
   async function handleUpdate(data: any) {
@@ -423,6 +426,7 @@ export default function ContactProfilePage() {
           ['conversations', `${i.conversations} (${profile.conversations.length})`],
           ['calls', `${lang === 'en' ? 'Calls' : 'Llamadas'} (${calls.length})`],
           ['notes', `${i.ctctTabNotes} (${profile.notes.length})`],
+          ['invoices', `Facturas (${invoices.length})`],
           ['activity', `${i.ctctTabActivity} (${profile.activities.length})`],
         ] as const).map(([key, label]) => (
           <button key={key} style={tabStyle(key)} onClick={() => setActiveTab(key as any)}>{label}</button>
@@ -484,6 +488,30 @@ export default function ContactProfilePage() {
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{i.ctctCustomFields}</div>
             <CustomFieldsPanel entityType="contact" entityId={id} />
           </div>
+        </div>
+      )}
+
+      {/* Tab: Invoices (Etapa 8) */}
+      {activeTab === 'invoices' && (
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>Facturas</span>
+            <a className="btn btn-primary" style={{ fontSize: 12 }} href={`/invoices?new=1&contact_id=${id}`}>+ Nueva factura</a>
+          </div>
+          {invoices.length === 0 ? (
+            <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 20 }}>Sin facturas para este contacto.</div>
+          ) : invoices.map((inv) => (
+            <a key={inv.id} href={`/invoices?open=${inv.id}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)', textDecoration: 'none', color: 'inherit' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{inv.number || 'Borrador'}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  {(({ draft: 'Borrador', issued: 'Emitida', partially_paid: 'Pago parcial', paid: 'Pagada', partially_refunded: 'Reembolso parcial', refunded: 'Reembolsada', void: 'Anulada' } as Record<string, string>)[inv.financial_status]) || inv.financial_status}
+                  {inv.due_date ? ` · vence ${String(inv.due_date).slice(0, 10)}` : ''}
+                </div>
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{formatMoney(inv.total_minor, inv.currency)}</div>
+            </a>
+          ))}
         </div>
       )}
 
