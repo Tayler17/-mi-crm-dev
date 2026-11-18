@@ -240,13 +240,13 @@ export default function BlogAdminPage() {
       {editingId === null && (
         <div style={{ marginTop: 26, border: '1px solid var(--border, #e5e7eb)', borderRadius: 12, padding: '16px 18px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>🔌 Conectar GrandRanker</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>🔌 Importar por webhook</h2>
             <span style={{ background: grConfigured ? '#ecfdf5' : '#f3f4f6', color: grConfigured ? '#065f46' : '#6b7280', padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
-              {grConfigured ? 'Conectado' : 'Sin conectar'}
+              {grConfigured ? 'Activo' : 'Inactivo'}
             </span>
           </div>
           <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 0 }}>
-            En GrandRanker, crea un destino <b>Custom API / Webhook</b> con esta URL y el token como <code>Authorization: Bearer</code>. Cada artículo que publiques allí aparecerá automáticamente en tu blog.
+            Conecta cualquier herramienta que envíe artículos por webhook (GrandRanker, Make, Zapier, n8n…). Apunta su destino <b>Custom API / Webhook</b> a esta URL con el token como <code>Authorization: Bearer</code> y cada artículo que publiques aparecerá automáticamente en tu blog.
           </p>
 
           <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>URL del webhook</label>
@@ -267,6 +267,24 @@ export default function BlogAdminPage() {
           <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 4 }}>
             Copia el token ahora: por seguridad no se vuelve a mostrar una vez guardado.
           </p>
+
+          <details style={{ marginTop: 10 }}>
+            <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Formato del payload (JSON)</summary>
+            <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '6px 0' }}>
+              <code>POST</code> con <code>Content-Type: application/json</code>. Solo <code>title</code> y <code>content</code> (HTML) son obligatorios; el resto es opcional. Para actualizar o borrar el mismo artículo, envía siempre su <code>id</code>.
+            </p>
+            <pre style={{ background: 'var(--bg-subtle, #f9fafb)', border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, padding: 12, fontSize: 12, overflowX: 'auto', margin: 0 }}>{`{
+  "event": "article.published",   // o "article.deleted"
+  "id": "id-en-tu-herramienta",   // para actualizar/borrar
+  "title": "Título del artículo",
+  "content": "<p>Contenido en HTML…</p>",
+  "excerpt": "Resumen corto",       // opcional
+  "image_url": "https://…/portada.jpg", // opcional
+  "tags": ["marketing", "ia"],      // opcional
+  "author": "Nombre o fuente",      // opcional
+  "seo_title": "…", "seo_description": "…" // opcional
+}`}</pre>
+          </details>
         </div>
       )}
     </div>
