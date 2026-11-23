@@ -1,0 +1,205 @@
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { SchedulerRegistry } from '@nestjs/schedule';
+import { CronJob } from 'cron';
+import { WhatsappWebService } from '../connections/whatsapp-web.service';
+
+/**
+ * Fase 2 — automatic payment-reminder bot.
+ *
+ * Once a day, for every tenant that OPTED IN (tenant_invoice_settings.reminders_enabled),
+ * it finds open/overdue invoices whose contact has a phone and nudges them by WhatsApp:
+ *   · due_soon_3 → 3 days before the due date
+ *   · due_today  → on the due date
+ *   · overdue_3  → 3 days after
+ *   · overdue_7  → 7 days after
+ * Each (invoice, rule) fires at most once (invoice_reminders log). Paid/void invoices are
+ * never chased (PATCH to paid/void stops it). Delivery reuses the WhatsApp Web session, the
+ * same path the appointment reminders use. Never messages anyone until the tenant enables it.
+ */
+const RULES: Array<{ rule: string; offset: number }> = [
+  { rule: 'due_soon_3', offset: 3 },
+  { rule: 'due_today', offset: 0 },
+  { rule: 'overdue_3', offset: -3 },
+  { rule: 'overdue_7', offset: -7 },
+];
+
+const SYMBOL: Record<string, string> = { GBP: '£', USD: '$', EUR: '€', DOP: 'RD$' };
+
+@Injectable()
+export class InvoiceReminderService implements OnModuleInit {
+  private readonly logger = new Logger(InvoiceReminderService.name);
+
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly schedulerRegistry: SchedulerRegistry,
+    private readonly waSvc: WhatsappWebService,
+  ) {}
+
+  async onModuleInit() {
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS invoice_reminders (
+        id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id  uuid NOT NULL,
+        invoice_id uuid NOT NULL,
+        rule       text NOT NULL,
+        sent_at    timestamptz NOT NULL DEFAULT now(),
+        UNIQUE(invoice_id, rule)
+      )
+    `).catch((e: any) => this.logger.error(`invoice_reminders init: ${e.message}`));
+    await this.db.query(`CREATE INDEX IF NOT EXISTS invoice_reminders_invoice_idx ON invoice_reminders(invoice_id)`).catch(() => {});
+
+    const job = new CronJob('0 14 * * *', () => { void this.runDailyCheck(); }); // 14:00 UTC daily
+    try { this.schedulerRegistry.addCronJob('invoice-reminders', job as any); job.start(); } catch {}
+    this.logger.log('Invoice reminder scheduler registered (14:00 UTC daily)');
+  }
+
+  /** Public so it can be triggered manually (owner "run now" endpoint). Optionally scoped to one tenant. */
+  async runDailyCheck(onlyTenantId?: string): Promise<{ sent: number; skipped: number }> {
+    let sent = 0, skipped = 0;
+    const connCache = new Map<string, { connectionId: string; inboxId: string | null } | null>();
+
+    for (const r of RULES) {
+      let rows: any[] = [];
+      try {
+        const params: any[] = [r.offset, r.rule];
+        let tenantFilter = '';
+        if (onlyTenantId) { params.push(onlyTenantId); tenantFilter = ` AND i.tenant_id = $${params.length}`; }
+        rows = await this.db.query(
+          `SELECT i.id, i.tenant_id, i.number, i.total_minor, i.currency, i.due_date,
+                  i.external_url, i.pdf_url, i.contact_id,
+                  ct.full_name, ct.phone,
+                  COALESCE(t.lang, 'es') AS lang, s.business_name
+             FROM invoices i
+             JOIN tenant_invoice_settings s ON s.tenant_id = i.tenant_id AND s.reminders_enabled = true
+             JOIN contacts ct ON ct.id = i.contact_id
+             JOIN tenants  t  ON t.id  = i.tenant_id
+            WHERE i.financial_status IN ('issued', 'partially_paid')
+              AND i.due_date IS NOT NULL
+              AND ct.phone IS NOT NULL AND ct.phone <> ''
+              AND i.due_date = (CURRENT_DATE + $1::int)${tenantFilter}
+              AND NOT EXISTS (SELECT 1 FROM invoice_reminders rr WHERE rr.invoice_id = i.id AND rr.rule = $2)
+            LIMIT 500`,
+          params,
+        );
+      } catch (e: any) {
+        this.logger.error(`reminder query (${r.rule}) failed: ${e?.message}`);
+        continue;
+      }
+
+      for (const inv of rows) {
+        try {
+          const ok = await this.sendReminder(inv, r.rule, connCache);
+          if (ok) sent++; else skipped++;
+        } catch (e: any) {
+          skipped++;
+          this.logger.error(`reminder ${inv.id} (${r.rule}) failed: ${e?.message}`);
+        }
+      }
+    }
+    if (sent || skipped) this.logger.log(`Invoice reminders: ${sent} sent, ${skipped} skipped`);
+    return { sent, skipped };
+  }
+
+  private async getTenantConnection(tenantId: string, cache: Map<string, { connectionId: string; inboxId: string | null } | null>) {
+    if (cache.has(tenantId)) return cache.get(tenantId)!;
+    const [conn] = await this.db.query(
+      `SELECT id, inbox_id FROM channel_connections
+        WHERE tenant_id=$1 AND channel_type='whatsapp_web' AND status='connected'
+        ORDER BY created_at ASC LIMIT 1`,
+      [tenantId],
+    );
+    const resolved = conn ? { connectionId: conn.id as string, inboxId: (conn.inbox_id ?? null) as string | null } : null;
+    cache.set(tenantId, resolved);
+    return resolved;
+  }
+
+  private jidFromPhone(phone: string, connectionId: string): string | null {
+    const p = String(phone || '').trim();
+    if (!p) return null;
+    if (p.startsWith('lid:')) {
+      const lidDigits = p.slice(4);
+      const resolved = this.waSvc.resolveLid(connectionId, lidDigits);
+      return resolved ? `${resolved}@s.whatsapp.net` : `${lidDigits}@lid`;
+    }
+    const digits = p.replace(/\D/g, '');
+    return digits ? `${digits}@s.whatsapp.net` : null;
+  }
+
+  private money(minor: any, currency: string): string {
+    const n = Number(minor) / 100;
+    const amount = n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const sym = SYMBOL[String(currency || '').toUpperCase()];
+    return sym ? `${sym}${amount}` : `${amount} ${currency}`;
+  }
+
+  private buildText(inv: any, rule: string): string {
+    const lang = String(inv.lang || 'es').toLowerCase().startsWith('en') ? 'en' : 'es';
+    const first = String(inv.full_name || '').split(' ')[0] || (lang === 'en' ? 'there' : '');
+    const company = inv.business_name || 'AutoMarkIQ';
+    const amount = this.money(inv.total_minor, inv.currency);
+    const due = new Date(inv.due_date).toLocaleDateString(lang === 'en' ? 'en-GB' : 'es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const link = (inv.external_url || inv.pdf_url || '').trim();
+
+    if (lang === 'en') {
+      const state = rule === 'due_soon_3' ? 'It is due in 3 days.'
+        : rule === 'due_today' ? 'It is due today.'
+        : 'It is overdue — please settle it when you can.';
+      const linkLine = link ? `\nView it here: ${link}\n` : '';
+      return `Hi ${first} 👋\n\nThis is ${company} about your invoice:\n\n📄 No: ${inv.number}\n💰 Amount: ${amount}\n📅 Due: ${due}\n\n${state}${linkLine}\nIf you have already paid, please ignore this message. Thank you!`;
+    }
+    const state = rule === 'due_soon_3' ? 'Vence en 3 días.'
+      : rule === 'due_today' ? 'Vence hoy.'
+      : 'Está vencida — por favor regulariza el pago cuando puedas.';
+    const linkLine = link ? `\nPuedes verla aquí: ${link}\n` : '';
+    return `Hola ${first} 👋\n\nTe escribimos de ${company} sobre tu factura:\n\n📄 N.º: ${inv.number}\n💰 Importe: ${amount}\n📅 Vencimiento: ${due}\n\n${state}${linkLine}\nSi ya realizaste el pago, ignora este mensaje. ¡Gracias!`;
+  }
+
+  private async sendReminder(inv: any, rule: string, cache: Map<string, { connectionId: string; inboxId: string | null } | null>): Promise<boolean> {
+    const conn = await this.getTenantConnection(inv.tenant_id, cache);
+    // No WhatsApp Web session → skip WITHOUT logging, so it can still fire on a later rule date once connected.
+    if (!conn) return false;
+    const jid = this.jidFromPhone(inv.phone, conn.connectionId);
+    if (!jid) return false;
+
+    const text = this.buildText(inv, rule);
+
+    // Find or create a conversation for the contact (so the message is logged + visible in the inbox).
+    let conversationId: string;
+    const [existing] = await this.db.query(
+      `SELECT id FROM conversations
+        WHERE tenant_id=$1 AND contact_id=$2 AND status != 'resolved'
+        ORDER BY created_at DESC LIMIT 1`,
+      [inv.tenant_id, inv.contact_id],
+    );
+    if (existing) {
+      conversationId = existing.id;
+    } else {
+      const [conv] = await this.db.query(
+        `INSERT INTO conversations (tenant_id, contact_id, inbox_id, connection_id, channel_type, external_id, status, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,'whatsapp_web',$5,'open',NOW(),NOW()) RETURNING id`,
+        [inv.tenant_id, inv.contact_id, conn.inboxId, conn.connectionId, jid],
+      );
+      conversationId = conv.id;
+    }
+
+    const sent = await this.waSvc.sendMessage(conn.connectionId, jid, text);
+    if (!sent) { this.logger.warn(`reminder ${inv.id}: WA delivery failed to ${jid}`); return false; }
+
+    await this.db.query(
+      `INSERT INTO messages
+         (tenant_id, conversation_id, body, content_type, direction, sender_type, is_private, created_at, updated_at)
+       VALUES ($1,$2,$3,'text','outbound','bot',false,NOW(),NOW())`,
+      [inv.tenant_id, conversationId, text],
+    ).catch(() => {});
+    await this.db.query(`UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1`, [conversationId]).catch(() => {});
+
+    await this.db.query(
+      `INSERT INTO invoice_reminders (tenant_id, invoice_id, rule) VALUES ($1,$2,$3) ON CONFLICT (invoice_id, rule) DO NOTHING`,
+      [inv.tenant_id, inv.id, rule],
+    );
+    this.logger.log(`Invoice reminder "${rule}" → ${jid} (invoice ${inv.number})`);
+    return true;
+  }
+}

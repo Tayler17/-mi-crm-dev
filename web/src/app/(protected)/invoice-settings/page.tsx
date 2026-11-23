@@ -113,6 +113,26 @@ export default function InvoiceSettingsPage() {
         </Field>
       </div>
 
+      <div style={{ marginTop: 22, border: '1px solid var(--border, #e5e7eb)', borderRadius: 12, padding: '14px 16px' }}>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={!!form.reminders_enabled}
+            onChange={(e) => set('reminders_enabled', e.target.checked)}
+            style={{ marginTop: 3, width: 16, height: 16 }}
+          />
+          <span>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>🔔 Recordatorios de cobro automáticos (WhatsApp)</span>
+            <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: 13, marginTop: 4 }}>
+              Un bot recuerda al cliente por WhatsApp cuando una factura está por vencer o vencida:
+              3 días antes, el día del vencimiento, y a los 3 y 7 días de atraso. Se detiene al marcar
+              la factura como pagada. Solo envía a contactos con teléfono y requiere una conexión de
+              <b> WhatsApp Web</b> activa. Cada recordatorio se envía una sola vez.
+            </span>
+          </span>
+        </label>
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 20 }}>
         <button className="btn btn-primary" disabled={saving} onClick={save}>
           {saving ? 'Guardando…' : 'Guardar'}
