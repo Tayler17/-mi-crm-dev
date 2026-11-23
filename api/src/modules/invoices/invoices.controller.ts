@@ -6,11 +6,15 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantId } from '../../common/decorators/tenant.decorator';
 import { InvoicesService } from './invoices.service';
+import { InvoiceReminderService } from './invoice-reminder.service';
 
 @Controller('invoices')
 @UseGuards(JwtAuthGuard)
 export class InvoicesController {
-  constructor(private readonly invoices: InvoicesService) {}
+  constructor(
+    private readonly invoices: InvoicesService,
+    private readonly reminders: InvoiceReminderService,
+  ) {}
 
   // ── Issuer settings (Ajustes → Facturación) ────────────────────────────────
   // NOTE: declared BEFORE the ':id' routes so /invoices/settings is not captured by :id.
@@ -24,6 +28,15 @@ export class InvoicesController {
   @Roles('admin')
   updateSettings(@TenantId() tenantId: string, @Body() dto: Record<string, any>) {
     return this.invoices.updateSettings(tenantId, dto);
+  }
+
+  // Manually run the payment-reminder bot for THIS tenant now (testing / on-demand).
+  // Still respects reminders_enabled, the per-(invoice,rule) log and paid/void filters.
+  @Post('reminders/run')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  runReminders(@TenantId() tenantId: string) {
+    return this.reminders.runDailyCheck(tenantId);
   }
 
   // ── Draft invoices CRUD (view/create/edit/delete = agent+) ──────────────────

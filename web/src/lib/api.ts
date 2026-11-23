@@ -2308,6 +2308,7 @@ export interface InvoiceSettings {
   default_currency?: string;
   default_tax_rate?: number; // fraction, e.g. 0.2 = 20%
   footer_terms?: string | null;
+  reminders_enabled?: boolean; // Fase 2: bot de recordatorios de cobro por WhatsApp
   configured?: boolean;
 }
 export const getInvoiceSettings = () => apiGet<InvoiceSettings>('/invoices/settings');

@@ -57,6 +57,8 @@ export class InvoicesService implements OnModuleInit {
       `number_prefix text NOT NULL DEFAULT 'INV'`, `cn_prefix text NOT NULL DEFAULT 'CN'`,
       `default_currency text NOT NULL DEFAULT 'GBP'`, 'default_tax_rate numeric NOT NULL DEFAULT 0',
       'footer_terms text', 'created_at timestamptz NOT NULL DEFAULT now()', 'updated_at timestamptz NOT NULL DEFAULT now()',
+      // Fase 2: automatic payment-reminder bot. Opt-in per tenant (default off) — never messages clients until enabled.
+      'reminders_enabled boolean NOT NULL DEFAULT false',
     ]) {
       await this.db.query(`ALTER TABLE tenant_invoice_settings ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
     }
@@ -262,18 +264,19 @@ export class InvoicesService implements OnModuleInit {
     await this.db.query(
       `INSERT INTO tenant_invoice_settings
          (tenant_id, business_name, address, tax_id, email, phone, logo_url,
-          number_prefix, cn_prefix, default_currency, default_tax_rate, footer_terms, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'INV'),COALESCE($9,'CN'),COALESCE($10,'GBP'),COALESCE($11::numeric,0),$12,NOW())
+          number_prefix, cn_prefix, default_currency, default_tax_rate, footer_terms, reminders_enabled, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'INV'),COALESCE($9,'CN'),COALESCE($10,'GBP'),COALESCE($11::numeric,0),$12,COALESCE($13,false),NOW())
        ON CONFLICT (tenant_id) DO UPDATE SET
          business_name=$2, address=$3, tax_id=$4, email=$5, phone=$6, logo_url=$7,
          number_prefix=COALESCE($8,'INV'), cn_prefix=COALESCE($9,'CN'),
          default_currency=COALESCE($10,'GBP'), default_tax_rate=COALESCE($11::numeric,0),
-         footer_terms=$12, updated_at=NOW()`,
+         footer_terms=$12, reminders_enabled=COALESCE($13, tenant_invoice_settings.reminders_enabled), updated_at=NOW()`,
       [
         tenantId, dto.business_name ?? null, dto.address ?? null, dto.tax_id ?? null,
         dto.email ?? null, dto.phone ?? null, dto.logo_url ?? null,
         dto.number_prefix ?? null, dto.cn_prefix ?? null, dto.default_currency ?? null,
         dto.default_tax_rate ?? null, dto.footer_terms ?? null,
+        dto.reminders_enabled === undefined ? null : !!dto.reminders_enabled,
       ],
     );
     return this.getSettings(tenantId);
