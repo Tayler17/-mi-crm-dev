@@ -59,6 +59,12 @@ export class InvoicesService implements OnModuleInit {
       'footer_terms text', 'created_at timestamptz NOT NULL DEFAULT now()', 'updated_at timestamptz NOT NULL DEFAULT now()',
       // Fase 2: automatic payment-reminder bot. Opt-in per tenant (default off) — never messages clients until enabled.
       'reminders_enabled boolean NOT NULL DEFAULT false',
+      // Fase 2b: optional official WhatsApp template for reminders (Cloud API). When set + a Cloud
+      // API connection exists, reminders go out as an approved template; otherwise they fall back to
+      // WhatsApp Web free text. reminder_template_vars maps each {{n}} to an invoice field key.
+      'reminder_template_name text',
+      'reminder_template_lang text',
+      'reminder_template_vars jsonb',
     ]) {
       await this.db.query(`ALTER TABLE tenant_invoice_settings ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
     }
@@ -261,22 +267,35 @@ export class InvoicesService implements OnModuleInit {
   }
 
   async updateSettings(tenantId: string, dto: Record<string, any>) {
+    // reminder_template_* are kept on `undefined` (partial saves) but can be CLEARED with an
+    // empty string / empty array, since COALESCE only falls through on SQL NULL.
+    const tplVars = dto.reminder_template_vars === undefined
+      ? null
+      : JSON.stringify(Array.isArray(dto.reminder_template_vars) ? dto.reminder_template_vars : []);
     await this.db.query(
       `INSERT INTO tenant_invoice_settings
          (tenant_id, business_name, address, tax_id, email, phone, logo_url,
-          number_prefix, cn_prefix, default_currency, default_tax_rate, footer_terms, reminders_enabled, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'INV'),COALESCE($9,'CN'),COALESCE($10,'GBP'),COALESCE($11::numeric,0),$12,COALESCE($13,false),NOW())
+          number_prefix, cn_prefix, default_currency, default_tax_rate, footer_terms, reminders_enabled,
+          reminder_template_name, reminder_template_lang, reminder_template_vars, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'INV'),COALESCE($9,'CN'),COALESCE($10,'GBP'),COALESCE($11::numeric,0),$12,COALESCE($13,false),$14,$15,$16::jsonb,NOW())
        ON CONFLICT (tenant_id) DO UPDATE SET
          business_name=$2, address=$3, tax_id=$4, email=$5, phone=$6, logo_url=$7,
          number_prefix=COALESCE($8,'INV'), cn_prefix=COALESCE($9,'CN'),
          default_currency=COALESCE($10,'GBP'), default_tax_rate=COALESCE($11::numeric,0),
-         footer_terms=$12, reminders_enabled=COALESCE($13, tenant_invoice_settings.reminders_enabled), updated_at=NOW()`,
+         footer_terms=$12, reminders_enabled=COALESCE($13, tenant_invoice_settings.reminders_enabled),
+         reminder_template_name=COALESCE($14, tenant_invoice_settings.reminder_template_name),
+         reminder_template_lang=COALESCE($15, tenant_invoice_settings.reminder_template_lang),
+         reminder_template_vars=COALESCE($16::jsonb, tenant_invoice_settings.reminder_template_vars),
+         updated_at=NOW()`,
       [
         tenantId, dto.business_name ?? null, dto.address ?? null, dto.tax_id ?? null,
         dto.email ?? null, dto.phone ?? null, dto.logo_url ?? null,
         dto.number_prefix ?? null, dto.cn_prefix ?? null, dto.default_currency ?? null,
         dto.default_tax_rate ?? null, dto.footer_terms ?? null,
         dto.reminders_enabled === undefined ? null : !!dto.reminders_enabled,
+        dto.reminder_template_name === undefined ? null : (dto.reminder_template_name || ''),
+        dto.reminder_template_lang === undefined ? null : (dto.reminder_template_lang || ''),
+        tplVars,
       ],
     );
     return this.getSettings(tenantId);
