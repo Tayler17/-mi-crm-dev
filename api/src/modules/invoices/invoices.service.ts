@@ -73,6 +73,11 @@ export class InvoicesService implements OnModuleInit {
       `reminder_rules jsonb NOT NULL DEFAULT '["due_soon_3","due_today","overdue_3","overdue_7"]'::jsonb`,
       'reminder_retry_days int NOT NULL DEFAULT 0',
       'reminder_retry_max int NOT NULL DEFAULT 0',
+      // Recurring weekly dunning (separate from the due-date notices): on chosen weekdays, remind
+      // every unpaid invoice (repeats until paid). reminder_recurring_templates maps a weekday
+      // (0-6 as a string key) to { name, lang, vars } so the template can differ per day.
+      'reminder_recurring_enabled boolean NOT NULL DEFAULT false',
+      `reminder_recurring_templates jsonb NOT NULL DEFAULT '{}'::jsonb`,
     ]) {
       await this.db.query(`ALTER TABLE tenant_invoice_settings ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
     }
@@ -289,15 +294,20 @@ export class InvoicesService implements OnModuleInit {
     const hour = dto.reminder_send_hour === undefined ? null : Math.max(0, Math.min(23, Number(dto.reminder_send_hour) || 0));
     const retryDays = dto.reminder_retry_days === undefined ? null : Math.max(0, Number(dto.reminder_retry_days) || 0);
     const retryMax = dto.reminder_retry_max === undefined ? null : Math.max(0, Math.min(20, Number(dto.reminder_retry_max) || 0));
+    const recurringTpls = dto.reminder_recurring_templates === undefined
+      ? null
+      : JSON.stringify(dto.reminder_recurring_templates && typeof dto.reminder_recurring_templates === 'object' ? dto.reminder_recurring_templates : {});
     await this.db.query(
       `INSERT INTO tenant_invoice_settings
          (tenant_id, business_name, address, tax_id, email, phone, logo_url,
           number_prefix, cn_prefix, default_currency, default_tax_rate, footer_terms, reminders_enabled,
           reminder_template_name, reminder_template_lang, reminder_template_vars,
-          reminder_send_hour, reminder_timezone, reminder_weekdays, reminder_rules, reminder_retry_days, reminder_retry_max, updated_at)
+          reminder_send_hour, reminder_timezone, reminder_weekdays, reminder_rules, reminder_retry_days, reminder_retry_max,
+          reminder_recurring_enabled, reminder_recurring_templates, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'INV'),COALESCE($9,'CN'),COALESCE($10,'GBP'),COALESCE($11::numeric,0),$12,COALESCE($13,false),
                $14,$15,$16::jsonb,
-               COALESCE($17,14),COALESCE($18,'UTC'),COALESCE($19::jsonb,'[0,1,2,3,4,5,6]'::jsonb),COALESCE($20::jsonb,'["due_soon_3","due_today","overdue_3","overdue_7"]'::jsonb),COALESCE($21,0),COALESCE($22,0),NOW())
+               COALESCE($17,14),COALESCE($18,'UTC'),COALESCE($19::jsonb,'[0,1,2,3,4,5,6]'::jsonb),COALESCE($20::jsonb,'["due_soon_3","due_today","overdue_3","overdue_7"]'::jsonb),COALESCE($21,0),COALESCE($22,0),
+               COALESCE($23,false),COALESCE($24::jsonb,'{}'::jsonb),NOW())
        ON CONFLICT (tenant_id) DO UPDATE SET
          business_name=$2, address=$3, tax_id=$4, email=$5, phone=$6, logo_url=$7,
          number_prefix=COALESCE($8,'INV'), cn_prefix=COALESCE($9,'CN'),
@@ -312,6 +322,8 @@ export class InvoicesService implements OnModuleInit {
          reminder_rules=COALESCE($20::jsonb, tenant_invoice_settings.reminder_rules),
          reminder_retry_days=COALESCE($21, tenant_invoice_settings.reminder_retry_days),
          reminder_retry_max=COALESCE($22, tenant_invoice_settings.reminder_retry_max),
+         reminder_recurring_enabled=COALESCE($23, tenant_invoice_settings.reminder_recurring_enabled),
+         reminder_recurring_templates=COALESCE($24::jsonb, tenant_invoice_settings.reminder_recurring_templates),
          updated_at=NOW()`,
       [
         tenantId, dto.business_name ?? null, dto.address ?? null, dto.tax_id ?? null,
@@ -324,6 +336,8 @@ export class InvoicesService implements OnModuleInit {
         tplVars,
         hour, dto.reminder_timezone === undefined ? null : (dto.reminder_timezone || 'UTC'),
         weekdays, rules, retryDays, retryMax,
+        dto.reminder_recurring_enabled === undefined ? null : !!dto.reminder_recurring_enabled,
+        recurringTpls,
       ],
     );
     return this.getSettings(tenantId);

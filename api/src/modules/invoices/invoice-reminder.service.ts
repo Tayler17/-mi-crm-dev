@@ -34,7 +34,10 @@ type ReminderChannel =
   | { kind: 'template'; connectionId: string; inboxId: string | null; templateName: string; templateLang: string; vars: string[] }
   | { kind: 'web'; connectionId: string; inboxId: string | null }
   | null;
-type ReminderChannelCache = Map<string, ReminderChannel>;
+type ConnRef = { connectionId: string; inboxId: string | null };
+type Connections = { cloud: ConnRef | null; web: ConnRef | null };
+type ConnCache = Map<string, Connections>;
+type TemplateConfig = { name: string; lang: string; vars: string[] } | null;
 
 @Injectable()
 export class InvoiceReminderService implements OnModuleInit {
@@ -80,13 +83,14 @@ export class InvoiceReminderService implements OnModuleInit {
     }
   }
 
-  /** Hourly cron entry: for every enabled tenant whose configured hour+weekday match "now"
-   *  (in their timezone), run their reminders. On-demand runs use runDailyCheck instead. */
+  /** Hourly cron entry. For every enabled tenant whose send hour == now (its timezone):
+   *   · run the due-date notices (any day),
+   *   · and, if the recurring dunning is on and today is one of its weekdays, run that too. */
   private async runScheduled(): Promise<void> {
     let tenants: any[] = [];
     try {
       tenants = await this.db.query(
-        `SELECT tenant_id, reminder_send_hour, reminder_timezone, reminder_weekdays
+        `SELECT tenant_id, reminder_send_hour, reminder_timezone, reminder_recurring_enabled, reminder_weekdays
            FROM tenant_invoice_settings WHERE reminders_enabled = true`,
       );
     } catch (e: any) { this.logger.error(`reminder schedule query failed: ${e?.message}`); return; }
@@ -94,64 +98,67 @@ export class InvoiceReminderService implements OnModuleInit {
     for (const t of tenants) {
       const tz = String(t.reminder_timezone || 'UTC');
       const hour = Number.isFinite(Number(t.reminder_send_hour)) ? Number(t.reminder_send_hour) : 14;
-      const days = Array.isArray(t.reminder_weekdays) ? t.reminder_weekdays.map((d: any) => Number(d)) : [0, 1, 2, 3, 4, 5, 6];
       const now = this.nowInTz(tz);
-      if (now.hour !== hour || !days.includes(now.weekday)) continue;
-      try { await this.runForTenant(t.tenant_id); }
-      catch (e: any) { this.logger.error(`reminder run (tenant ${t.tenant_id}) failed: ${e?.message}`); }
+      if (now.hour !== hour) continue;
+
+      try { await this.runOffsetForTenant(t.tenant_id); }
+      catch (e: any) { this.logger.error(`reminder offset (tenant ${t.tenant_id}) failed: ${e?.message}`); }
+
+      const days = Array.isArray(t.reminder_weekdays) ? t.reminder_weekdays.map((d: any) => Number(d)) : [];
+      if (t.reminder_recurring_enabled && days.includes(now.weekday)) {
+        try { await this.runRecurringForTenant(t.tenant_id, now.weekday); }
+        catch (e: any) { this.logger.error(`reminder recurring (tenant ${t.tenant_id}) failed: ${e?.message}`); }
+      }
     }
   }
 
-  /** Public (manual "run now" endpoint). With a tenantId, runs just that tenant IGNORING the
-   *  hour/weekday schedule (for testing). Without one, runs every enabled tenant now. */
+  /** Public (manual "run now" endpoint, admin). Runs BOTH mechanisms for the tenant(s) now,
+   *  ignoring the hour/weekday schedule (the recurring part uses today's weekday template). */
   async runDailyCheck(onlyTenantId?: string): Promise<{ sent: number; skipped: number }> {
-    if (onlyTenantId) return this.runForTenant(onlyTenantId);
+    const tenantIds: string[] = onlyTenantId
+      ? [onlyTenantId]
+      : (await this.db.query(`SELECT tenant_id FROM tenant_invoice_settings WHERE reminders_enabled = true`).catch(() => [])).map((r: any) => r.tenant_id);
     let sent = 0, skipped = 0;
-    const rows = await this.db.query(`SELECT tenant_id FROM tenant_invoice_settings WHERE reminders_enabled = true`).catch(() => []);
-    for (const t of rows) {
-      const r = await this.runForTenant(t.tenant_id).catch(() => ({ sent: 0, skipped: 0 }));
-      sent += r.sent; skipped += r.skipped;
+    for (const tid of tenantIds) {
+      const a = await this.runOffsetForTenant(tid).catch(() => ({ sent: 0, skipped: 0 }));
+      sent += a.sent; skipped += a.skipped;
+      const [s] = await this.db.query(
+        `SELECT reminder_recurring_enabled, reminder_timezone FROM tenant_invoice_settings WHERE tenant_id = $1 LIMIT 1`, [tid],
+      ).catch(() => [undefined]);
+      if (s?.reminder_recurring_enabled) {
+        const wd = this.nowInTz(String(s.reminder_timezone || 'UTC')).weekday;
+        const b = await this.runRecurringForTenant(tid, wd).catch(() => ({ sent: 0, skipped: 0 }));
+        sent += b.sent; skipped += b.skipped;
+      }
     }
     return { sent, skipped };
   }
 
-  /** Build this tenant's active rule list: the enabled fixed notices + optional recurring retries. */
-  private buildRules(settings: any): Array<{ rule: string; sendOffset: number; retry: boolean }> {
-    const active: string[] = Array.isArray(settings?.reminder_rules) && settings.reminder_rules.length
-      ? settings.reminder_rules.filter((k: any) => ALL_RULE_KEYS.includes(k))
-      : ALL_RULE_KEYS;
-    const rules = FIXED_RULES.filter((r) => active.includes(r.rule)).map((r) => ({ ...r, retry: false }));
-    const retryDays = Math.max(0, Number(settings?.reminder_retry_days) || 0);
-    const retryMax = Math.max(0, Number(settings?.reminder_retry_max) || 0);
-    if (retryDays > 0 && retryMax > 0) {
-      for (let k = 1; k <= retryMax; k++) rules.push({ rule: `retry_${k}`, sendOffset: retryDays * k, retry: true });
-    }
-    return rules;
-  }
-
-  private async runForTenant(tenantId: string): Promise<{ sent: number; skipped: number }> {
+  /** (A) Due-date notices: −3 / due / +3 / +7, each at most once. Fires on its exact date (any
+   *  weekday) at the tenant's send hour; a 1-day catch-up absorbs a missed hourly run. */
+  private async runOffsetForTenant(tenantId: string): Promise<{ sent: number; skipped: number }> {
     let sent = 0, skipped = 0;
-    const connCache: ReminderChannelCache = new Map();
+    const connCache: ConnCache = new Map();
 
     const [settings] = await this.db.query(
-      `SELECT reminders_enabled, reminder_rules, reminder_weekdays, reminder_retry_days, reminder_retry_max
+      `SELECT reminders_enabled, reminder_rules, reminder_template_name, reminder_template_lang, reminder_template_vars
          FROM tenant_invoice_settings WHERE tenant_id = $1 LIMIT 1`,
       [tenantId],
     );
-    if (!settings?.reminders_enabled) return { sent, skipped }; // never messages while disabled
+    if (!settings?.reminders_enabled) return { sent, skipped };
 
-    // Catch-up window: if weekdays are restricted, allow a notice whose target day was skipped to
-    // still fire on the next allowed day (bounded, so old invoices aren't blasted when enabling).
-    const restricted = Array.isArray(settings.reminder_weekdays) && settings.reminder_weekdays.length < 7;
-    const window = restricted ? 3 : 1;
+    const conns = await this.getConnections(tenantId, connCache);
+    const tpl = this.templateConfigFrom(settings.reminder_template_name, settings.reminder_template_lang, settings.reminder_template_vars);
+    const channel = this.resolveChannel(conns, tpl);
+    if (!channel) return { sent, skipped }; // no WhatsApp channel yet → retry on a later date
 
-    for (const r of this.buildRules(settings)) {
+    const active: string[] = Array.isArray(settings.reminder_rules) && settings.reminder_rules.length
+      ? settings.reminder_rules.filter((k: any) => ALL_RULE_KEYS.includes(k))
+      : ALL_RULE_KEYS;
+
+    for (const r of FIXED_RULES.filter((x) => active.includes(x.rule))) {
       let rows: any[] = [];
       try {
-        // Same-day guard for retries: don't pile a retry on top of a notice already sent today.
-        const retryGuard = r.retry
-          ? `AND NOT EXISTS (SELECT 1 FROM invoice_reminders r2 WHERE r2.invoice_id = i.id AND r2.sent_at::date = CURRENT_DATE)`
-          : '';
         rows = await this.db.query(
           `SELECT i.id, i.tenant_id, i.number, i.total_minor, i.currency, i.due_date,
                   i.external_url, i.pdf_url, i.contact_id,
@@ -165,75 +172,111 @@ export class InvoiceReminderService implements OnModuleInit {
               AND i.financial_status IN ('issued', 'partially_paid')
               AND i.due_date IS NOT NULL
               AND ct.phone IS NOT NULL AND ct.phone <> ''
-              AND (CURRENT_DATE - (i.due_date + $2::int)) BETWEEN 0 AND $3
-              AND NOT EXISTS (SELECT 1 FROM invoice_reminders rr WHERE rr.invoice_id = i.id AND rr.rule = $4)
-              ${retryGuard}
+              AND (CURRENT_DATE - (i.due_date + $2::int)) BETWEEN 0 AND 1
+              AND NOT EXISTS (SELECT 1 FROM invoice_reminders rr WHERE rr.invoice_id = i.id AND rr.rule = $3)
             LIMIT 500`,
-          [tenantId, r.sendOffset, window, r.rule],
+          [tenantId, r.sendOffset, r.rule],
         );
-      } catch (e: any) {
-        this.logger.error(`reminder query (${r.rule}) failed: ${e?.message}`);
-        continue;
-      }
+      } catch (e: any) { this.logger.error(`reminder query (${r.rule}) failed: ${e?.message}`); continue; }
 
       for (const inv of rows) {
         try {
-          const ok = await this.sendReminder(inv, r.rule, connCache);
+          const ok = await this.sendReminder(inv, r.rule, channel);
           if (ok) sent++; else skipped++;
-        } catch (e: any) {
-          skipped++;
-          this.logger.error(`reminder ${inv.id} (${r.rule}) failed: ${e?.message}`);
-        }
+        } catch (e: any) { skipped++; this.logger.error(`reminder ${inv.id} (${r.rule}) failed: ${e?.message}`); }
       }
     }
     if (sent || skipped) this.logger.log(`Invoice reminders (tenant ${tenantId}): ${sent} sent, ${skipped} skipped`);
     return { sent, skipped };
   }
 
-  /** Resolve how this tenant sends reminders: prefer an approved official template (Cloud API)
-   *  when configured AND a connected Cloud API number exists, otherwise fall back to WhatsApp Web
-   *  free text. Returns null when the tenant can't send yet (so it retries on a later rule date). */
-  private async getTenantReminderChannel(tenantId: string, cache: ReminderChannelCache): Promise<ReminderChannel> {
-    if (cache.has(tenantId)) return cache.get(tenantId)!;
-    let resolved: ReminderChannel = null;
+  /** (B) Recurring weekly dunning: on a chosen weekday, remind EVERY unpaid invoice (issued /
+   *  partially_paid), repeating on each configured day until paid. The template can differ per
+   *  weekday (reminder_recurring_templates[weekday]); with none, it uses WhatsApp Web free text. */
+  private async runRecurringForTenant(tenantId: string, weekday: number): Promise<{ sent: number; skipped: number }> {
+    let sent = 0, skipped = 0;
+    const connCache: ConnCache = new Map();
 
-    const [s] = await this.db.query(
-      `SELECT reminder_template_name, reminder_template_lang, reminder_template_vars
-         FROM tenant_invoice_settings WHERE tenant_id=$1 LIMIT 1`,
+    const [settings] = await this.db.query(
+      `SELECT reminders_enabled, reminder_recurring_enabled, reminder_recurring_templates
+         FROM tenant_invoice_settings WHERE tenant_id = $1 LIMIT 1`,
       [tenantId],
     );
-    const tplName = String(s?.reminder_template_name ?? '').trim();
+    if (!settings?.reminders_enabled || !settings?.reminder_recurring_enabled) return { sent, skipped };
 
-    // Official template path (only if a template is configured AND a Cloud API number is connected).
-    if (tplName) {
-      const [cloud] = await this.db.query(
-        `SELECT id, inbox_id FROM channel_connections
-          WHERE tenant_id=$1 AND channel_type='whatsapp' AND status='connected'
-          ORDER BY created_at ASC LIMIT 1`,
-        [tenantId],
+    const conns = await this.getConnections(tenantId, connCache);
+    const map = settings.reminder_recurring_templates && typeof settings.reminder_recurring_templates === 'object'
+      ? settings.reminder_recurring_templates : {};
+    const dayTpl = map[String(weekday)];
+    const tpl = dayTpl ? this.templateConfigFrom(dayTpl.name, dayTpl.lang, dayTpl.vars) : null;
+    const channel = this.resolveChannel(conns, tpl);
+    if (!channel) return { sent, skipped };
+
+    // Per-DAY idempotency: re-sends on the next configured weekday, but never twice the same day.
+    const rule = `recurring_${this.todayStr()}`;
+    let rows: any[] = [];
+    try {
+      rows = await this.db.query(
+        `SELECT i.id, i.tenant_id, i.number, i.total_minor, i.currency, i.due_date,
+                i.external_url, i.pdf_url, i.contact_id,
+                ct.full_name, ct.phone,
+                COALESCE(t.lang, 'es') AS lang, s.business_name
+           FROM invoices i
+           JOIN tenant_invoice_settings s ON s.tenant_id = i.tenant_id AND s.reminders_enabled = true
+           JOIN contacts ct ON ct.id = i.contact_id
+           JOIN tenants  t  ON t.id  = i.tenant_id
+          WHERE i.tenant_id = $1
+            AND i.financial_status IN ('issued', 'partially_paid')
+            AND ct.phone IS NOT NULL AND ct.phone <> ''
+            AND NOT EXISTS (SELECT 1 FROM invoice_reminders rr WHERE rr.invoice_id = i.id AND rr.rule = $2)
+          LIMIT 1000`,
+        [tenantId, rule],
       );
-      if (cloud) {
-        const vars = Array.isArray(s?.reminder_template_vars) ? (s.reminder_template_vars as string[]) : [];
-        resolved = {
-          kind: 'template', connectionId: cloud.id as string, inboxId: (cloud.inbox_id ?? null) as string | null,
-          templateName: tplName, templateLang: String(s?.reminder_template_lang || 'es'), vars,
-        };
-      }
-    }
+    } catch (e: any) { this.logger.error(`recurring reminder query failed: ${e?.message}`); return { sent, skipped }; }
 
-    // Fallback: WhatsApp Web free text (current behaviour).
-    if (!resolved) {
-      const [web] = await this.db.query(
-        `SELECT id, inbox_id FROM channel_connections
-          WHERE tenant_id=$1 AND channel_type='whatsapp_web' AND status='connected'
-          ORDER BY created_at ASC LIMIT 1`,
-        [tenantId],
-      );
-      if (web) resolved = { kind: 'web', connectionId: web.id as string, inboxId: (web.inbox_id ?? null) as string | null };
+    for (const inv of rows) {
+      try {
+        const ok = await this.sendReminder(inv, rule, channel);
+        if (ok) sent++; else skipped++;
+      } catch (e: any) { skipped++; this.logger.error(`recurring reminder ${inv.id} failed: ${e?.message}`); }
     }
+    if (sent || skipped) this.logger.log(`Recurring reminders (tenant ${tenantId}, weekday ${weekday}): ${sent} sent, ${skipped} skipped`);
+    return { sent, skipped };
+  }
 
-    cache.set(tenantId, resolved);
-    return resolved;
+  private todayStr(): string { return new Date().toISOString().slice(0, 10); }
+
+  /** The tenant's connected WhatsApp connections (official Cloud API + WhatsApp Web), cached per run. */
+  private async getConnections(tenantId: string, cache: ConnCache): Promise<Connections> {
+    if (cache.has(tenantId)) return cache.get(tenantId)!;
+    const [cloud] = await this.db.query(
+      `SELECT id, inbox_id FROM channel_connections
+        WHERE tenant_id=$1 AND channel_type='whatsapp' AND status='connected' ORDER BY created_at ASC LIMIT 1`, [tenantId]);
+    const [web] = await this.db.query(
+      `SELECT id, inbox_id FROM channel_connections
+        WHERE tenant_id=$1 AND channel_type='whatsapp_web' AND status='connected' ORDER BY created_at ASC LIMIT 1`, [tenantId]);
+    const conns: Connections = {
+      cloud: cloud ? { connectionId: cloud.id as string, inboxId: (cloud.inbox_id ?? null) as string | null } : null,
+      web: web ? { connectionId: web.id as string, inboxId: (web.inbox_id ?? null) as string | null } : null,
+    };
+    cache.set(tenantId, conns);
+    return conns;
+  }
+
+  private templateConfigFrom(name: any, lang: any, vars: any): TemplateConfig {
+    const n = String(name ?? '').trim();
+    if (!n) return null;
+    return { name: n, lang: String(lang || 'es'), vars: Array.isArray(vars) ? (vars as string[]) : [] };
+  }
+
+  /** Prefer the official template when one is given AND a Cloud API number is connected; otherwise
+   *  fall back to WhatsApp Web free text. Null when the tenant has no connected WhatsApp channel. */
+  private resolveChannel(conns: Connections, tpl: TemplateConfig): ReminderChannel {
+    if (tpl && conns.cloud) {
+      return { kind: 'template', connectionId: conns.cloud.connectionId, inboxId: conns.cloud.inboxId, templateName: tpl.name, templateLang: tpl.lang, vars: tpl.vars };
+    }
+    if (conns.web) return { kind: 'web', connectionId: conns.web.connectionId, inboxId: conns.web.inboxId };
+    return null;
   }
 
   /** Resolve one template {{n}} placeholder to its value for this invoice/rule. Unknown keys
@@ -249,12 +292,28 @@ export class InvoiceReminderService implements OnModuleInit {
       case 'due_date':
         return new Date(inv.due_date).toLocaleDateString(lang === 'en' ? 'en-GB' : 'es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
       case 'link': return String(inv.external_url || inv.pdf_url || '').trim();
-      case 'state':
-        if (lang === 'en') return rule === 'due_soon_3' ? 'due in 3 days' : rule === 'due_today' ? 'due today' : 'overdue';
-        return rule === 'due_soon_3' ? 'vence en 3 días' : rule === 'due_today' ? 'vence hoy' : 'está vencida';
+      case 'state': return this.stateText(inv, lang);
       default:
         return key.startsWith('fixed:') ? key.slice(6) : '';
     }
+  }
+
+  /** Days until due (negative = overdue), from the invoice due_date. Null when no due_date. */
+  private dueDiffDays(inv: any): number | null {
+    if (!inv.due_date) return null;
+    const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+    const due = new Date(inv.due_date); due.setUTCHours(0, 0, 0, 0);
+    return Math.round((due.getTime() - today.getTime()) / 86400000);
+  }
+
+  /** Short status phrase derived from the real due date (works for both the due-date notices and
+   *  the recurring dunning, where the invoice may not even be overdue yet). */
+  private stateText(inv: any, lang: 'en' | 'es'): string {
+    const d = this.dueDiffDays(inv);
+    if (d === null) return lang === 'en' ? 'pending payment' : 'pendiente de pago';
+    if (d > 0) return lang === 'en' ? `due in ${d} day(s)` : `vence en ${d} día(s)`;
+    if (d === 0) return lang === 'en' ? 'due today' : 'vence hoy';
+    return lang === 'en' ? 'overdue' : 'está vencida';
   }
 
   /** Find an open conversation for the contact, or create one on the given channel. Shared by both paths. */
@@ -308,31 +367,27 @@ export class InvoiceReminderService implements OnModuleInit {
     return sym ? `${sym}${amount}` : `${amount} ${currency}`;
   }
 
-  private buildText(inv: any, rule: string): string {
+  private buildText(inv: any, _rule: string): string {
     const lang = String(inv.lang || 'es').toLowerCase().startsWith('en') ? 'en' : 'es';
     const first = String(inv.full_name || '').split(' ')[0] || (lang === 'en' ? 'there' : '');
     const company = inv.business_name || 'AutoMarkIQ';
     const amount = this.money(inv.total_minor, inv.currency);
-    const due = new Date(inv.due_date).toLocaleDateString(lang === 'en' ? 'en-GB' : 'es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const due = inv.due_date ? new Date(inv.due_date).toLocaleDateString(lang === 'en' ? 'en-GB' : 'es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
     const link = (inv.external_url || inv.pdf_url || '').trim();
+    const diff = this.dueDiffDays(inv);
 
     if (lang === 'en') {
-      const state = rule === 'due_soon_3' ? 'It is due in 3 days.'
-        : rule === 'due_today' ? 'It is due today.'
-        : 'It is overdue — please settle it when you can.';
+      const state = diff !== null && diff < 0 ? 'It is overdue — please settle it when you can.' : `It is ${this.stateText(inv, 'en')}.`;
       const linkLine = link ? `\nView it here: ${link}\n` : '';
       return `Hi ${first} 👋\n\nThis is ${company} about your invoice:\n\n📄 No: ${inv.number}\n💰 Amount: ${amount}\n📅 Due: ${due}\n\n${state}${linkLine}\nIf you have already paid, please ignore this message. Thank you!`;
     }
-    const state = rule === 'due_soon_3' ? 'Vence en 3 días.'
-      : rule === 'due_today' ? 'Vence hoy.'
-      : 'Está vencida — por favor regulariza el pago cuando puedas.';
+    const st = this.stateText(inv, 'es');
+    const state = diff !== null && diff < 0 ? 'Está vencida — por favor regulariza el pago cuando puedas.' : `${st.charAt(0).toUpperCase()}${st.slice(1)}.`;
     const linkLine = link ? `\nPuedes verla aquí: ${link}\n` : '';
     return `Hola ${first} 👋\n\nTe escribimos de ${company} sobre tu factura:\n\n📄 N.º: ${inv.number}\n💰 Importe: ${amount}\n📅 Vencimiento: ${due}\n\n${state}${linkLine}\nSi ya realizaste el pago, ignora este mensaje. ¡Gracias!`;
   }
 
-  private async sendReminder(inv: any, rule: string, cache: ReminderChannelCache): Promise<boolean> {
-    const ch = await this.getTenantReminderChannel(inv.tenant_id, cache);
-    // No usable channel yet → skip WITHOUT logging, so it can still fire on a later rule date.
+  private async sendReminder(inv: any, rule: string, ch: ReminderChannel): Promise<boolean> {
     if (!ch) return false;
     return ch.kind === 'template'
       ? this.sendViaTemplate(inv, rule, ch)

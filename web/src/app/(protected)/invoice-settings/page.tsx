@@ -24,6 +24,9 @@ const WEEKDAYS: { d: number; label: string }[] = [
   { d: 1, label: 'L' }, { d: 2, label: 'M' }, { d: 3, label: 'X' }, { d: 4, label: 'J' },
   { d: 5, label: 'V' }, { d: 6, label: 'S' }, { d: 0, label: 'D' },
 ];
+const WEEKDAY_NAMES: Record<number, string> = {
+  0: 'Domingo', 1: 'Lunes', 2: 'Martes', 3: 'Miércoles', 4: 'Jueves', 5: 'Viernes', 6: 'Sábado',
+};
 // The 4 fixed notices (keys must match the API's FIXED_RULES).
 const FIXED_NOTICES: { k: string; label: string }[] = [
   { k: 'due_soon_3', label: '3 días antes de vencer' },
@@ -82,8 +85,6 @@ export default function InvoiceSettingsPage() {
   }
   useEffect(() => { if (form.reminders_enabled) loadTemplates(); /* eslint-disable-next-line */ }, [form.reminders_enabled]);
 
-  const selectedTpl = tplList.find((t) => t.name === form.reminder_template_name) || null;
-  const varCount = tplVarCount(selectedTpl);
   const varMap = Array.isArray(form.reminder_template_vars) ? form.reminder_template_vars : [];
 
   function pickReminderTemplate(name: string) {
@@ -98,7 +99,7 @@ export default function InvoiceSettingsPage() {
   function setVarMap(i: number, v: string) {
     setForm((f) => {
       const arr = [...(Array.isArray(f.reminder_template_vars) ? f.reminder_template_vars : [])];
-      while (arr.length < varCount) arr.push('');
+      while (arr.length <= i) arr.push('');
       arr[i] = v;
       return { ...f, reminder_template_vars: arr };
     });
@@ -116,6 +117,32 @@ export default function InvoiceSettingsPage() {
     const cur = new Set(activeRules);
     cur.has(k) ? cur.delete(k) : cur.add(k);
     set('reminder_rules', FIXED_NOTICES.map((n) => n.k).filter((x) => cur.has(x)));
+  }
+
+  // Recurring weekly dunning helpers (per-day template: { [weekday]: { name, lang, vars } })
+  const recTpls: Record<string, { name: string; lang: string; vars: string[] }> =
+    (form.reminder_recurring_templates && typeof form.reminder_recurring_templates === 'object') ? form.reminder_recurring_templates : {};
+  function pickRecurringTemplate(wd: number, name: string) {
+    setForm((f) => {
+      const map: Record<string, { name: string; lang: string; vars: string[] }> = { ...((f.reminder_recurring_templates as any) || {}) };
+      if (!name) { delete map[String(wd)]; }
+      else {
+        const t = tplList.find((x) => x.name === name) || null;
+        const n = tplVarCount(t);
+        const defaults = ['first_name', 'number', 'amount', 'due_date', 'link', 'state'];
+        map[String(wd)] = { name, lang: t?.language || 'es', vars: Array.from({ length: n }, (_, i) => defaults[i] ?? '') };
+      }
+      return { ...f, reminder_recurring_templates: map };
+    });
+  }
+  function setRecurringVar(wd: number, i: number, v: string) {
+    setForm((f) => {
+      const map: Record<string, { name: string; lang: string; vars: string[] }> = { ...((f.reminder_recurring_templates as any) || {}) };
+      const entry = { ...(map[String(wd)] || { name: '', lang: 'es', vars: [] }) };
+      const arr = [...(entry.vars || [])]; arr[i] = v; entry.vars = arr;
+      map[String(wd)] = entry;
+      return { ...f, reminder_recurring_templates: map };
+    });
   }
 
   async function save() {
@@ -226,8 +253,7 @@ export default function InvoiceSettingsPage() {
         {form.reminders_enabled && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--border, #e5e7eb)' }}>
             <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>⏰ Cuándo se envían</div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <Field label="Hora de envío">
                 <select className="form-input" value={form.reminder_send_hour ?? 14} onChange={(e) => set('reminder_send_hour', Number(e.target.value))}>
                   {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
@@ -239,26 +265,18 @@ export default function InvoiceSettingsPage() {
                 </select>
               </Field>
             </div>
+            {tplLoading && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>Cargando plantillas…</div>}
+            {tplErr && <div style={{ fontSize: 12, color: '#dc2626', marginTop: 8 }}>{tplErr}</div>}
+          </div>
+        )}
 
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Días permitidos</div>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-              {WEEKDAYS.map((w) => {
-                const on = weekdays.includes(w.d);
-                return (
-                  <button
-                    key={w.d} type="button" onClick={() => toggleWeekday(w.d)}
-                    style={{
-                      width: 34, height: 34, borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                      border: on ? '1px solid var(--primary)' : '1px solid var(--border, #e5e7eb)',
-                      background: on ? 'var(--primary)' : 'transparent', color: on ? '#fff' : 'var(--text-muted)',
-                    }}
-                  >{w.label}</button>
-                );
-              })}
+        {form.reminders_enabled && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--border, #e5e7eb)' }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>📅 Avisos por vencimiento</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 10 }}>
+              Avisos puntuales relativos al vencimiento de cada factura. Cada uno se envía una sola vez.
             </div>
-
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Avisos que se envían</div>
-            <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
+            <div style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
               {FIXED_NOTICES.map((n) => (
                 <label key={n.k} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
                   <input type="checkbox" checked={activeRules.includes(n.k)} onChange={() => toggleRule(n.k)} style={{ width: 15, height: 15 }} />
@@ -266,82 +284,66 @@ export default function InvoiceSettingsPage() {
                 </label>
               ))}
             </div>
-
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Reintento mientras siga vencida</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-              <span>Repetir cada</span>
-              <input
-                type="number" min={0} className="form-input" style={{ width: 70 }}
-                value={form.reminder_retry_days ?? 0}
-                onChange={(e) => set('reminder_retry_days', Math.max(0, Number(e.target.value) || 0))}
-              />
-              <span>días, hasta</span>
-              <input
-                type="number" min={0} max={20} className="form-input" style={{ width: 70 }}
-                value={form.reminder_retry_max ?? 0}
-                onChange={(e) => set('reminder_retry_max', Math.max(0, Math.min(20, Number(e.target.value) || 0)))}
-              />
-              <span>veces. (0 = desactivado)</span>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+              📑 Plantilla para estos avisos (opcional). En blanco → <b>WhatsApp Web</b> texto libre.
             </div>
+            <TemplateMapper
+              tplList={tplList} name={form.reminder_template_name ?? ''} vars={varMap}
+              onPick={pickReminderTemplate} onSetVar={setVarMap}
+            />
           </div>
         )}
 
         {form.reminders_enabled && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--border, #e5e7eb)' }}>
-            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>📑 Plantilla oficial (opcional)</div>
-            <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 10 }}>
-              Si eliges una plantilla aprobada y tienes conexión de <b>WhatsApp API (oficial)</b>, los recordatorios
-              saldrán como plantilla (cumple con Meta fuera de la ventana de 24h). Si la dejas en blanco, se envían
-              por <b>WhatsApp Web</b> como texto libre.
-            </div>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+              <input
+                type="checkbox" checked={!!form.reminder_recurring_enabled}
+                onChange={(e) => set('reminder_recurring_enabled', e.target.checked)}
+                style={{ marginTop: 3, width: 16, height: 16 }}
+              />
+              <span>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>🔁 Recordatorio recurrente</span>
+                <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: 12, marginTop: 4 }}>
+                  En los días que elijas (ej. miércoles y viernes), a la hora de arriba, recuerda a <b>todas</b> las
+                  facturas con saldo pendiente, y se repite esos días hasta que paguen. La plantilla puede variar por día.
+                </span>
+              </span>
+            </label>
 
-            {tplLoading && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Cargando plantillas…</div>}
-            {tplErr && <div style={{ fontSize: 12, color: '#dc2626', marginBottom: 8 }}>{tplErr}</div>}
-
-            <Field label="Plantilla aprobada">
-              <select className="form-input" value={form.reminder_template_name ?? ''} onChange={(e) => pickReminderTemplate(e.target.value)}>
-                <option value="">— Ninguna (usar WhatsApp Web) —</option>
-                {tplList.map((t) => (
-                  <option key={t.id} value={t.name}>{t.name} ({t.language})</option>
-                ))}
-              </select>
-            </Field>
-
-            {selectedTpl && (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-                  Texto: <span style={{ fontStyle: 'italic' }}>{tplBody(selectedTpl)}</span>
+            {form.reminder_recurring_enabled && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Días de envío</div>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+                  {WEEKDAYS.map((w) => {
+                    const on = weekdays.includes(w.d);
+                    return (
+                      <button
+                        key={w.d} type="button" onClick={() => toggleWeekday(w.d)}
+                        style={{
+                          width: 34, height: 34, borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                          border: on ? '1px solid var(--primary)' : '1px solid var(--border, #e5e7eb)',
+                          background: on ? 'var(--primary)' : 'transparent', color: on ? '#fff' : 'var(--text-muted)',
+                        }}
+                      >{w.label}</button>
+                    );
+                  })}
                 </div>
-                {varCount === 0 ? (
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Esta plantilla no tiene variables.</div>
+
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Plantilla por día (opcional)</div>
+                {weekdays.length === 0 ? (
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Elige al menos un día arriba.</div>
                 ) : (
-                  <div style={{ display: 'grid', gap: 8 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600 }}>Mapea cada variable a un dato de la factura:</div>
-                    {Array.from({ length: varCount }, (_, i) => {
-                      const cur = varMap[i] ?? '';
-                      const isFixed = cur.startsWith('fixed:');
-                      return (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontFamily: 'monospace', fontSize: 13, minWidth: 42 }}>{`{{${i + 1}}}`}</span>
-                          <select
-                            className="form-input" style={{ flex: 1 }}
-                            value={isFixed ? 'fixed' : cur}
-                            onChange={(e) => setVarMap(i, e.target.value === 'fixed' ? 'fixed:' : e.target.value)}
-                          >
-                            <option value="">— Elige un dato —</option>
-                            {TPL_FIELDS.map((f) => <option key={f.v} value={f.v}>{f.label}</option>)}
-                            <option value="fixed">Texto fijo…</option>
-                          </select>
-                          {isFixed && (
-                            <input
-                              className="form-input" style={{ flex: 1 }} placeholder="Texto fijo"
-                              value={cur.slice(6)}
-                              onChange={(e) => setVarMap(i, `fixed:${e.target.value}`)}
-                            />
-                          )}
-                        </div>
-                      );
-                    })}
+                  <div style={{ display: 'grid', gap: 12 }}>
+                    {[...weekdays].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((wd) => (
+                      <div key={wd} style={{ border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, padding: '10px 12px' }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{WEEKDAY_NAMES[wd]}</div>
+                        <TemplateMapper
+                          tplList={tplList} name={recTpls[String(wd)]?.name ?? ''} vars={recTpls[String(wd)]?.vars ?? []}
+                          onPick={(n) => pickRecurringTemplate(wd, n)} onSetVar={(i, v) => setRecurringVar(wd, i, v)}
+                        />
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -368,5 +370,63 @@ function Field({ label, full, children }: { label: string; full?: boolean; child
       <label className="form-label" style={{ fontSize: 12, fontWeight: 600 }}>{label}</label>
       {children}
     </div>
+  );
+}
+
+// Reusable: pick an approved template + map its {{n}} placeholders. Used for the due-date notices
+// template and for each recurring weekday's template.
+function TemplateMapper({ tplList, name, vars, onPick, onSetVar, label }: {
+  tplList: WhatsappTemplate[]; name: string; vars: string[];
+  onPick: (name: string) => void; onSetVar: (i: number, v: string) => void; label?: string;
+}) {
+  const sel = tplList.find((t) => t.name === name) || null;
+  const vc = tplVarCount(sel);
+  return (
+    <>
+      <Field label={label || 'Plantilla aprobada'}>
+        <select className="form-input" value={name || ''} onChange={(e) => onPick(e.target.value)}>
+          <option value="">— Ninguna (usar WhatsApp Web) —</option>
+          {tplList.map((t) => <option key={t.id} value={t.name}>{t.name} ({t.language})</option>)}
+        </select>
+      </Field>
+      {sel && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+            Texto: <span style={{ fontStyle: 'italic' }}>{tplBody(sel)}</span>
+          </div>
+          {vc === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Esta plantilla no tiene variables.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>Mapea cada variable a un dato de la factura:</div>
+              {Array.from({ length: vc }, (_, i) => {
+                const cur = vars[i] ?? '';
+                const isFixed = cur.startsWith('fixed:');
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontFamily: 'monospace', fontSize: 13, minWidth: 42 }}>{`{{${i + 1}}}`}</span>
+                    <select
+                      className="form-input" style={{ flex: 1 }}
+                      value={isFixed ? 'fixed' : cur}
+                      onChange={(e) => onSetVar(i, e.target.value === 'fixed' ? 'fixed:' : e.target.value)}
+                    >
+                      <option value="">— Elige un dato —</option>
+                      {TPL_FIELDS.map((f) => <option key={f.v} value={f.v}>{f.label}</option>)}
+                      <option value="fixed">Texto fijo…</option>
+                    </select>
+                    {isFixed && (
+                      <input
+                        className="form-input" style={{ flex: 1 }} placeholder="Texto fijo"
+                        value={cur.slice(6)} onChange={(e) => onSetVar(i, `fixed:${e.target.value}`)}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </>
   );
 }
