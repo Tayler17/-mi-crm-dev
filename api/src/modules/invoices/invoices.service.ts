@@ -348,12 +348,14 @@ export class InvoicesService implements OnModuleInit {
   /** Per-invoice opt-out from the payment-reminder bot (both the due-date notices and the
    *  recurring dunning skip a muted invoice). */
   async setRemindersMuted(tenantId: string, id: string, muted: boolean) {
-    const rows = await this.db.query(
+    const res: any = await this.db.query(
       `UPDATE invoices SET reminders_muted = $3, updated_at = NOW()
         WHERE id = $1 AND tenant_id = $2 RETURNING id, reminders_muted`,
       [id, tenantId, !!muted],
     );
-    if (!rows.length) throw new NotFoundException('Factura no encontrada');
+    // TypeORM's pg driver returns UPDATE ... RETURNING as [rows, affectedCount], not rows.
+    const rows = Array.isArray(res?.[0]) ? res[0] : res;
+    if (!rows?.length) throw new NotFoundException('Factura no encontrada');
     return rows[0];
   }
 

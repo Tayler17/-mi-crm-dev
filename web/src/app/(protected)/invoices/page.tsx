@@ -175,8 +175,7 @@ export default function InvoicesPage() {
     const next = !row.reminders_muted;
     setRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, reminders_muted: next } : x)));
     try {
-      const res = await setInvoiceRemindersMuted(row.id, next);
-      setRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, reminders_muted: res.reminders_muted } : x)));
+      await setInvoiceRemindersMuted(row.id, next); // keep the optimistic value on success
     } catch (e: any) {
       setRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, reminders_muted: !next } : x)));
       setError(e?.message || 'No se pudo cambiar el recordatorio');
