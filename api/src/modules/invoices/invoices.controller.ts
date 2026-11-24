@@ -39,6 +39,14 @@ export class InvoicesController {
     return this.reminders.runDailyCheck(tenantId);
   }
 
+  // Read-only: how many invoices WOULD get a reminder today (sends nothing).
+  @Get('reminders/preview')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  previewReminders(@TenantId() tenantId: string) {
+    return this.reminders.previewForTenant(tenantId);
+  }
+
   // ── Draft invoices CRUD (view/create/edit/delete = agent+) ──────────────────
   @Post()
   createDraft(@TenantId() tenantId: string, @Request() req: any, @Body() dto: any) {
@@ -74,6 +82,12 @@ export class InvoicesController {
   @Patch(':id')
   updateDraft(@TenantId() tenantId: string, @Param('id') id: string, @Body() dto: any) {
     return this.invoices.updateDraft(tenantId, id, dto);
+  }
+
+  /** Mute/unmute the payment-reminder bot for a single invoice (works on any status). */
+  @Patch(':id/reminders')
+  setRemindersMuted(@TenantId() tenantId: string, @Param('id') id: string, @Body() dto: { muted?: boolean }) {
+    return this.invoices.setRemindersMuted(tenantId, id, !!dto?.muted);
   }
 
   @Delete(':id')

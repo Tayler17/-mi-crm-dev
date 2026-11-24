@@ -2340,6 +2340,18 @@ export const getInvoiceSettings = () => apiGet<InvoiceSettings>('/invoices/setti
 export const updateInvoiceSettings = (data: Partial<InvoiceSettings>) =>
   apiPut<InvoiceSettings>('/invoices/settings', data);
 
+export interface ReminderPreview {
+  dueNotices: number;
+  recurring: number;
+  isRecurringDay: boolean;
+  recurringEnabled: boolean;
+  muted: number;
+  sample: Array<{ number: string; name: string; due_date: string | null; reason: string }>;
+}
+export const previewInvoiceReminders = () => apiGet<ReminderPreview>('/invoices/reminders/preview');
+export const setInvoiceRemindersMuted = (invoiceId: string, muted: boolean) =>
+  apiPatch<{ id: string; reminders_muted: boolean }>(`/invoices/${invoiceId}/reminders`, { muted });
+
 // ── Invoices (drafts — Etapa 1) ────────────────────────────────────────────────
 export interface InvoiceItem {
   id?: string;
@@ -2358,6 +2370,7 @@ export interface InvoiceListRow {
   delivery_status: string; currency: string; total_minor: number; amount_paid_minor: number;
   balance_minor: number; due_date?: string | null; created_at: string;
   contact_id?: string | null; contact_name?: string | null; overdue?: boolean;
+  reminders_muted?: boolean;
 }
 export interface InvoiceFilters { status?: string; overdue?: boolean; q?: string; contactId?: string; dealId?: string }
 export interface InvoicePayment {
