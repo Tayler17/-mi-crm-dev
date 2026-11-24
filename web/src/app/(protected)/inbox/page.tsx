@@ -8,7 +8,7 @@ import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import {
   getConversations, getConversation, createConversation, updateConversation, deleteConversation,
   getMessages, getNotes, sendMessage, sendNote,
-  getScheduledMessages, scheduleMessage, cancelScheduledMessage,
+  getScheduledMessages, scheduleMessage, scheduleWhatsappTemplate, cancelScheduledMessage,
   getContacts, getInboxes, getCannedResponses, getTags, getAgents,
   getTeams, getQueues, assignConversation,
   getAiPrompts, runAiPrompt, openNotificationsStream, uploadMessageFile,
@@ -573,6 +573,7 @@ export default function InboxPage() {
   const [tplImgUrl, setTplImgUrl] = useState('');
   const [tplSending, setTplSending] = useState(false);
   const [tplResult, setTplResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [tplScheduleAt, setTplScheduleAt] = useState(''); // #3: schedule a template for later
 
   // WhatsApp actions menu (groups Template/Buttons/… to keep the composer uncluttered)
   const [showWaMenu, setShowWaMenu] = useState(false);
@@ -986,7 +987,7 @@ export default function InboxPage() {
 
   // ── WhatsApp templates (send from inbox, e.g. outside the 24h window) ──
   function openTemplates() {
-    setShowTpl(true); setTplSel(null); setTplResult(null); setTplError('');
+    setShowTpl(true); setTplSel(null); setTplResult(null); setTplError(''); setTplScheduleAt('');
     setTplLoading(true);
     getWhatsappTemplates(activeId ? { conversationId: activeId } : undefined)
       .then((r) => {
@@ -1021,6 +1022,22 @@ export default function InboxPage() {
       } else {
         setTplResult({ ok: false, msg: r.error || (en ? 'Send failed' : 'Falló el envío') });
       }
+    } catch (err: unknown) {
+      setTplResult({ ok: false, msg: err instanceof Error ? err.message : 'Error' });
+    } finally { setTplSending(false); }
+  }
+  // #3: schedule the selected template to be sent at a future time (instead of now).
+  async function scheduleTemplate() {
+    if (!tplSel || !activeId || !tplScheduleAt) return;
+    setTplSending(true); setTplResult(null);
+    try {
+      const rendered = tplFill(tplBodyText(tplSel), tplVars);
+      await scheduleWhatsappTemplate(activeId, {
+        templateName: tplSel.name, templateLang: tplSel.language, templateParams: tplVars,
+        renderedBody: rendered, scheduledAt: new Date(tplScheduleAt).toISOString(),
+      });
+      setShowTpl(false); setTplSel(null); setTplScheduleAt('');
+      const s = await getScheduledMessages(activeId); setScheduledMsgs(s);
     } catch (err: unknown) {
       setTplResult({ ok: false, msg: err instanceof Error ? err.message : 'Error' });
     } finally { setTplSending(false); }
@@ -2062,6 +2079,7 @@ export default function InboxPage() {
                           <div style={{ fontSize: 13, marginBottom: 4, wordBreak: 'break-word' }}>{s.body}</div>
                           <div style={{ fontSize: 11, color: '#92400e', display: 'flex', gap: 8 }}>
                             <span>🕐 {new Date(s.scheduled_at).toLocaleString(i.locale, { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                            {s.kind === 'template' && <span>· 📑 {en ? 'Template' : 'Plantilla'}</span>}
                             {s.author_name && <span>· {s.author_name}</span>}
                           </div>
                         </div>
@@ -2935,6 +2953,12 @@ export default function InboxPage() {
                   <div style={{ fontSize: 13, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 12px', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
                     {tplFill(tplBodyText(tplSel), tplVars)}
                   </div>
+                  <div className="form-group" style={{ marginTop: 10 }}>
+                    <label className="form-label">🕐 {en ? 'Schedule for later (optional)' : 'Programar para más tarde (opcional)'}</label>
+                    <input className="form-input" type="datetime-local" value={tplScheduleAt}
+                      min={new Date().toISOString().slice(0, 16)}
+                      onChange={(e) => setTplScheduleAt(e.target.value)} />
+                  </div>
                   {tplResult && !tplResult.ok && <div className="error-msg" style={{ marginTop: 8 }}>{tplResult.msg}</div>}
                 </div>
               )}
@@ -2942,9 +2966,15 @@ export default function InboxPage() {
             <div className="modal-footer">
               <button type="button" className="btn btn-secondary" onClick={() => setShowTpl(false)}>{en ? 'Close' : 'Cerrar'}</button>
               {tplSel && (
-                <button type="button" className="btn btn-primary" disabled={tplSending} onClick={sendTemplate}>
-                  {tplSending ? (en ? 'Sending…' : 'Enviando…') : (en ? 'Send' : 'Enviar')}
-                </button>
+                tplScheduleAt ? (
+                  <button type="button" className="btn btn-primary" disabled={tplSending} onClick={scheduleTemplate}>
+                    {tplSending ? (en ? 'Scheduling…' : 'Programando…') : `🕐 ${en ? 'Schedule' : 'Programar'}`}
+                  </button>
+                ) : (
+                  <button type="button" className="btn btn-primary" disabled={tplSending} onClick={sendTemplate}>
+                    {tplSending ? (en ? 'Sending…' : 'Enviando…') : (en ? 'Send' : 'Enviar')}
+                  </button>
+                )
               )}
             </div>
           </div>

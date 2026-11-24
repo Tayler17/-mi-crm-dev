@@ -1894,13 +1894,23 @@ export interface ScheduledMessage {
   author_name?: string;
   body: string;
   scheduled_at: string;
-  status: 'pending' | 'sent' | 'cancelled';
+  status: 'pending' | 'sent' | 'cancelled' | 'failed';
   created_at: string;
+  kind?: 'text' | 'template';
+  template_name?: string | null;
 }
 export const getScheduledMessages = (conversationId: string) =>
   apiGet<ScheduledMessage[]>(`/conversations/${conversationId}/messages/scheduled`);
 export const scheduleMessage = (conversationId: string, body: string, scheduledAt: string) =>
   apiPost<ScheduledMessage>(`/conversations/${conversationId}/messages/schedule`, { body, scheduledAt });
+export const scheduleWhatsappTemplate = (
+  conversationId: string,
+  data: { templateName: string; templateLang: string; templateParams: string[]; renderedBody: string; scheduledAt: string },
+) =>
+  apiPost<ScheduledMessage>(`/conversations/${conversationId}/messages/schedule`, {
+    kind: 'template', body: data.renderedBody, scheduledAt: data.scheduledAt,
+    templateName: data.templateName, templateLang: data.templateLang, templateParams: data.templateParams,
+  });
 export const cancelScheduledMessage = (conversationId: string, schedId: string) =>
   apiDelete(`/conversations/${conversationId}/messages/scheduled/${schedId}`);
 
@@ -2314,6 +2324,13 @@ export interface InvoiceSettings {
   reminder_template_name?: string | null;
   reminder_template_lang?: string | null;
   reminder_template_vars?: string[] | null; // mapea cada {{n}} a un campo de la factura
+  // Fase 2c: cadencia configurable del bot de recordatorios.
+  reminder_send_hour?: number;          // 0-23, hora local del tenant
+  reminder_timezone?: string | null;    // IANA, ej. 'Europe/London'
+  reminder_weekdays?: number[] | null;  // 0=Dom..6=Sáb, días permitidos
+  reminder_rules?: string[] | null;     // cuáles de los 4 avisos fijos están activos
+  reminder_retry_days?: number;         // repetir cada N días mientras siga vencida (0=off)
+  reminder_retry_max?: number;          // máximo de reintentos
   configured?: boolean;
 }
 export const getInvoiceSettings = () => apiGet<InvoiceSettings>('/invoices/settings');
