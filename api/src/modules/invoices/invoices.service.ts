@@ -65,6 +65,14 @@ export class InvoicesService implements OnModuleInit {
       'reminder_template_name text',
       'reminder_template_lang text',
       'reminder_template_vars jsonb',
+      // Fase 2c: configurable cadence per tenant (hour/timezone, allowed weekdays, which of the 4
+      // fixed notices are active, and an optional recurring retry while overdue).
+      'reminder_send_hour int NOT NULL DEFAULT 14',
+      `reminder_timezone text NOT NULL DEFAULT 'UTC'`,
+      `reminder_weekdays jsonb NOT NULL DEFAULT '[0,1,2,3,4,5,6]'::jsonb`,
+      `reminder_rules jsonb NOT NULL DEFAULT '["due_soon_3","due_today","overdue_3","overdue_7"]'::jsonb`,
+      'reminder_retry_days int NOT NULL DEFAULT 0',
+      'reminder_retry_max int NOT NULL DEFAULT 0',
     ]) {
       await this.db.query(`ALTER TABLE tenant_invoice_settings ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
     }
@@ -272,12 +280,24 @@ export class InvoicesService implements OnModuleInit {
     const tplVars = dto.reminder_template_vars === undefined
       ? null
       : JSON.stringify(Array.isArray(dto.reminder_template_vars) ? dto.reminder_template_vars : []);
+    const weekdays = dto.reminder_weekdays === undefined
+      ? null
+      : JSON.stringify((Array.isArray(dto.reminder_weekdays) ? dto.reminder_weekdays : [0, 1, 2, 3, 4, 5, 6]).map((d: any) => Number(d)).filter((d: number) => d >= 0 && d <= 6));
+    const rules = dto.reminder_rules === undefined
+      ? null
+      : JSON.stringify(Array.isArray(dto.reminder_rules) ? dto.reminder_rules : []);
+    const hour = dto.reminder_send_hour === undefined ? null : Math.max(0, Math.min(23, Number(dto.reminder_send_hour) || 0));
+    const retryDays = dto.reminder_retry_days === undefined ? null : Math.max(0, Number(dto.reminder_retry_days) || 0);
+    const retryMax = dto.reminder_retry_max === undefined ? null : Math.max(0, Math.min(20, Number(dto.reminder_retry_max) || 0));
     await this.db.query(
       `INSERT INTO tenant_invoice_settings
          (tenant_id, business_name, address, tax_id, email, phone, logo_url,
           number_prefix, cn_prefix, default_currency, default_tax_rate, footer_terms, reminders_enabled,
-          reminder_template_name, reminder_template_lang, reminder_template_vars, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'INV'),COALESCE($9,'CN'),COALESCE($10,'GBP'),COALESCE($11::numeric,0),$12,COALESCE($13,false),$14,$15,$16::jsonb,NOW())
+          reminder_template_name, reminder_template_lang, reminder_template_vars,
+          reminder_send_hour, reminder_timezone, reminder_weekdays, reminder_rules, reminder_retry_days, reminder_retry_max, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'INV'),COALESCE($9,'CN'),COALESCE($10,'GBP'),COALESCE($11::numeric,0),$12,COALESCE($13,false),
+               $14,$15,$16::jsonb,
+               COALESCE($17,14),COALESCE($18,'UTC'),COALESCE($19::jsonb,'[0,1,2,3,4,5,6]'::jsonb),COALESCE($20::jsonb,'["due_soon_3","due_today","overdue_3","overdue_7"]'::jsonb),COALESCE($21,0),COALESCE($22,0),NOW())
        ON CONFLICT (tenant_id) DO UPDATE SET
          business_name=$2, address=$3, tax_id=$4, email=$5, phone=$6, logo_url=$7,
          number_prefix=COALESCE($8,'INV'), cn_prefix=COALESCE($9,'CN'),
@@ -286,6 +306,12 @@ export class InvoicesService implements OnModuleInit {
          reminder_template_name=COALESCE($14, tenant_invoice_settings.reminder_template_name),
          reminder_template_lang=COALESCE($15, tenant_invoice_settings.reminder_template_lang),
          reminder_template_vars=COALESCE($16::jsonb, tenant_invoice_settings.reminder_template_vars),
+         reminder_send_hour=COALESCE($17, tenant_invoice_settings.reminder_send_hour),
+         reminder_timezone=COALESCE($18, tenant_invoice_settings.reminder_timezone),
+         reminder_weekdays=COALESCE($19::jsonb, tenant_invoice_settings.reminder_weekdays),
+         reminder_rules=COALESCE($20::jsonb, tenant_invoice_settings.reminder_rules),
+         reminder_retry_days=COALESCE($21, tenant_invoice_settings.reminder_retry_days),
+         reminder_retry_max=COALESCE($22, tenant_invoice_settings.reminder_retry_max),
          updated_at=NOW()`,
       [
         tenantId, dto.business_name ?? null, dto.address ?? null, dto.tax_id ?? null,
@@ -296,6 +322,8 @@ export class InvoicesService implements OnModuleInit {
         dto.reminder_template_name === undefined ? null : (dto.reminder_template_name || ''),
         dto.reminder_template_lang === undefined ? null : (dto.reminder_template_lang || ''),
         tplVars,
+        hour, dto.reminder_timezone === undefined ? null : (dto.reminder_timezone || 'UTC'),
+        weekdays, rules, retryDays, retryMax,
       ],
     );
     return this.getSettings(tenantId);

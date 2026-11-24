@@ -19,6 +19,23 @@ const TPL_FIELDS: { v: string; label: string }[] = [
   { v: 'link', label: 'Enlace a la factura' },
   { v: 'state', label: 'Estado (vence / vencida)' },
 ];
+// Weekday chips: label → JS day index (0=Sun..6=Sat). Shown Mon-first.
+const WEEKDAYS: { d: number; label: string }[] = [
+  { d: 1, label: 'L' }, { d: 2, label: 'M' }, { d: 3, label: 'X' }, { d: 4, label: 'J' },
+  { d: 5, label: 'V' }, { d: 6, label: 'S' }, { d: 0, label: 'D' },
+];
+// The 4 fixed notices (keys must match the API's FIXED_RULES).
+const FIXED_NOTICES: { k: string; label: string }[] = [
+  { k: 'due_soon_3', label: '3 días antes de vencer' },
+  { k: 'due_today', label: 'El día del vencimiento' },
+  { k: 'overdue_3', label: '3 días de atraso' },
+  { k: 'overdue_7', label: '7 días de atraso' },
+];
+const TIMEZONES = [
+  'UTC', 'Europe/London', 'Europe/Madrid', 'America/Santo_Domingo', 'America/New_York',
+  'America/Mexico_City', 'America/Bogota', 'America/Sao_Paulo', 'America/Los_Angeles',
+];
+
 const tplBody = (t?: WhatsappTemplate | null) =>
   t?.components?.find((c) => String(c.type).toUpperCase() === 'BODY')?.text || '';
 const tplVarCount = (t?: WhatsappTemplate | null): number => {
@@ -85,6 +102,20 @@ export default function InvoiceSettingsPage() {
       arr[i] = v;
       return { ...f, reminder_template_vars: arr };
     });
+  }
+
+  // Cadence helpers
+  const weekdays = Array.isArray(form.reminder_weekdays) ? form.reminder_weekdays : [0, 1, 2, 3, 4, 5, 6];
+  const activeRules = Array.isArray(form.reminder_rules) ? form.reminder_rules : FIXED_NOTICES.map((n) => n.k);
+  function toggleWeekday(d: number) {
+    const cur = new Set(weekdays);
+    cur.has(d) ? cur.delete(d) : cur.add(d);
+    set('reminder_weekdays', [...cur].sort((a, b) => a - b));
+  }
+  function toggleRule(k: string) {
+    const cur = new Set(activeRules);
+    cur.has(k) ? cur.delete(k) : cur.add(k);
+    set('reminder_rules', FIXED_NOTICES.map((n) => n.k).filter((x) => cur.has(x)));
   }
 
   async function save() {
@@ -191,6 +222,69 @@ export default function InvoiceSettingsPage() {
             </span>
           </span>
         </label>
+
+        {form.reminders_enabled && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--border, #e5e7eb)' }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>⏰ Cuándo se envían</div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 12 }}>
+              <Field label="Hora de envío">
+                <select className="form-input" value={form.reminder_send_hour ?? 14} onChange={(e) => set('reminder_send_hour', Number(e.target.value))}>
+                  {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+                </select>
+              </Field>
+              <Field label="Zona horaria">
+                <select className="form-input" value={form.reminder_timezone ?? 'UTC'} onChange={(e) => set('reminder_timezone', e.target.value)}>
+                  {TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+                </select>
+              </Field>
+            </div>
+
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Días permitidos</div>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+              {WEEKDAYS.map((w) => {
+                const on = weekdays.includes(w.d);
+                return (
+                  <button
+                    key={w.d} type="button" onClick={() => toggleWeekday(w.d)}
+                    style={{
+                      width: 34, height: 34, borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                      border: on ? '1px solid var(--primary)' : '1px solid var(--border, #e5e7eb)',
+                      background: on ? 'var(--primary)' : 'transparent', color: on ? '#fff' : 'var(--text-muted)',
+                    }}
+                  >{w.label}</button>
+                );
+              })}
+            </div>
+
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Avisos que se envían</div>
+            <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
+              {FIXED_NOTICES.map((n) => (
+                <label key={n.k} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                  <input type="checkbox" checked={activeRules.includes(n.k)} onChange={() => toggleRule(n.k)} style={{ width: 15, height: 15 }} />
+                  {n.label}
+                </label>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Reintento mientras siga vencida</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+              <span>Repetir cada</span>
+              <input
+                type="number" min={0} className="form-input" style={{ width: 70 }}
+                value={form.reminder_retry_days ?? 0}
+                onChange={(e) => set('reminder_retry_days', Math.max(0, Number(e.target.value) || 0))}
+              />
+              <span>días, hasta</span>
+              <input
+                type="number" min={0} max={20} className="form-input" style={{ width: 70 }}
+                value={form.reminder_retry_max ?? 0}
+                onChange={(e) => set('reminder_retry_max', Math.max(0, Math.min(20, Number(e.target.value) || 0)))}
+              />
+              <span>veces. (0 = desactivado)</span>
+            </div>
+          </div>
+        )}
 
         {form.reminders_enabled && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--border, #e5e7eb)' }}>

@@ -19,12 +19,14 @@ import { ConnectionsService } from '../connections/connections.service';
  * never chased (PATCH to paid/void stops it). Delivery reuses the WhatsApp Web session, the
  * same path the appointment reminders use. Never messages anyone until the tenant enables it.
  */
-const RULES: Array<{ rule: string; offset: number }> = [
-  { rule: 'due_soon_3', offset: 3 },
-  { rule: 'due_today', offset: 0 },
-  { rule: 'overdue_3', offset: -3 },
-  { rule: 'overdue_7', offset: -7 },
+// sendOffset = days relative to due_date when we intend to send (negative = before, positive = after).
+const FIXED_RULES: Array<{ rule: string; sendOffset: number }> = [
+  { rule: 'due_soon_3', sendOffset: -3 },
+  { rule: 'due_today', sendOffset: 0 },
+  { rule: 'overdue_3', sendOffset: 3 },
+  { rule: 'overdue_7', sendOffset: 7 },
 ];
+const ALL_RULE_KEYS = FIXED_RULES.map((r) => r.rule);
 
 const SYMBOL: Record<string, string> = { GBP: '£', USD: '$', EUR: '€', DOP: 'RD$' };
 
@@ -58,22 +60,98 @@ export class InvoiceReminderService implements OnModuleInit {
     `).catch((e: any) => this.logger.error(`invoice_reminders init: ${e.message}`));
     await this.db.query(`CREATE INDEX IF NOT EXISTS invoice_reminders_invoice_idx ON invoice_reminders(invoice_id)`).catch(() => {});
 
-    const job = new CronJob('0 14 * * *', () => { void this.runDailyCheck(); }); // 14:00 UTC daily
+    // Runs every hour; each tenant only sends at its own configured hour + allowed weekday (its timezone).
+    const job = new CronJob('0 * * * *', () => { void this.runScheduled(); });
     try { this.schedulerRegistry.addCronJob('invoice-reminders', job as any); job.start(); } catch {}
-    this.logger.log('Invoice reminder scheduler registered (14:00 UTC daily)');
+    this.logger.log('Invoice reminder scheduler registered (hourly; per-tenant hour/timezone)');
   }
 
-  /** Public so it can be triggered manually (owner "run now" endpoint). Optionally scoped to one tenant. */
+  /** Current hour (0-23) and weekday (0=Sun..6=Sat) in the given IANA timezone. */
+  private nowInTz(tz: string): { hour: number; weekday: number } {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz || 'UTC', hour: '2-digit', hour12: false, weekday: 'short' }).formatToParts(new Date());
+      const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0') % 24;
+      const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+      const weekday = map[parts.find((p) => p.type === 'weekday')?.value ?? 'Sun'] ?? 0;
+      return { hour, weekday };
+    } catch {
+      const d = new Date();
+      return { hour: d.getUTCHours(), weekday: d.getUTCDay() };
+    }
+  }
+
+  /** Hourly cron entry: for every enabled tenant whose configured hour+weekday match "now"
+   *  (in their timezone), run their reminders. On-demand runs use runDailyCheck instead. */
+  private async runScheduled(): Promise<void> {
+    let tenants: any[] = [];
+    try {
+      tenants = await this.db.query(
+        `SELECT tenant_id, reminder_send_hour, reminder_timezone, reminder_weekdays
+           FROM tenant_invoice_settings WHERE reminders_enabled = true`,
+      );
+    } catch (e: any) { this.logger.error(`reminder schedule query failed: ${e?.message}`); return; }
+
+    for (const t of tenants) {
+      const tz = String(t.reminder_timezone || 'UTC');
+      const hour = Number.isFinite(Number(t.reminder_send_hour)) ? Number(t.reminder_send_hour) : 14;
+      const days = Array.isArray(t.reminder_weekdays) ? t.reminder_weekdays.map((d: any) => Number(d)) : [0, 1, 2, 3, 4, 5, 6];
+      const now = this.nowInTz(tz);
+      if (now.hour !== hour || !days.includes(now.weekday)) continue;
+      try { await this.runForTenant(t.tenant_id); }
+      catch (e: any) { this.logger.error(`reminder run (tenant ${t.tenant_id}) failed: ${e?.message}`); }
+    }
+  }
+
+  /** Public (manual "run now" endpoint). With a tenantId, runs just that tenant IGNORING the
+   *  hour/weekday schedule (for testing). Without one, runs every enabled tenant now. */
   async runDailyCheck(onlyTenantId?: string): Promise<{ sent: number; skipped: number }> {
+    if (onlyTenantId) return this.runForTenant(onlyTenantId);
+    let sent = 0, skipped = 0;
+    const rows = await this.db.query(`SELECT tenant_id FROM tenant_invoice_settings WHERE reminders_enabled = true`).catch(() => []);
+    for (const t of rows) {
+      const r = await this.runForTenant(t.tenant_id).catch(() => ({ sent: 0, skipped: 0 }));
+      sent += r.sent; skipped += r.skipped;
+    }
+    return { sent, skipped };
+  }
+
+  /** Build this tenant's active rule list: the enabled fixed notices + optional recurring retries. */
+  private buildRules(settings: any): Array<{ rule: string; sendOffset: number; retry: boolean }> {
+    const active: string[] = Array.isArray(settings?.reminder_rules) && settings.reminder_rules.length
+      ? settings.reminder_rules.filter((k: any) => ALL_RULE_KEYS.includes(k))
+      : ALL_RULE_KEYS;
+    const rules = FIXED_RULES.filter((r) => active.includes(r.rule)).map((r) => ({ ...r, retry: false }));
+    const retryDays = Math.max(0, Number(settings?.reminder_retry_days) || 0);
+    const retryMax = Math.max(0, Number(settings?.reminder_retry_max) || 0);
+    if (retryDays > 0 && retryMax > 0) {
+      for (let k = 1; k <= retryMax; k++) rules.push({ rule: `retry_${k}`, sendOffset: retryDays * k, retry: true });
+    }
+    return rules;
+  }
+
+  private async runForTenant(tenantId: string): Promise<{ sent: number; skipped: number }> {
     let sent = 0, skipped = 0;
     const connCache: ReminderChannelCache = new Map();
 
-    for (const r of RULES) {
+    const [settings] = await this.db.query(
+      `SELECT reminders_enabled, reminder_rules, reminder_weekdays, reminder_retry_days, reminder_retry_max
+         FROM tenant_invoice_settings WHERE tenant_id = $1 LIMIT 1`,
+      [tenantId],
+    );
+    if (!settings?.reminders_enabled) return { sent, skipped }; // never messages while disabled
+
+    // Catch-up window: if weekdays are restricted, allow a notice whose target day was skipped to
+    // still fire on the next allowed day (bounded, so old invoices aren't blasted when enabling).
+    const restricted = Array.isArray(settings.reminder_weekdays) && settings.reminder_weekdays.length < 7;
+    const window = restricted ? 3 : 1;
+
+    for (const r of this.buildRules(settings)) {
       let rows: any[] = [];
       try {
-        const params: any[] = [r.offset, r.rule];
-        let tenantFilter = '';
-        if (onlyTenantId) { params.push(onlyTenantId); tenantFilter = ` AND i.tenant_id = $${params.length}`; }
+        // Same-day guard for retries: don't pile a retry on top of a notice already sent today.
+        const retryGuard = r.retry
+          ? `AND NOT EXISTS (SELECT 1 FROM invoice_reminders r2 WHERE r2.invoice_id = i.id AND r2.sent_at::date = CURRENT_DATE)`
+          : '';
         rows = await this.db.query(
           `SELECT i.id, i.tenant_id, i.number, i.total_minor, i.currency, i.due_date,
                   i.external_url, i.pdf_url, i.contact_id,
@@ -83,13 +161,15 @@ export class InvoiceReminderService implements OnModuleInit {
              JOIN tenant_invoice_settings s ON s.tenant_id = i.tenant_id AND s.reminders_enabled = true
              JOIN contacts ct ON ct.id = i.contact_id
              JOIN tenants  t  ON t.id  = i.tenant_id
-            WHERE i.financial_status IN ('issued', 'partially_paid')
+            WHERE i.tenant_id = $1
+              AND i.financial_status IN ('issued', 'partially_paid')
               AND i.due_date IS NOT NULL
               AND ct.phone IS NOT NULL AND ct.phone <> ''
-              AND i.due_date = (CURRENT_DATE + $1::int)${tenantFilter}
-              AND NOT EXISTS (SELECT 1 FROM invoice_reminders rr WHERE rr.invoice_id = i.id AND rr.rule = $2)
+              AND (CURRENT_DATE - (i.due_date + $2::int)) BETWEEN 0 AND $3
+              AND NOT EXISTS (SELECT 1 FROM invoice_reminders rr WHERE rr.invoice_id = i.id AND rr.rule = $4)
+              ${retryGuard}
             LIMIT 500`,
-          params,
+          [tenantId, r.sendOffset, window, r.rule],
         );
       } catch (e: any) {
         this.logger.error(`reminder query (${r.rule}) failed: ${e?.message}`);
@@ -106,7 +186,7 @@ export class InvoiceReminderService implements OnModuleInit {
         }
       }
     }
-    if (sent || skipped) this.logger.log(`Invoice reminders: ${sent} sent, ${skipped} skipped`);
+    if (sent || skipped) this.logger.log(`Invoice reminders (tenant ${tenantId}): ${sent} sent, ${skipped} skipped`);
     return { sent, skipped };
   }
 

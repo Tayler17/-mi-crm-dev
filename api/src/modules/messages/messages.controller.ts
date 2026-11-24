@@ -301,14 +301,22 @@ export class MessagesController {
   @Post('messages/schedule')
   async scheduleMessage(
     @Param('conversationId') cid: string,
-    @Body() body: { body: string; scheduledAt: string },
+    @Body() body: { body: string; scheduledAt: string; kind?: string; templateName?: string; templateLang?: string; templateParams?: string[] },
     @TenantId() tenantId: string,
     @Request() req: any,
   ) {
+    const isTpl = body.kind === 'template';
     const rows = await this.db.query(
-      `INSERT INTO scheduled_messages (tenant_id, conversation_id, author_id, body, scheduled_at)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [tenantId, cid, req.user.id, body.body, body.scheduledAt],
+      `INSERT INTO scheduled_messages
+         (tenant_id, conversation_id, author_id, body, scheduled_at, kind, template_name, template_lang, template_params)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb) RETURNING *`,
+      [
+        tenantId, cid, req.user.id, body.body, body.scheduledAt,
+        isTpl ? 'template' : 'text',
+        isTpl ? (body.templateName ?? null) : null,
+        isTpl ? (body.templateLang ?? null) : null,
+        isTpl ? JSON.stringify(Array.isArray(body.templateParams) ? body.templateParams : []) : null,
+      ],
     );
     return rows[0];
   }
