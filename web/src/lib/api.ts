@@ -2309,6 +2309,11 @@ export interface InvoiceSettings {
   default_tax_rate?: number; // fraction, e.g. 0.2 = 20%
   footer_terms?: string | null;
   reminders_enabled?: boolean; // Fase 2: bot de recordatorios de cobro por WhatsApp
+  // Fase 2b: plantilla oficial de WhatsApp para los recordatorios (opcional). Si está puesta y hay
+  // conexión Cloud API, los recordatorios salen como plantilla aprobada; si no, por WhatsApp Web.
+  reminder_template_name?: string | null;
+  reminder_template_lang?: string | null;
+  reminder_template_vars?: string[] | null; // mapea cada {{n}} a un campo de la factura
   configured?: boolean;
 }
 export const getInvoiceSettings = () => apiGet<InvoiceSettings>('/invoices/settings');

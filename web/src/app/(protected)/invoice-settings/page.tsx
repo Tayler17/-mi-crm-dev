@@ -1,12 +1,32 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { getInvoiceSettings, updateInvoiceSettings, InvoiceSettings } from '@/lib/api';
+import { getInvoiceSettings, updateInvoiceSettings, InvoiceSettings, getWhatsappTemplates, WhatsappTemplate } from '@/lib/api';
 import { PaymentsSettingsContent } from '@/components/PaymentsSettings';
 
 // Common currencies for the picker (the backend accepts any ISO code; decimals are
 // derived per currency, so JPY/BHD etc. are handled correctly even if not listed here).
 const CURRENCIES = ['GBP', 'EUR', 'USD', 'DOP', 'JPY', 'BHD', 'MXN', 'COP', 'BRL', 'CAD', 'AUD'];
+
+// Fields a WhatsApp template {{n}} placeholder can be mapped to (see templateParam on the API).
+const TPL_FIELDS: { v: string; label: string }[] = [
+  { v: 'first_name', label: 'Nombre (de pila)' },
+  { v: 'full_name', label: 'Nombre completo' },
+  { v: 'company', label: 'Empresa (tu negocio)' },
+  { v: 'number', label: 'Nº de factura' },
+  { v: 'amount', label: 'Importe' },
+  { v: 'due_date', label: 'Fecha de vencimiento' },
+  { v: 'link', label: 'Enlace a la factura' },
+  { v: 'state', label: 'Estado (vence / vencida)' },
+];
+const tplBody = (t?: WhatsappTemplate | null) =>
+  t?.components?.find((c) => String(c.type).toUpperCase() === 'BODY')?.text || '';
+const tplVarCount = (t?: WhatsappTemplate | null): number => {
+  const body = tplBody(t);
+  const idx = [...body.matchAll(/\{\{\s*(\d+)\s*\}\}/g)].map((m) => Number(m[1]));
+  if (idx.length) return Math.max(...idx);
+  return [...body.matchAll(/\{\{[^}]+\}\}/g)].length;
+};
 
 export default function InvoiceSettingsPage() {
   const [form, setForm] = useState<InvoiceSettings>({
@@ -16,6 +36,10 @@ export default function InvoiceSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [tab, setTab] = useState<'datos' | 'pagos'>('datos');
+  const [tplList, setTplList] = useState<WhatsappTemplate[]>([]);
+  const [tplLoading, setTplLoading] = useState(false);
+  const [tplErr, setTplErr] = useState('');
+  const [tplLoaded, setTplLoaded] = useState(false);
 
   useEffect(() => {
     getInvoiceSettings()
@@ -25,6 +49,43 @@ export default function InvoiceSettingsPage() {
   }, []);
 
   const set = (k: keyof InvoiceSettings, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
+
+  // Lazily load the tenant's approved WhatsApp templates the first time reminders are enabled.
+  function loadTemplates() {
+    if (tplLoaded || tplLoading) return;
+    setTplLoading(true); setTplErr('');
+    getWhatsappTemplates()
+      .then((r) => {
+        if (!r.ok) setTplErr(r.error || 'No se pudieron cargar las plantillas (¿hay conexión de WhatsApp API?).');
+        setTplList((r.templates ?? []).filter((t) => t.status.toUpperCase() === 'APPROVED'));
+        setTplLoaded(true);
+      })
+      .catch((e) => setTplErr(e?.message || 'Error al cargar plantillas'))
+      .finally(() => setTplLoading(false));
+  }
+  useEffect(() => { if (form.reminders_enabled) loadTemplates(); /* eslint-disable-next-line */ }, [form.reminders_enabled]);
+
+  const selectedTpl = tplList.find((t) => t.name === form.reminder_template_name) || null;
+  const varCount = tplVarCount(selectedTpl);
+  const varMap = Array.isArray(form.reminder_template_vars) ? form.reminder_template_vars : [];
+
+  function pickReminderTemplate(name: string) {
+    if (!name) { setForm((f) => ({ ...f, reminder_template_name: '', reminder_template_lang: '', reminder_template_vars: [] })); return; }
+    const t = tplList.find((x) => x.name === name) || null;
+    const n = tplVarCount(t);
+    // Sensible defaults for the first few placeholders; the user can change each one.
+    const defaults = ['first_name', 'number', 'amount', 'due_date', 'link', 'state'];
+    const vars = Array.from({ length: n }, (_, i) => defaults[i] ?? '');
+    setForm((f) => ({ ...f, reminder_template_name: name, reminder_template_lang: t?.language || 'es', reminder_template_vars: vars }));
+  }
+  function setVarMap(i: number, v: string) {
+    setForm((f) => {
+      const arr = [...(Array.isArray(f.reminder_template_vars) ? f.reminder_template_vars : [])];
+      while (arr.length < varCount) arr.push('');
+      arr[i] = v;
+      return { ...f, reminder_template_vars: arr };
+    });
+  }
 
   async function save() {
     setSaving(true); setMsg(null);
@@ -126,11 +187,73 @@ export default function InvoiceSettingsPage() {
             <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: 13, marginTop: 4 }}>
               Un bot recuerda al cliente por WhatsApp cuando una factura está por vencer o vencida:
               3 días antes, el día del vencimiento, y a los 3 y 7 días de atraso. Se detiene al marcar
-              la factura como pagada. Solo envía a contactos con teléfono y requiere una conexión de
-              <b> WhatsApp Web</b> activa. Cada recordatorio se envía una sola vez.
+              la factura como pagada. Solo envía a contactos con teléfono. Cada recordatorio se envía una sola vez.
             </span>
           </span>
         </label>
+
+        {form.reminders_enabled && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--border, #e5e7eb)' }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>📑 Plantilla oficial (opcional)</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 10 }}>
+              Si eliges una plantilla aprobada y tienes conexión de <b>WhatsApp API (oficial)</b>, los recordatorios
+              saldrán como plantilla (cumple con Meta fuera de la ventana de 24h). Si la dejas en blanco, se envían
+              por <b>WhatsApp Web</b> como texto libre.
+            </div>
+
+            {tplLoading && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Cargando plantillas…</div>}
+            {tplErr && <div style={{ fontSize: 12, color: '#dc2626', marginBottom: 8 }}>{tplErr}</div>}
+
+            <Field label="Plantilla aprobada">
+              <select className="form-input" value={form.reminder_template_name ?? ''} onChange={(e) => pickReminderTemplate(e.target.value)}>
+                <option value="">— Ninguna (usar WhatsApp Web) —</option>
+                {tplList.map((t) => (
+                  <option key={t.id} value={t.name}>{t.name} ({t.language})</option>
+                ))}
+              </select>
+            </Field>
+
+            {selectedTpl && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+                  Texto: <span style={{ fontStyle: 'italic' }}>{tplBody(selectedTpl)}</span>
+                </div>
+                {varCount === 0 ? (
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Esta plantilla no tiene variables.</div>
+                ) : (
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>Mapea cada variable a un dato de la factura:</div>
+                    {Array.from({ length: varCount }, (_, i) => {
+                      const cur = varMap[i] ?? '';
+                      const isFixed = cur.startsWith('fixed:');
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontFamily: 'monospace', fontSize: 13, minWidth: 42 }}>{`{{${i + 1}}}`}</span>
+                          <select
+                            className="form-input" style={{ flex: 1 }}
+                            value={isFixed ? 'fixed' : cur}
+                            onChange={(e) => setVarMap(i, e.target.value === 'fixed' ? 'fixed:' : e.target.value)}
+                          >
+                            <option value="">— Elige un dato —</option>
+                            {TPL_FIELDS.map((f) => <option key={f.v} value={f.v}>{f.label}</option>)}
+                            <option value="fixed">Texto fijo…</option>
+                          </select>
+                          {isFixed && (
+                            <input
+                              className="form-input" style={{ flex: 1 }} placeholder="Texto fijo"
+                              value={cur.slice(6)}
+                              onChange={(e) => setVarMap(i, `fixed:${e.target.value}`)}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 20 }}>
