@@ -38,20 +38,27 @@ export class MessagesService implements OnModuleInit {
     await this.repo.update(messageId, { deletedAt: new Date() });
   }
 
-  findByConversation(conversationId: string, tenantId: string) {
-    return this.repo.find({
+  async findByConversation(conversationId: string, tenantId: string) {
+    // Fetch the 500 MOST RECENT messages (DESC), then return them in chronological
+    // order for the UI. Ordering ASC + take 500 returned the OLDEST 500 instead, so in
+    // long threads (>500 msgs) newly sent messages (e.g. templates) fell outside the
+    // window and vanished on reload even though they were stored and delivered.
+    const rows = await this.repo.find({
       where: { conversationId, tenantId, isPrivate: false },
-      order: { createdAt: 'ASC' },
+      order: { createdAt: 'DESC' },
       take: 500,
     });
+    return rows.reverse();
   }
 
-  findNotesByConversation(conversationId: string, tenantId: string) {
-    return this.repo.find({
+  async findNotesByConversation(conversationId: string, tenantId: string) {
+    // Same as findByConversation: take the 200 most recent notes, chronological for the UI.
+    const rows = await this.repo.find({
       where: { conversationId, tenantId, isPrivate: true },
-      order: { createdAt: 'ASC' },
+      order: { createdAt: 'DESC' },
       take: 200,
     });
+    return rows.reverse();
   }
 
   create(conversationId: string, dto: CreateMessageDto, tenantId: string, senderId?: string) {
