@@ -449,10 +449,10 @@ export default function InvoicesPage() {
                           {['issued', 'partially_paid'].includes(r.financial_status) && (
                             <button
                               className="btn btn-secondary"
-                              style={{ marginRight: 6, ...(r.reminders_muted ? { background: '#fee2e2', borderColor: '#dc2626', color: '#991b1b', fontWeight: 700 } : {}) }}
+                              style={{ marginRight: 6, minWidth: 116, textAlign: 'center', ...(r.reminders_muted ? { background: '#fee2e2', borderColor: '#dc2626', color: '#991b1b', fontWeight: 700 } : {}) }}
                               title={r.reminders_muted ? 'Recordatorios silenciados — clic para reactivar' : 'Silenciar recordatorios de esta factura'}
                               onClick={() => toggleMute(r)}
-                            >{r.reminders_muted ? '🔕 Silenciada' : '🔔'}</button>
+                            >{r.reminders_muted ? '🔕 Silenciada' : '🔔 Recordar'}</button>
                           )}
                           {REFUNDABLE_STATUSES.includes(r.financial_status) && Number(r.amount_paid_minor) > 0 && (
                             <button className="btn btn-secondary" style={{ marginRight: 6 }} onClick={() => openRefund(r)}>Reembolsar</button>
