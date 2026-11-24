@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { getInvoiceSettings, updateInvoiceSettings, InvoiceSettings, getWhatsappTemplates, WhatsappTemplate } from '@/lib/api';
+import { getInvoiceSettings, updateInvoiceSettings, InvoiceSettings, getWhatsappTemplates, WhatsappTemplate, previewInvoiceReminders, ReminderPreview } from '@/lib/api';
 import { PaymentsSettingsContent } from '@/components/PaymentsSettings';
 
 // Common currencies for the picker (the backend accepts any ISO code; decimals are
@@ -60,6 +60,8 @@ export default function InvoiceSettingsPage() {
   const [tplLoading, setTplLoading] = useState(false);
   const [tplErr, setTplErr] = useState('');
   const [tplLoaded, setTplLoaded] = useState(false);
+  const [preview, setPreview] = useState<ReminderPreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
   useEffect(() => {
     getInvoiceSettings()
@@ -144,6 +146,17 @@ export default function InvoiceSettingsPage() {
       return { ...f, reminder_recurring_templates: map };
     });
   }
+
+  async function doPreview() {
+    setPreviewing(true); setPreview(null);
+    try { setPreview(await previewInvoiceReminders()); }
+    catch (e: any) { setMsg({ ok: false, text: e?.message || 'No se pudo previsualizar' }); }
+    finally { setPreviewing(false); }
+  }
+  const REASON_LABEL: Record<string, string> = {
+    due_soon_3: '3 días antes', due_today: 'el día del vencimiento', overdue_3: '+3 de atraso',
+    overdue_7: '+7 de atraso', recurrente: 'recurrente',
+  };
 
   async function save() {
     setSaving(true); setMsg(null);
@@ -344,6 +357,46 @@ export default function InvoiceSettingsPage() {
                         />
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {form.reminders_enabled && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--border, #e5e7eb)' }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>🔎 Previsualizar envíos de hoy</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 10 }}>
+              No envía nada. Cuenta a qué facturas les tocaría un recordatorio <b>hoy</b> con la configuración
+              guardada. (Guarda antes si acabas de cambiar algo.)
+            </div>
+            <button type="button" className="btn btn-secondary" disabled={previewing} onClick={doPreview}>
+              {previewing ? 'Calculando…' : 'Previsualizar'}
+            </button>
+
+            {preview && (
+              <div style={{ marginTop: 12, fontSize: 13 }}>
+                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 8 }}>
+                  <span>📅 Avisos por vencimiento: <b>{preview.dueNotices}</b></span>
+                  <span>🔁 Recurrente: <b>{preview.isRecurringDay ? preview.recurring : (preview.recurringEnabled ? 'hoy no toca' : 'desactivado')}</b></span>
+                  <span style={{ color: 'var(--text-muted)' }}>🔕 Silenciadas: {preview.muted}</span>
+                </div>
+                {preview.sample.length === 0 ? (
+                  <div style={{ color: 'var(--text-muted)' }}>Hoy no se enviaría ningún recordatorio.</div>
+                ) : (
+                  <div style={{ border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, overflow: 'hidden' }}>
+                    {preview.sample.map((s, idx) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '7px 10px', borderTop: idx ? '1px solid var(--border, #e5e7eb)' : undefined, fontSize: 12 }}>
+                        <span><b>{s.number || '—'}</b> · {s.name || '—'}</span>
+                        <span style={{ color: 'var(--text-muted)' }}>{REASON_LABEL[s.reason] || s.reason}</span>
+                      </div>
+                    ))}
+                    {(preview.dueNotices + preview.recurring) > preview.sample.length && (
+                      <div style={{ padding: '7px 10px', borderTop: '1px solid var(--border, #e5e7eb)', fontSize: 12, color: 'var(--text-muted)' }}>
+                        …y más (mostrando {preview.sample.length}).
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

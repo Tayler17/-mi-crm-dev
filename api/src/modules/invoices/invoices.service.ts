@@ -130,6 +130,8 @@ export class InvoicesService implements OnModuleInit {
       'paid_at timestamptz', 'voided_at timestamptz', 'created_by uuid', 'pdf_token text', 'pdf_url text',
       // External mirror (invoices pushed in from another system via the public API, read-only in the CRM).
       'source text', 'external_id text', 'external_url text',
+      // Per-invoice opt-out: the payment-reminder bot never chases an invoice with this set.
+      'reminders_muted boolean NOT NULL DEFAULT false',
       'created_at timestamptz NOT NULL DEFAULT now()', 'updated_at timestamptz NOT NULL DEFAULT now()',
     ]) {
       await this.db.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
@@ -343,6 +345,18 @@ export class InvoicesService implements OnModuleInit {
     return this.getSettings(tenantId);
   }
 
+  /** Per-invoice opt-out from the payment-reminder bot (both the due-date notices and the
+   *  recurring dunning skip a muted invoice). */
+  async setRemindersMuted(tenantId: string, id: string, muted: boolean) {
+    const rows = await this.db.query(
+      `UPDATE invoices SET reminders_muted = $3, updated_at = NOW()
+        WHERE id = $1 AND tenant_id = $2 RETURNING id, reminders_muted`,
+      [id, tenantId, !!muted],
+    );
+    if (!rows.length) throw new NotFoundException('Factura no encontrada');
+    return rows[0];
+  }
+
   // ── Draft invoices (Etapa 1) ────────────────────────────────────────────────
   /** Financial / delivery / overdue are three INDEPENDENT dimensions (Etapa 3).
    *  Overdue is derived (never stored) so it can't drift from the financial status. */
@@ -364,7 +378,7 @@ export class InvoicesService implements OnModuleInit {
     const rows = await this.db.query(
       `SELECT i.id, i.number, i.kind, i.financial_status, i.delivery_status, i.currency,
               i.total_minor, i.amount_paid_minor, (i.total_minor - i.amount_paid_minor) AS balance_minor,
-              i.due_date, i.created_at, i.contact_id, c.full_name AS contact_name
+              i.due_date, i.created_at, i.contact_id, i.reminders_muted, c.full_name AS contact_name
          FROM invoices i
          LEFT JOIN contacts c ON c.id = i.contact_id
         WHERE ${where.join(' AND ')}

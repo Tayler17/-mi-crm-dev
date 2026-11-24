@@ -170,6 +170,7 @@ export class InvoiceReminderService implements OnModuleInit {
              JOIN tenants  t  ON t.id  = i.tenant_id
             WHERE i.tenant_id = $1
               AND i.financial_status IN ('issued', 'partially_paid')
+              AND i.reminders_muted = false
               AND i.due_date IS NOT NULL
               AND ct.phone IS NOT NULL AND ct.phone <> ''
               AND (CURRENT_DATE - (i.due_date + $2::int)) BETWEEN 0 AND 1
@@ -227,6 +228,7 @@ export class InvoiceReminderService implements OnModuleInit {
            JOIN tenants  t  ON t.id  = i.tenant_id
           WHERE i.tenant_id = $1
             AND i.financial_status IN ('issued', 'partially_paid')
+            AND i.reminders_muted = false
             AND ct.phone IS NOT NULL AND ct.phone <> ''
             AND NOT EXISTS (SELECT 1 FROM invoice_reminders rr WHERE rr.invoice_id = i.id AND rr.rule = $2)
           LIMIT 1000`,
@@ -245,6 +247,64 @@ export class InvoiceReminderService implements OnModuleInit {
   }
 
   private todayStr(): string { return new Date().toISOString().slice(0, 10); }
+
+  /** Read-only preview: how many invoices WOULD get a reminder today (due-date notices + the
+   *  recurring dunning if today is one of its weekdays), plus how many are muted. Sends nothing. */
+  async previewForTenant(tenantId: string): Promise<{
+    dueNotices: number; recurring: number; isRecurringDay: boolean; recurringEnabled: boolean;
+    muted: number; sample: Array<{ number: string; name: string; due_date: string | null; reason: string }>;
+  }> {
+    const [settings] = await this.db.query(
+      `SELECT reminders_enabled, reminder_rules, reminder_recurring_enabled, reminder_weekdays, reminder_timezone
+         FROM tenant_invoice_settings WHERE tenant_id = $1 LIMIT 1`, [tenantId],
+    ).catch(() => [undefined]);
+    const sample: Array<{ number: string; name: string; due_date: string | null; reason: string }> = [];
+    let dueNotices = 0, recurring = 0;
+    const recurringEnabled = !!settings?.reminder_recurring_enabled;
+
+    // (A) due-date notices
+    const active: string[] = Array.isArray(settings?.reminder_rules) && settings.reminder_rules.length
+      ? settings.reminder_rules.filter((k: any) => ALL_RULE_KEYS.includes(k)) : ALL_RULE_KEYS;
+    for (const r of FIXED_RULES.filter((x) => active.includes(x.rule))) {
+      const rows = await this.db.query(
+        `SELECT i.number, ct.full_name AS name, i.due_date
+           FROM invoices i JOIN contacts ct ON ct.id = i.contact_id
+          WHERE i.tenant_id = $1 AND i.financial_status IN ('issued','partially_paid')
+            AND i.reminders_muted = false AND i.due_date IS NOT NULL
+            AND ct.phone IS NOT NULL AND ct.phone <> ''
+            AND (CURRENT_DATE - (i.due_date + $2::int)) BETWEEN 0 AND 1
+            AND NOT EXISTS (SELECT 1 FROM invoice_reminders rr WHERE rr.invoice_id = i.id AND rr.rule = $3)
+          LIMIT 100`, [tenantId, r.sendOffset, r.rule],
+      ).catch(() => []);
+      dueNotices += rows.length;
+      for (const x of rows) if (sample.length < 25) sample.push({ number: x.number, name: x.name, due_date: x.due_date, reason: r.rule });
+    }
+
+    // (B) recurring — only if today is one of its weekdays (tenant timezone)
+    const weekday = this.nowInTz(String(settings?.reminder_timezone || 'UTC')).weekday;
+    const days = Array.isArray(settings?.reminder_weekdays) ? settings.reminder_weekdays.map((d: any) => Number(d)) : [];
+    const isRecurringDay = recurringEnabled && days.includes(weekday);
+    if (isRecurringDay) {
+      const rows = await this.db.query(
+        `SELECT i.number, ct.full_name AS name, i.due_date
+           FROM invoices i JOIN contacts ct ON ct.id = i.contact_id
+          WHERE i.tenant_id = $1 AND i.financial_status IN ('issued','partially_paid')
+            AND i.reminders_muted = false AND ct.phone IS NOT NULL AND ct.phone <> ''
+            AND NOT EXISTS (SELECT 1 FROM invoice_reminders rr WHERE rr.invoice_id = i.id AND rr.rule = $2)
+          LIMIT 500`, [tenantId, `recurring_${this.todayStr()}`],
+      ).catch(() => []);
+      recurring = rows.length;
+      for (const x of rows) if (sample.length < 25) sample.push({ number: x.number, name: x.name, due_date: x.due_date, reason: 'recurrente' });
+    }
+
+    const [m] = await this.db.query(
+      `SELECT COUNT(*)::int AS c FROM invoices i JOIN contacts ct ON ct.id = i.contact_id
+        WHERE i.tenant_id = $1 AND i.financial_status IN ('issued','partially_paid')
+          AND i.reminders_muted = true AND ct.phone IS NOT NULL AND ct.phone <> ''`, [tenantId],
+    ).catch(() => [{ c: 0 }]);
+
+    return { dueNotices, recurring, isRecurringDay, recurringEnabled, muted: m?.c ?? 0, sample };
+  }
 
   /** The tenant's connected WhatsApp connections (official Cloud API + WhatsApp Web), cached per run. */
   private async getConnections(tenantId: string, cache: ConnCache): Promise<Connections> {
