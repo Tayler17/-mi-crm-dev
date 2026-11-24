@@ -170,12 +170,17 @@ export default function InvoicesPage() {
     try { const inv = await getInvoice(row.id); setCnExisting(inv.credit_notes || []); } catch { /* ignore */ }
   }
 
-  // Mute/unmute the payment-reminder bot for a single invoice.
+  // Mute/unmute the payment-reminder bot for a single invoice (optimistic; reverts on error).
   async function toggleMute(row: InvoiceListRow) {
+    const next = !row.reminders_muted;
+    setRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, reminders_muted: next } : x)));
     try {
-      const res = await setInvoiceRemindersMuted(row.id, !row.reminders_muted);
+      const res = await setInvoiceRemindersMuted(row.id, next);
       setRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, reminders_muted: res.reminders_muted } : x)));
-    } catch (e: any) { setError(e?.message || 'No se pudo cambiar el recordatorio'); }
+    } catch (e: any) {
+      setRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, reminders_muted: !next } : x)));
+      setError(e?.message || 'No se pudo cambiar el recordatorio');
+    }
   }
 
   function setCnLine(i: number, patch: Partial<FormLine>) {
@@ -443,10 +448,11 @@ export default function InvoicesPage() {
                           )}
                           {['issued', 'partially_paid'].includes(r.financial_status) && (
                             <button
-                              className="btn btn-secondary" style={{ marginRight: 6 }}
+                              className="btn btn-secondary"
+                              style={{ marginRight: 6, ...(r.reminders_muted ? { background: '#fee2e2', borderColor: '#dc2626', color: '#991b1b', fontWeight: 700 } : {}) }}
                               title={r.reminders_muted ? 'Recordatorios silenciados — clic para reactivar' : 'Silenciar recordatorios de esta factura'}
                               onClick={() => toggleMute(r)}
-                            >{r.reminders_muted ? '🔕' : '🔔'}</button>
+                            >{r.reminders_muted ? '🔕 Silenciada' : '🔔'}</button>
                           )}
                           {REFUNDABLE_STATUSES.includes(r.financial_status) && Number(r.amount_paid_minor) > 0 && (
                             <button className="btn btn-secondary" style={{ marginRight: 6 }} onClick={() => openRefund(r)}>Reembolsar</button>
