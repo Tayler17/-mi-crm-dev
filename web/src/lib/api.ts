@@ -2329,8 +2329,11 @@ export interface InvoiceSettings {
   reminder_timezone?: string | null;    // IANA, ej. 'Europe/London'
   reminder_weekdays?: number[] | null;  // 0=Dom..6=Sáb, días permitidos
   reminder_rules?: string[] | null;     // cuáles de los 4 avisos fijos están activos
-  reminder_retry_days?: number;         // repetir cada N días mientras siga vencida (0=off)
-  reminder_retry_max?: number;          // máximo de reintentos
+  reminder_retry_days?: number;         // (en desuso) reintento cada N días
+  reminder_retry_max?: number;          // (en desuso) máximo de reintentos
+  // Recordatorio recurrente semanal (ej. mié y vie): recuerda a TODAS las impagas, repite hasta pagar.
+  reminder_recurring_enabled?: boolean;
+  reminder_recurring_templates?: Record<string, { name: string; lang: string; vars: string[] }> | null;
   configured?: boolean;
 }
 export const getInvoiceSettings = () => apiGet<InvoiceSettings>('/invoices/settings');
