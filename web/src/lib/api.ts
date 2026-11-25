@@ -2319,6 +2319,7 @@ export interface InvoiceListRow {
   balance_minor: number; due_date?: string | null; created_at: string;
   contact_id?: string | null; contact_name?: string | null; overdue?: boolean;
   reminders_muted?: boolean;
+  source?: string | null; external_id?: string | null; external_url?: string | null;
 }
 export interface InvoiceFilters { status?: string; overdue?: boolean; q?: string; contactId?: string; dealId?: string }
 export interface InvoicePayment {
