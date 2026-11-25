@@ -417,6 +417,7 @@ export default function InvoicesPage() {
               {rows.map((r) => {
                 const st = STATUS_STYLE[r.financial_status] ?? { bg: '#e5e7eb', fg: '#374151', label: r.financial_status };
                 const isDraft = r.financial_status === 'draft';
+                const isExternal = !!r.external_id; // mirror pushed from an external system (e.g. tscouriers) → read-only in the CRM
                 return (
                   <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
                     <td style={{ padding: '10px 12px', fontWeight: 600 }}>{r.number || 'Borrador'}</td>
@@ -424,6 +425,7 @@ export default function InvoicesPage() {
                     <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                       <span style={{ background: st.bg, color: st.fg, padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>{st.label}</span>
                       {r.overdue && <span style={{ marginLeft: 6, background: '#fee2e2', color: '#991b1b', padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>⚠ Vencida</span>}
+                      {isExternal && <span title={`Factura externa (${r.source || 'externa'}) · solo lectura en el CRM`} style={{ marginLeft: 6, background: '#e0e7ff', color: '#3730a3', padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>🔗 Externa</span>}
                     </td>
                     <td style={{ padding: '10px 12px', fontSize: 12 }}>
                       {r.delivery_status === 'sent'
@@ -434,7 +436,23 @@ export default function InvoicesPage() {
                     <td style={{ padding: '10px 12px' }}>{formatMoney(Number(r.balance_minor), r.currency)}</td>
                     <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{r.created_at ? new Date(r.created_at).toLocaleDateString() : ''}</td>
                     <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', textAlign: 'right' }}>
-                      {isDraft ? (
+                      {isExternal ? (
+                        <>
+                          {['issued', 'partially_paid'].includes(r.financial_status) && (
+                            <button
+                              className="btn btn-secondary"
+                              style={{ marginRight: 6, minWidth: 116, textAlign: 'center', ...(r.reminders_muted ? { background: '#fee2e2', borderColor: '#dc2626', color: '#991b1b', fontWeight: 700 } : {}) }}
+                              title={r.reminders_muted ? 'Recordatorios silenciados — clic para reactivar' : 'Silenciar recordatorios de esta factura'}
+                              onClick={() => toggleMute(r)}
+                            >{r.reminders_muted ? '🔕 Silenciada' : '🔔 Recordar'}</button>
+                          )}
+                          {r.external_url ? (
+                            <a className="btn btn-secondary" href={r.external_url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>Ver PDF ↗</a>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Solo lectura</span>
+                          )}
+                        </>
+                      ) : isDraft ? (
                         <>
                           <button className="btn btn-secondary" style={{ marginRight: 6 }} onClick={() => openEdit(r.id)}>Editar</button>
                           <button className="btn btn-primary" style={{ marginRight: 6 }} onClick={() => issueFromList(r.id)}>Emitir</button>

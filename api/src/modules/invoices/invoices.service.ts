@@ -380,7 +380,8 @@ export class InvoicesService implements OnModuleInit {
     const rows = await this.db.query(
       `SELECT i.id, i.number, i.kind, i.financial_status, i.delivery_status, i.currency,
               i.total_minor, i.amount_paid_minor, (i.total_minor - i.amount_paid_minor) AS balance_minor,
-              i.due_date, i.created_at, i.contact_id, i.reminders_muted, c.full_name AS contact_name
+              i.due_date, i.created_at, i.contact_id, i.reminders_muted,
+              i.source, i.external_id, i.external_url, c.full_name AS contact_name
          FROM invoices i
          LEFT JOIN contacts c ON c.id = i.contact_id
         WHERE ${where.join(' AND ')}
